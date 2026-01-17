@@ -1,0 +1,212 @@
+import { useState } from 'react';
+import { Link, useLocation } from 'wouter';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { useAuth } from '@/hooks/use-auth';
+import { useToast } from '@/hooks/use-toast';
+import { Mic, Eye, EyeOff, Clock } from 'lucide-react';
+
+export default function Login() {
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [showPendingDialog, setShowPendingDialog] = useState(false);
+  const [, setLocation] = useLocation();
+  const { login } = useAuth();
+  const { toast } = useToast();
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!username || !password) return;
+
+    setIsLoading(true);
+    try {
+      await login(username, password, rememberMe);
+      
+      // Проверяем статус пользователя после логина
+      const userDataString = localStorage.getItem('accessToken');
+      if (userDataString) {
+        try {
+          const payload = JSON.parse(atob(userDataString.split('.')[1]));
+          const userData = await fetch('/api/auth/me', {
+            headers: {
+              'Authorization': `Bearer ${userDataString}`,
+            },
+          }).then(r => r.json());
+          
+          if (userData.user && userData.user.status === 'pending') {
+            setShowPendingDialog(true);
+            return;
+          }
+        } catch (e) {
+          // Игнорируем ошибки парсинга
+        }
+      }
+      
+      toast({
+        title: "Добро пожаловать!",
+        description: rememberMe 
+          ? "Вы успешно вошли в систему. Сессия активна 30 дней." 
+          : "Вы успешно вошли в систему",
+      });
+      setLocation('/');
+    } catch (error) {
+      toast({
+        title: "Ошибка входа",
+        description: error instanceof Error ? error.message : "Неверные данные для входа",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handlePendingDialogClose = () => {
+    setShowPendingDialog(false);
+    setLocation('/');
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-background px-4">
+      <div className="w-full max-w-md space-y-6">
+        {/* Logo */}
+        <div className="text-center space-y-2">
+          <div className="flex items-center justify-center gap-2 font-serif text-2xl font-bold text-primary">
+            <Mic className="h-6 w-6 text-accent" />
+            <span>VoxLibris</span>
+          </div>
+          <p className="text-sm text-muted-foreground">
+            Войдите в свой аккаунт
+          </p>
+        </div>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Вход в систему</CardTitle>
+            <CardDescription>
+              Введите ваши данные для входа в аккаунт
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="username">Email</Label>
+                <Input
+                  id="username"
+                  type="email"
+                  placeholder="your.email@example.com"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  required
+                  autoComplete="username"
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="password">Пароль</Label>
+                <div className="relative">
+                  <Input
+                    id="password"
+                    type={showPassword ? "text" : "password"}
+                    placeholder="Введите пароль"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required
+                    autoComplete="current-password"
+                    className="pr-10"
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                    onClick={() => setShowPassword(!showPassword)}
+                  >
+                    {showPassword ? (
+                      <EyeOff className="h-4 w-4 text-muted-foreground" />
+                    ) : (
+                      <Eye className="h-4 w-4 text-muted-foreground" />
+                    )}
+                  </Button>
+                </div>
+              </div>
+
+              <div className="flex items-center space-x-2">
+                <input
+                  id="remember-me"
+                  type="checkbox"
+                  checked={rememberMe}
+                  onChange={(e) => setRememberMe(e.target.checked)}
+                  className="h-4 w-4 text-primary focus:ring-primary border-gray-300 rounded"
+                />
+                <Label 
+                  htmlFor="remember-me" 
+                  className="text-sm font-normal cursor-pointer select-none"
+                >
+                  Запомнить меня на 30 дней
+                </Label>
+              </div>
+
+              <Button type="submit" className="w-full" disabled={isLoading}>
+                {isLoading ? "Входим..." : "Войти"}
+              </Button>
+            </form>
+
+            <div className="mt-6 text-center space-y-2">
+              <p className="text-sm text-muted-foreground">
+                Нет аккаунта?{' '}
+                <Link href="/auth/register" className="text-primary hover:underline font-medium">
+                  Зарегистрироваться
+                </Link>
+              </p>
+              <Link href="/" className="block text-sm text-muted-foreground hover:text-primary">
+                ← Вернуться на главную
+              </Link>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Диалог ожидания активации */}
+      <Dialog open={showPendingDialog} onOpenChange={setShowPendingDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <div className="flex items-center gap-3 mb-2">
+              <div className="p-3 bg-yellow-100 rounded-full">
+                <Clock className="h-6 w-6 text-yellow-600" />
+              </div>
+              <DialogTitle>Аккаунт ожидает активации</DialogTitle>
+            </div>
+            <DialogDescription className="text-base">
+              Ваш аккаунт успешно создан и вы вошли в систему, но он ожидает активации администратором.
+              <br /><br />
+              <strong>Что вы можете делать сейчас:</strong>
+              <ul className="list-disc list-inside mt-2 space-y-1">
+                <li>Просматривать каталог клубов</li>
+                <li>Просматривать свою библиотеку</li>
+                <li>Читать ранее загруженные книги</li>
+              </ul>
+              <br />
+              <strong>После активации станут доступны:</strong>
+              <ul className="list-disc list-inside mt-2 space-y-1">
+                <li>Загрузка новых книг</li>
+                <li>Создание и присоединение к клубам</li>
+                <li>Проведение сессий чтения</li>
+              </ul>
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button onClick={handlePendingDialogClose} className="w-full">
+              Понятно, продолжить
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}

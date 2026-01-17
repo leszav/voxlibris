@@ -1,0 +1,112 @@
+# xLibris - Docker Compose v2 Configuration
+# Используй: docker compose up -d
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: xlibris-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: xlibris
+      POSTGRES_USER: xlibris
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-xlibris_dev}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U xlibris -d xlibris"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Redis for Sessions & Cache
+  redis:
+    image: redis:7-alpine
+    container_name: xlibris-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redis_dev}
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # STUN/TURN Server для WebRTC
+  coturn:
+    image: coturn/coturn:latest
+    container_name: xlibris-coturn
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      TURN_USERNAME: ${TURN_USERNAME:-xlibris}
+      TURN_PASSWORD: ${TURN_PASSWORD:-turn_dev}
+    command: >
+      -n
+      --log-file=stdout
+      --lt-cred-mech
+      --fingerprint
+      --no-multicast-peers
+      --no-cli
+      --no-tlsv1
+      --no-tlsv1_1
+      --realm=xlibris.local
+      --user=${TURN_USERNAME:-xlibris}:${TURN_PASSWORD:-turn_dev}
+      --external-ip=$$(detect-external-ip)
+
+  # MinIO для Object Storage (S3-совместимое)
+  minio:
+    image: minio/minio:latest
+    container_name: xlibris-minio
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin123}
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  # Local Verdaccio Registry (резервный)
+  verdaccio:
+    image: verdaccio/verdaccio:latest
+    container_name: xlibris-verdaccio
+    restart: unless-stopped
+    volumes:
+      - verdaccio_data:/verdaccio/storage
+      - verdaccio_conf:/verdaccio/conf
+    ports:
+      - "4873:4873"
+    environment:
+      VERDACCIO_USER_UID: 100
+      VERDACCIO_USER_GID: 101
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  minio_data:
+    driver: local
+  verdaccio_data:
+    driver: local
+  verdaccio_conf:
+    driver: local
+
+networks:
+  default:
+    name: xlibris-network

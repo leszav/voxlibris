@@ -1,0 +1,150 @@
+/* Reader Theme Styles */
+
+/* Light Theme */
+body.reader-light {
+  --reader-bg: #ffffff;
+  --reader-text: #1a1a1a;
+  --reader-text-secondary: #666666;
+  --reader-border: #e5e5e5;
+}
+
+/* Dark Theme */
+body.reader-dark {
+  --reader-bg: #1a1a1a;
+  --reader-text: #e5e5e5;
+  --reader-text-secondary: #999999;
+  --reader-border: #333333;
+}
+
+/* Sepia Theme */
+body.reader-sepia {
+  --reader-bg: #f4ecd8;
+  --reader-text: #5c4a3a;
+  --reader-text-secondary: #8b7355;
+  --reader-border: #d4c4a8;
+}
+
+/* Reader Content Styles */
+.reader-content {
+  color: var(--reader-text);
+  font-size: var(--reader-font-size, 18px);
+  font-family: var(--reader-font-family, Georgia);
+  line-height: var(--reader-line-height, 1.6);
+  text-align: var(--reader-text-align, justify);
+  scroll-behavior: smooth;
+}
+
+.reader-content p {
+  margin-bottom: 1em;
+}
+
+.reader-content h1,
+.reader-content h2,
+.reader-content h3,
+.reader-content h4,
+.reader-content h5,
+.reader-content h6 {
+  margin-top: 1.5em;
+  margin-bottom: 0.5em;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.reader-content blockquote {
+  border-left: 4px solid var(--reader-border);
+  padding-left: 1em;
+  margin: 1.5em 0;
+  font-style: italic;
+  color: var(--reader-text-secondary);
+}
+
+/* Poetry / Verse styling */
+.reader-content .verse,
+.reader-content .poetry {
+  white-space: pre-wrap;
+  font-family: inherit;
+  margin: 1.5em 0;
+  padding-left: 2em;
+}
+
+.reader-content .stanza {
+  margin-bottom: 1.5em;
+}
+
+/* Images */
+.reader-content img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  margin: 2em auto;
+  border-radius: 8px;
+}
+
+/* Code blocks */
+.reader-content pre {
+  background: var(--reader-border);
+  padding: 1em;
+  border-radius: 6px;
+  overflow-x: auto;
+  margin: 1.5em 0;
+}
+
+.reader-content code {
+  font-family: 'Courier New', monospace;
+  font-size: 0.9em;
+}
+
+/* Lists */
+.reader-content ul,
+.reader-content ol {
+  margin: 1em 0;
+  padding-left: 2em;
+}
+
+.reader-content li {
+  margin-bottom: 0.5em;
+}
+
+/* Links */
+.reader-content a {
+  color: #0066cc;
+  text-decoration: underline;
+}
+
+body.reader-dark .reader-content a {
+  color: #4da6ff;
+}
+
+body.reader-sepia .reader-content a {
+  color: #8b5a2b;
+}
+
+/* Horizontal rule */
+.reader-content hr {
+  border: none;
+  border-top: 2px solid var(--reader-border);
+  margin: 2em 0;
+}
+
+/* Selection */
+.reader-content ::selection {
+  background: rgba(255, 213, 79, 0.5);
+}
+
+body.reader-dark .reader-content ::selection {
+  background: rgba(255, 213, 79, 0.3);
+}
+
+/* Remove empty paragraphs */
+.reader-content p:empty {
+  display: none;
+}
+
+/* First letter drop cap (optional) */
+.reader-content .chapter-start::first-letter {
+  font-size: 3em;
+  line-height: 1;
+  float: left;
+  margin: 0 0.1em 0 0;
+  font-weight: bold;
+}

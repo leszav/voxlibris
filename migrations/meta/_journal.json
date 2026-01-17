@@ -1,0 +1,160 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1765442370383,
+      "tag": "0000_light_lake",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1765442832957,
+      "tag": "0001_loud_namor",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1765443486589,
+      "tag": "0002_polite_warbound",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1765446023885,
+      "tag": "0003_nappy_scarlet_witch",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1765667872000,
+      "tag": "0004_fix_cascade_delete",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1765697974662,
+      "tag": "0005_rich_toro",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1734167325000,
+      "tag": "0006_fix_remaining_cascade",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1734334453000,
+      "tag": "0007_fix_final_cascade_constraints",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1734334753000,
+      "tag": "0008_add_admin_performance_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1734335052000,
+      "tag": "0009_voxlibris_upload_system",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1767819039374,
+      "tag": "0010_deep_marvel_boy",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1768169147260,
+      "tag": "0011_glamorous_frog_thor",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1768229147260,
+      "tag": "0012_club_reader_tables",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1768289147260,
+      "tag": "0013_update_users_email_confirmation",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1768349147260,
+      "tag": "0014_make_club_bookid_nullable",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1768409147260,
+      "tag": "0016_fix_clubs_book_id_reference",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1768469147260,
+      "tag": "0017_remove_analytics_book_fk",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1768529147260,
+      "tag": "0018_add_email_and_invitation_tracking",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1768589147260,
+      "tag": "0019_add_user_profile_cover_image",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1768649147260,
+      "tag": "0020_reader_bookmarks_notes",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1768709147260,
+      "tag": "0021_voxlibris_upload_contexts",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1768769147260,
+      "tag": "0022_fix_reading_progress_constraint",
+      "breakpoints": true
+    }
+  ]
+}

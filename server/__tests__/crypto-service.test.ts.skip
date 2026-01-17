@@ -1,0 +1,73 @@
+import { test, describe } from 'node:test';
+import assert from 'node:assert/strict';
+import { CryptoService } from '../crypto-service.ts';
+import crypto from 'crypto';
+
+// Set test master key for crypto service
+process.env.MASTER_KEY = 'a'.repeat(64);
+
+describe('Crypto Service Tests', () => {
+  test('should generate encryption key', () => {
+    const key1 = CryptoService.generateKey();
+    const key2 = CryptoService.generateKey();
+    
+    assert.ok(Buffer.isBuffer(key1), 'Key should be a Buffer');
+    assert.ok(Buffer.isBuffer(key2), 'Key should be a Buffer');
+    assert.ok(!key1.equals(key2), 'Keys should be different');
+    assert.equal(key1.length, 32, 'Key should be 32 bytes (256 bits)');
+  });
+
+  test('should encrypt and decrypt file data', () => {
+    const testData = Buffer.from('Test file content for encryption');
+    const key = CryptoService.generateKey();
+    
+    const encrypted = CryptoService.encryptFile(testData, key);
+    const decrypted = CryptoService.decryptFile(encrypted, key);
+    
+    assert.ok(Buffer.isBuffer(encrypted), 'Encrypted data should be a Buffer');
+    assert.ok(encrypted.length > testData.length, 'Encrypted data should be larger (includes IV + auth tag)');
+    assert.ok(decrypted.equals(testData), 'Decrypted data should match original');
+  });
+
+  test('should encrypt CEK with master key', () => {
+    const cek = CryptoService.generateKey();
+    
+    const encryptedCek = CryptoService.encryptKey(cek);
+    const decryptedCek = CryptoService.decryptKey(encryptedCek);
+    
+    assert.ok(typeof encryptedCek === 'string', 'Encrypted CEK should be a string');
+    assert.ok(Buffer.isBuffer(decryptedCek), 'Decrypted CEK should be a Buffer');
+    assert.ok(decryptedCek.equals(cek), 'Decrypted CEK should match original');
+  });
+
+  test('should fail decryption with wrong key', () => {
+    const testData = Buffer.from('Test data');
+    const key1 = CryptoService.generateKey();
+    const key2 = CryptoService.generateKey();
+    
+    const encrypted = CryptoService.encryptFile(testData, key1);
+    
+    assert.throws(() => {
+      CryptoService.decryptFile(encrypted, key2);
+    }, Error, 'Should throw error with wrong key');
+  });
+
+  test('should handle empty data encryption', () => {
+    const emptyData = Buffer.alloc(0);
+    const key = CryptoService.generateKey();
+    
+    const encrypted = CryptoService.encryptFile(emptyData, key);
+    const decrypted = CryptoService.decryptFile(encrypted, key);
+    
+    assert.ok(decrypted.equals(emptyData), 'Should handle empty data correctly');
+  });
+
+  test('should validate key length', () => {
+    const testData = Buffer.from('test');
+    const shortKey = crypto.randomBytes(16); // 128 bits instead of 256
+    
+    assert.throws(() => {
+      CryptoService.encryptFile(testData, shortKey);
+    }, Error, 'Should reject short keys');
+  });
+});

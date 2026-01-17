@@ -1,0 +1,189 @@
+import * as React from "react";
+import { MainLayout } from "@/components/layout/MainLayout";
+import { Button } from "@/components/ui/button";
+import { ClubCard } from "@/components/ui/club-card";
+import { Badge } from "@/components/ui/badge";
+import { ArrowRight, Sparkles, Loader2 } from "lucide-react";
+import { ReadingDreamIllustration } from "@/components/illustrations/reading-dream";
+import { Link } from "wouter";
+import { useCatalogClubs } from "@/hooks/use-clubs";
+// Import generated assets using aliases
+import heroImage from "@assets/generated_images/cozy_library_atmosphere_with_warm_lighting.png";
+import classicCover from "@assets/generated_images/classic_novel_book_cover_design.png";
+import modernCover from "@assets/generated_images/modern_fiction_book_cover_design.png";
+import mysteryCover from "@assets/generated_images/mystery_thriller_book_cover_design.png";
+
+
+export default function Home() {
+  // Получаем реальные клубы для каталога с автообновлением каждые 30 секунд
+  const { data: clubs, isLoading, error } = useCatalogClubs();
+  
+  // Берем только первые 6 клубов для главной страницы (TOP-6)
+  const featuredClubs = clubs?.slice(0, 6) || [];
+
+
+
+  return (
+    <MainLayout>
+      {/* Hero Section */}
+      <section className="relative w-full h-[600px] flex items-center justify-center overflow-hidden">
+        <div className="absolute inset-0 z-0">
+          <img
+            src={heroImage}
+            alt="Уютный уголок для чтения"
+            className="w-full h-full object-cover"
+          />
+          <div className="absolute inset-0 bg-primary/40 mix-blend-multiply" />
+          <div className="absolute inset-0 bg-gradient-to-t from-background via-transparent to-transparent" />
+        </div>
+
+        <div className="relative z-10 container px-6 md:px-12 text-center max-w-4xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-8 duration-1000">
+          <Badge variant="secondary" className="px-4 py-1.5 text-sm backdrop-blur-sm bg-white/10 text-white border-white/20">
+            <Sparkles className="w-3.5 h-3.5 mr-2 text-accent" />
+            Социальное чтение по-новому
+          </Badge>
+          
+          <h1 className="font-serif text-5xl md:text-7xl font-bold text-white leading-tight tracking-tight drop-shadow-lg">
+            Читаем Вместе,<br />
+            <span className="text-accent italic">Вслух и Живьем.</span>
+          </h1>
+          
+          <p className="text-lg md:text-xl text-white/90 max-w-2xl mx-auto font-light leading-relaxed drop-shadow-md">
+            Вступайте в эксклюзивные книжные клубы, слушайте талантливых чтецов в прямом эфире и делитесь впечатлениями с сообществом.
+          </p>
+          
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-4">
+            <Link href="/catalog">
+              <Button size="lg" className="rounded-full px-8 h-12 text-base font-medium shadow-xl hover:scale-105 transition-transform">
+                Найти клуб
+              </Button>
+            </Link>
+            {/* DEMO LINK */}
+            <Link href="/reader-studio">
+              <Button size="lg" variant="outline" className="rounded-full px-8 h-12 text-base font-medium bg-white/10 text-white border-white/20 hover:bg-white/20 backdrop-blur-sm hover:scale-105 transition-transform">
+                Начать читать (Демо)
+              </Button>
+            </Link>
+          </div>
+        </div>
+      </section>
+
+      {/* Featured Clubs */}
+      <section className="py-20 container px-6 md:px-12">
+        <div className="flex items-end justify-between mb-10">
+          <div>
+            <h2 className="text-3xl font-serif font-bold text-primary mb-2">Популярные Клубы</h2>
+            <p className="text-muted-foreground">Самые активные сообщества прямо сейчас.</p>
+          </div>
+          <Link href="/catalog">
+            <Button variant="ghost" className="group">
+              Все клубы <ArrowRight className="ml-2 h-4 w-4 group-hover:translate-x-1 transition-transform" />
+            </Button>
+          </Link>
+        </div>
+
+        {/* Состояние загрузки */}
+        {isLoading && (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            <span className="ml-2 text-muted-foreground">Загружаем популярные клубы...</span>
+          </div>
+        )}
+
+        {/* Состояние ошибки */}
+        {error && (
+          <div className="text-center py-12">
+            <div className="text-red-600 mb-2">Не удалось загрузить клубы</div>
+            <div className="text-sm text-muted-foreground">Попробуйте обновить страницу позже</div>
+          </div>
+        )}
+
+        {/* Список клубов */}
+        {!isLoading && !error && (
+          <div className="border border-border/50 rounded-2xl p-6 bg-card/50 backdrop-blur-sm">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {featuredClubs.map((club) => (
+              <ClubCard
+                key={club.id}
+                id={club.id}
+                title={club.title}
+                bookTitle={club.book?.title ?? undefined}
+                author={club.book?.author ?? undefined}
+                coverUrl={club.coverImage ?? undefined}
+                bookCoverUrl={club.book?.coverUrl ?? undefined}
+                description={club.description ?? undefined}
+                members={club.memberCount}
+                maxMembers={club.maxMembers}
+                isLive={club.isLive}
+                isPrivate={club.isPrivate}
+                type={club.type}
+                tags={club.tags}
+              />
+            ))}
+            
+            {/* Если клубов пока нет */}
+            {featuredClubs.length === 0 && (
+              <div className="col-span-full text-center py-12">
+                <div className="text-muted-foreground mb-4">
+                  Популярных клубов пока нет
+                </div>
+                <Link href="/catalog">
+                  <Button variant="outline">
+                    Посмотреть все клубы
+                  </Button>
+                </Link>
+              </div>
+            )}
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* For Beginners Section */}
+      <section className="py-20 bg-secondary/30">
+        <div className="container px-6 md:px-12">
+          <div className="grid md:grid-cols-2 gap-12 items-center">
+            <div className="space-y-6">
+              <h2 className="text-3xl md:text-4xl font-serif font-bold text-primary">Как работает VoxLibris</h2>
+              <p className="text-lg text-muted-foreground leading-relaxed">
+                Откройте книги с новой стороны. Хотите ли вы читать вслух для аудитории или просто слушать — здесь найдется место для каждого.
+              </p>
+              
+              <div className="space-y-4 pt-4">
+                {[
+                  { title: "Вступите в клуб", desc: "Выберите жанр и найдите группу по душе." },
+                  { title: "Слушайте в эфире", desc: "Подключайтесь к живым чтениям от лучших чтецов." },
+                  { title: "Обсуждайте", desc: "Общайтесь в чате и делитесь мыслями по ходу сюжета." }
+                ].map((item, i) => (
+                  <div key={i} className="flex gap-4">
+                    <div className="h-10 w-10 rounded-full bg-background border flex items-center justify-center shrink-0 font-serif font-bold text-accent shadow-sm">
+                      {i + 1}
+                    </div>
+                    <div>
+                      <h4 className="font-semibold text-foreground">{item.title}</h4>
+                      <p className="text-sm text-muted-foreground">{item.desc}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            
+            <div className="relative">
+              <div className="aspect-square rounded-2xl bg-card border shadow-2xl p-8 rotate-3 hover:rotate-0 transition-transform duration-500">
+                <div className="h-full w-full rounded-xl bg-gradient-to-br from-primary/5 via-accent/5 to-secondary/10 flex items-center justify-center border border-dashed border-primary/20">
+                   <div className="text-center space-y-6 p-6">
+                     <ReadingDreamIllustration className="w-32 h-32 mx-auto text-primary/60" />
+                     <p className="font-serif text-xl italic text-primary/80 leading-relaxed">
+                       "Чтение — это окно в тысячи миров, дверь к свободе и крылья для души."
+                       <span className="block text-sm mt-2 text-primary/50">— Максим Горький</span>
+                     </p>
+                   </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </MainLayout>
+  );
+}

@@ -1,0 +1,148 @@
+name: CD - dev
+
+on:
+  push:
+    branches: 
+      - dev
+      - 'dev_*'
+  workflow_dispatch:
+
+jobs:
+  lint:
+    name: 🔍 Линтинг и проверка типов
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Настроить Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Установить pnpm
+        run: npm install -g pnpm@^9
+      - name: Использовать npm registry
+        run: |
+          if [ -f .npmrc ]; then mv .npmrc .npmrc.ci.bak; fi
+          pnpm config set registry https://registry.npmjs.org
+      - name: Установить зависимости
+        run: pnpm install --frozen-lockfile
+      - name: TypeScript проверка
+        run: pnpm run check
+      - name: Линтинг кода
+        run: pnpm run lint
+
+  security:
+    name: 🔒 Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Настроить Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Установить pnpm
+        run: npm install -g pnpm@^9
+      - name: Использовать npm registry
+        run: |
+          if [ -f .npmrc ]; then mv .npmrc .npmrc.ci.bak; fi
+          pnpm config set registry https://registry.npmjs.org
+      - name: Установить зависимости
+        run: pnpm install --frozen-lockfile
+      - name: Security audit (информационно)
+        run: pnpm audit --audit-level=moderate || echo "⚠️ Есть уязвимости, но продолжаем"
+      - name: Проверка критических уязвимостей в prod-зависимостях
+        run: pnpm audit --prod --audit-level=high || echo "⚠️ Критические уязвимости найдены"
+
+  test:
+    name: 🧪 Тесты
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Настроить Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Установить pnpm
+        run: npm install -g pnpm@^9
+      - name: Использовать npm registry
+        run: |
+          if [ -f .npmrc ]; then mv .npmrc .npmrc.ci.bak; fi
+          pnpm config set registry https://registry.npmjs.org
+      - name: Установить зависимости
+        run: pnpm install --frozen-lockfile
+      - name: Запустить тесты
+        run: pnpm test
+
+  build:
+    name: 🏗️ Сборка
+    needs: [lint, security, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Настроить Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Установить pnpm
+        run: npm install -g pnpm@^9
+      - name: Сдвинуть registry к npm (CI)
+        run: |
+          if [ -f .npmrc ]; then mv .npmrc .npmrc.ci.bak; fi
+          export npm_config_registry=https://registry.npmjs.org
+          pnpm config set registry https://registry.npmjs.org
+      - name: Установить зависимости
+        run: pnpm install --frozen-lockfile
+      - name: Сборка проекта
+        run: pnpm run build
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-files
+          path: dist/
+          retention-days: 7
+
+  deploy:
+    name: Деплой на dev-хост (опционально)
+    needs: build
+    runs-on: ubuntu-latest
+    env:
+      DEPLOY_ENABLED: 'false'
+    # Определяем условия запуска деплоя внутри шага (чтобы избежать линтер-предупреждений)
+    steps:
+      - uses: actions/checkout@v4
+      - name: Determine deploy eligibility
+        id: determine
+        run: |
+          DEPLOY=false
+          if [ -n "${{ secrets.DEPLOY_SSH_HOST }}" ] && [ -n "${{ secrets.DEPLOY_SSH_KEY }}" ]; then
+            if [ "${{ secrets.DEPLOY_ENABLED }}" = 'true' ] || [ "${{ env.DEPLOY_ENABLED }}" = 'true' ]; then
+              DEPLOY=true
+            fi
+          fi
+          echo "deploy=$DEPLOY" >> $GITHUB_OUTPUT
+
+      - name: Add deploy host to known_hosts
+        if: steps.determine.outputs.deploy == 'true'
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H ${{ secrets.DEPLOY_SSH_HOST }} >> ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+      - name: SSH-деплой (пример)
+        if: steps.determine.outputs.deploy == 'true'
+        uses: appleboy/ssh-action@v0.1.8
+        continue-on-error: true
+        with:
+          host: ${{ secrets.DEPLOY_SSH_HOST }}
+          username: ${{ secrets.DEPLOY_SSH_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_SSH_PORT || '22' }}
+          script: |
+            # Это пример скрипта деплоя. Настройте под вашу инфраструктуру.
+            echo "Деплой: обновляем код на хосте ${{ secrets.DEPLOY_SSH_HOST }}"
+            cd /var/www/xlibris || true
+            git fetch origin dev
+            git reset --hard origin/dev
+            pnpm install --frozen-lockfile || true
+            pnpm -w -r run build --if-present || true
+            if command -v systemctl >/dev/null 2>&1; then
+              systemctl restart xlibris || true
+            fi

@@ -1,0 +1,355 @@
+import type { Express, Request, Response } from "express";
+import { z } from "zod";
+import cookieParser from "cookie-parser";
+import { authService } from "./auth-service";
+import { storage } from "./storage";
+import { jwtAuth } from "./jwt-middleware";
+import { insertUserSchema } from "@shared/schema";
+
+// Password validation schema
+const passwordSchema = z.string()
+  .min(8, "Пароль должен содержать минимум 8 символов")
+  .regex(/[A-Za-z]/, "Пароль должен содержать хотя бы одну букву")
+  .regex(/\d/, "Пароль должен содержать хотя бы одну цифру");
+
+// Registration schema with password validation
+const registerSchema = insertUserSchema.extend({
+  password: passwordSchema
+});
+
+// Login schema
+const loginSchema = z.object({
+  password: z.string(),
+  username: z.string().optional(),
+  email: z.string().optional(),
+  rememberMe: z.boolean().optional()
+}).refine(data => data.username || data.email, {
+  message: "Either username or email must be provided"
+});
+
+// Валидация и обработка приглашения при регистрации
+async function validateAndProcessInvite(
+  inviteToken: string | undefined,
+  email: string
+): Promise<{ invitedBy?: string; invitedToClub?: string } | { error: { status: number; message: string; code?: string } }> {
+  if (!inviteToken) {
+    return {};
+  }
+
+  const invitation = await storage.getClubInvitation(inviteToken).catch((err) => {
+    console.warn('Invite token lookup failed during registration:', err);
+    return null;
+  });
+
+  if (!invitation) {
+    return { error: { status: 400, message: 'Неверный или отсутствующий токен приглашения' } };
+  }
+
+  const expiresAt = invitation.expiresAt ? new Date(invitation.expiresAt) : null;
+  if (expiresAt && expiresAt <= new Date()) {
+    await storage.updateInvitationStatus(inviteToken, 'expired').catch(() => {});
+    return { error: { status: 410, message: 'Приглашение истекло' } };
+  }
+
+  if (invitation.email && invitation.email.toLowerCase() !== email.toLowerCase()) {
+    return { error: { status: 400, message: 'Email в регистрации должен совпадать с email, на который отправлено приглашение', code: 'INVITE_EMAIL_MISMATCH' } };
+  }
+
+  if (invitation.status !== 'pending') {
+    return { error: { status: 409, message: `Приглашение уже имеет статус: ${invitation.status}` } };
+  }
+
+  return { invitedBy: invitation.invitedBy, invitedToClub: invitation.clubId };
+}
+
+// Присоединение пользователя к клубу по приглашению
+async function joinClubByInvite(inviteToken: string | undefined, invitedToClub: string | undefined, userId: string | undefined): Promise<void> {
+  if (!invitedToClub || !userId) return;
+
+  try {
+    await storage.joinClub(invitedToClub, userId, 'member');
+    if (inviteToken) {
+      await storage.updateInvitationStatus(inviteToken, 'accepted', new Date());
+    }
+  } catch (err) {
+    console.error('Failed to auto-join user to invited club:', err);
+  }
+}
+
+export function setupAuthRoutes(app: Express): void {
+  // Setup cookie parser
+  app.use(cookieParser());
+
+  // Registration endpoint
+  app.post("/api/auth/register", async (req: Request, res: Response) => {
+    try {
+      const validation = registerSchema.safeParse(req.body);
+      
+      if (!validation.success) {
+        return res.status(400).json({
+          message: "Ошибка валидации данных",
+          errors: validation.error.issues
+        });
+      }
+
+      const validatedData = validation.data as { username: string; email: string; password: string; invitedBy?: string; invitedToClub?: string; status?: string };
+      const { username, email, password } = validatedData;
+      const { rememberMe = false } = req.body;
+      const inviteToken = (req.body.invite || req.query.invite) as string | undefined;
+
+      // Валидация приглашения
+      const inviteValidation = await validateAndProcessInvite(inviteToken, email);
+      if ('error' in inviteValidation) {
+        return res.status(inviteValidation.error.status).json({
+          message: inviteValidation.error.message,
+          ...(inviteValidation.error.code && { code: inviteValidation.error.code })
+        });
+      }
+
+      const { invitedBy, invitedToClub } = inviteValidation;
+
+      const authResult = await authService.register(
+        username,
+        email,
+        password,
+        invitedBy,
+        invitedToClub,
+        rememberMe
+      );
+
+      // Присоединение к клубу по приглашению
+      await joinClubByInvite(inviteToken, invitedToClub, authResult.user?.id);
+
+      // Set refresh token as httpOnly cookie with appropriate maxAge
+      const maxAge = rememberMe ? 30 * 24 * 60 * 60 * 1000 : 7 * 24 * 60 * 60 * 1000;
+      res.cookie('refreshToken', authResult.tokens.refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'strict',
+        maxAge,
+      });
+
+      res.status(201).json({
+        message: "Пользователь успешно зарегистрирован",
+        user: authResult.user,
+        accessToken: authResult.tokens.accessToken,
+        sessionType: authResult.sessionType
+      });
+    } catch (error) {
+      console.error("Registration error:", error);
+      res.status(500).json({ 
+        message: error instanceof Error ? error.message : "Ошибка сервера" 
+      });
+    }
+  });
+
+  // Login endpoint
+  app.post("/api/auth/login", async (req: Request, res: Response) => {
+    try {
+      const validation = loginSchema.safeParse(req.body);
+      
+      if (!validation.success) {
+        return res.status(400).json({
+          message: "Ошибка валидации данных",
+          errors: validation.error.issues
+        });
+      }
+
+      const { username, email, password, rememberMe = false } = validation.data;
+      const emailOrUsername = email || username;
+
+      if (!emailOrUsername) {
+        return res.status(400).json({ 
+          message: "Требуются email или username" 
+        });
+      }
+
+      const authResult = await authService.authenticate(emailOrUsername, password, rememberMe);
+      
+      if (!authResult) {
+        return res.status(401).json({ 
+          message: "Неверные данные для входа" 
+        });
+      }
+
+      // Set refresh token as httpOnly cookie with appropriate maxAge
+      const maxAge = rememberMe ? 30 * 24 * 60 * 60 * 1000 : 7 * 24 * 60 * 60 * 1000;
+      res.cookie('refreshToken', authResult.tokens.refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'strict',
+        maxAge,
+      });
+
+      res.json({
+        message: "Успешный вход в систему",
+        user: authResult.user,
+        accessToken: authResult.tokens.accessToken,
+        sessionType: authResult.sessionType
+      });
+    } catch (error) {
+      console.error("Login error:", error);
+      
+      // Обработка специфичных ошибок
+      if (error instanceof Error) {
+        if (error.message === 'ACCOUNT_SUSPENDED') {
+          return res.status(403).json({ 
+            message: "Аккаунт заблокирован администратором",
+            code: "ACCOUNT_SUSPENDED"
+          });
+        }
+        
+        if (error.message === 'ACCOUNT_DELETED') {
+          return res.status(403).json({ 
+            message: "Аккаунт удален",
+            code: "ACCOUNT_DELETED"
+          });
+        }
+      }
+      
+      res.status(500).json({ 
+        message: error instanceof Error ? error.message : "Ошибка сервера" 
+      });
+    }
+  });
+
+  // Refresh token endpoint
+  app.post("/api/auth/refresh", async (req: Request, res: Response) => {
+    try {
+      const refreshToken = authService.extractRefreshTokenFromCookies(req.cookies);
+      
+      if (!refreshToken) {
+        return res.status(401).json({ 
+          message: "Refresh token не найден" 
+        });
+      }
+
+      const result = await authService.refreshTokens(refreshToken);
+      
+      if (!result) {
+        return res.status(401).json({ 
+          message: "Недействительный refresh token" 
+        });
+      }
+
+      // Set new refresh token as httpOnly cookie with appropriate maxAge
+      const maxAge = result.sessionType === 'remember_me' 
+        ? 30 * 24 * 60 * 60 * 1000 
+        : 7 * 24 * 60 * 60 * 1000;
+        
+      res.cookie('refreshToken', result.newTokens.refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'strict',
+        maxAge,
+      });
+
+      res.json({
+        accessToken: result.newTokens.accessToken
+      });
+    } catch (error) {
+      console.error("Refresh token error:", error);
+      res.status(500).json({ message: "Ошибка обновления токена" });
+    }
+  });
+
+  // Logout endpoint
+  app.post("/api/auth/logout", async (req: Request, res: Response) => {
+    try {
+      const refreshToken = authService.extractRefreshTokenFromCookies(req.cookies);
+      
+      if (refreshToken) {
+        await authService.logout(refreshToken);
+      }
+
+      // Clear refresh token cookie
+      res.clearCookie('refreshToken');
+      
+      res.json({ message: "Успешный выход из системы" });
+    } catch (error) {
+      console.error("Logout error:", error);
+      res.status(500).json({ message: "Ошибка выхода из системы" });
+    }
+  });
+
+  // Get current user endpoint
+  app.get("/api/auth/me", jwtAuth, (req: Request, res: Response) => {
+    res.json({
+      user: {
+        id: req.user!.userId,
+        username: req.user!.username,
+        role: req.user!.role
+      }
+    });
+  });
+
+  // Email confirmation endpoints
+  app.post("/api/auth/confirm-email", async (req: Request, res: Response) => {
+    try {
+      const { token } = req.body;
+      
+      if (!token) {
+        return res.status(400).json({
+          message: "Токен подтверждения обязателен",
+          code: "TOKEN_REQUIRED"
+        });
+      }
+
+      const result = await authService.confirmEmail(token);
+      
+      if (result.success) {
+        res.json({
+          success: true,
+          message: result.message
+        });
+      } else {
+        res.status(400).json({
+          success: false,
+          message: result.message,
+          code: "CONFIRMATION_FAILED"
+        });
+      }
+    } catch (error) {
+      console.error('Email confirmation error:', error);
+      res.status(500).json({
+        message: "Ошибка при подтверждении email"
+      });
+    }
+  });
+
+  // Resend confirmation email endpoint
+  app.post("/api/auth/resend-confirmation", async (req: Request, res: Response) => {
+    try {
+      const { userId } = req.body;
+      
+      if (!userId) {
+        return res.status(400).json({
+          message: "ID пользователя обязателен",
+          code: "USER_ID_REQUIRED"
+        });
+      }
+
+      const result = await authService.resendConfirmationEmail(userId);
+      
+      if (result.success) {
+        res.json({
+          success: true,
+          message: result.message
+        });
+      } else {
+        res.status(400).json({
+          success: false,
+          message: result.message,
+          code: "RESEND_FAILED"
+        });
+      }
+    } catch (error) {
+      console.error('Resend confirmation email error:', error);
+      res.status(500).json({
+        message: "Ошибка при повторной отправке письма"
+      });
+    }
+  });
+
+  // NOTE: Admin endpoints moved to admin-routes.ts to avoid conflicts
+}

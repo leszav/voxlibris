@@ -1,0 +1,67 @@
+import { test, describe } from 'node:test';
+import assert from 'node:assert/strict';
+import { logger, logInfo, logError, logWarn, logDebug } from '../lib/logger.ts';
+
+describe('Logger Tests', () => {
+  test('should create logger with correct configuration', () => {
+    assert.ok(logger, 'Logger should be defined');
+    assert.ok(typeof logger.info === 'function', 'Logger should have info method');
+    assert.ok(typeof logger.error === 'function', 'Logger should have error method');
+    assert.ok(typeof logger.warn === 'function', 'Logger should have warn method');
+    assert.ok(typeof logger.debug === 'function', 'Logger should have debug method');
+  });
+
+  test('should log info message', () => {
+    // Mock console to capture logs
+    let capturedMessage = '';
+    const originalConsoleLog = console.log;
+    console.log = (msg: string) => {
+      capturedMessage = msg;
+    };
+
+    logInfo('Test info message', { userId: '123' });
+    
+    console.log = originalConsoleLog;
+    assert.ok(capturedMessage.includes('Test info message'), 'Should log info message');
+  });
+
+  test('should log error message', () => {
+    let capturedMessage = '';
+    const originalConsoleError = console.error;
+    console.error = (msg: string) => {
+      capturedMessage = msg;
+    };
+
+    const testError = new Error('Test error');
+    logError('Test error message', testError);
+    
+    console.error = originalConsoleError;
+    assert.ok(capturedMessage.includes('Test error message'), 'Should log error message');
+  });
+
+  test('should log warning message', () => {
+    let capturedMessage = '';
+    const originalConsoleWarn = console.warn;
+    console.warn = (msg: string) => {
+      capturedMessage = msg;
+    };
+
+    logWarn('Test warning message', { code: 'WARN001' });
+    
+    console.warn = originalConsoleWarn;
+    assert.ok(capturedMessage.includes('Test warning message'), 'Should log warning message');
+  });
+
+  test('should log debug message', () => {
+    let capturedMessage = '';
+    const originalConsoleDebug = console.debug;
+    console.debug = (msg: string) => {
+      capturedMessage = msg;
+    };
+
+    logDebug('Test debug message', { step: 'initialization' });
+    
+    console.debug = originalConsoleDebug;
+    assert.ok(capturedMessage.includes('Test debug message'), 'Should log debug message');
+  });
+});

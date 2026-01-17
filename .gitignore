@@ -1,0 +1,198 @@
+# ==============================================
+# VoxLibris .gitignore
+# ==============================================
+
+# Dependencies
+node_modules/
+bower_components/
+
+# Build outputs
+dist/
+build/
+out/
+*.tsbuildinfo
+coverage/
+
+# Environment files
+.env
+.env.local
+.env.development
+.env.production
+.env.staging
+.env.test
+.env*.local
+
+# OS specific files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+*~
+*.swp
+*.swo
+*.swn
+.bashrc.local
+
+# IDE and Editor files
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+.project
+.settings/
+.classpath
+.factorypath
+*.launch
+.history/
+
+# SDD Agent folders (may contain credentials)
+.claude/
+.cursor/
+.gemini/
+.qwen/
+.codex/
+.qoder/
+.amazonq/
+.specify/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+.dev-monitor.log
+
+# Temporary files and folders
+*.tmp
+*.temp
+.tmp/
+.temp/
+.cache/
+.backups/
+backups/
+memory/
+
+# Testing
+coverage/
+.nyc_output/
+*.lcov
+
+# Production artifacts
+*.tar.gz
+*.zip
+*.rar
+*.7z
+
+# Server specific
+server/public/
+vite.config.ts.*
+
+# Database
+*.sqlite
+*.sqlite3
+*.db
+
+# Deployment
+deploy/
+
+# AI Memory (development only - NOT FOR PRODUCTION)
+data/ai-memory/
+.ai-memory-config
+.ai-memory-session
+.ollama-config
+.env.ai-memory
+
+# Development Scripts (local modifications)
+scripts/ai-*.sh
+scripts/ai-*.js
+scripts/mcp-*.sh
+scripts/compliance-*.sh
+scripts/setup-*.sh
+scripts/validate-*.sh
+scripts/restore-ssh-keys.sh
+scripts/create-caprover-apps.py
+scripts/test-mcp.sh
+scripts/dev-monitor.sh
+scripts/smart-memory-start.sh
+scripts/ollama-setup.sh
+scripts/xlibris-workflow.sh
+scripts/convert-or-to-nullish.ts
+scripts/run-eslint.cjs
+scripts/run-eslint.js
+
+# Attached assets (temporary uploads)
+attached_assets/*.txt
+
+# Error and debug files
+errors.txt
+out.txt
+debug.log
+
+# Lock files (keep pnpm-lock.yaml for consistency)
+package-lock.json
+yarn.lock
+
+# Documentation drafts
+memory.md
+tasks.md
+AGENTS.md
+MAIL.md
+Summary.md
+FASE1_SECURITY_REPORT.md
+SECURITY_REPAIR_COMPLETE.md
+CAPROVER_APPS_RESULT.md
+CAPROVER_SETUP.md
+SSH_KEYS.md
+SSH_RECOVERY.md
+scripts/ollama-*.sh
+
+# Local instructions and configs
+.github/instructions/agent.instructions.md
+.env.local.backup
+.env*.backup
+
+# CI/CD configs (using GitHub Actions only)
+.gitlab-ci.yml
+
+# Code quality configs (project-specific)
+.sonarignore
+biome.json
+eslint.config.js
+sonar-project.properties
+
+# Git hooks (local development only)
+.husky/
+
+# Python virtual environment
+venv_caprover/
+
+# Project specifications and plans
+specs/
+plans/
+
+# Runtime data (excluding ai-memory which is already covered)
+data/*
+!data/ai-memory/
+
+# Deployment scripts (run from CI/CD or locally)
+deploy/
+
+# Logs (generated at runtime)
+logs/
+
+# SonarQube local analysis
+.scannerwork/
+sonar-report.json
+
+# Docker and SonarQube (local development)
+.sonar/
+docker-compose.override.yml
+
+# Caprover deployment configuration
+captain-definition

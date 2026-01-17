@@ -1,0 +1,428 @@
+import type {
+  Club,
+  ClubInvitation,
+  ClubInvitationWithInviter,
+  ClubMemberRole,
+  ClubWithDetails,
+} from "@shared/schema";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
+
+export type { ClubInvitationWithInviter } from "@shared/schema";
+
+export interface InvitationWithClub extends Partial<ClubInvitation> {
+  // Раньше API возвращал поля напрямую. Сейчас публичный endpoint
+  // возвращает объект { invitation, club }, поэтому мы подстроимся
+  // под ожидаемую форму внутри хука.
+  clubName?: string;
+  club?: {
+    id: string;
+    title: string;
+    description: string | null;
+    isPrivate: boolean;
+    memberCount: number;
+    maxMembers: number;
+  };
+  inviter?: {
+    id?: string;
+    username?: string;
+  } | null;
+}
+
+export interface CreateClubRequest {
+  title: string;
+  description?: string;
+  coverImage?: string;
+  bookId?: string; // Книга добавляется после создания клуба
+  type?: "standard" | "premium" | "reader-led";
+  maxMembers?: number;
+  isPrivate?: boolean;
+  schedule?: string;
+  settings?: string;
+}
+
+export interface UpdateClubRequest {
+  title?: string;
+  description?: string;
+  coverImage?: string;
+  maxMembers?: number;
+  isPrivate?: boolean;
+  schedule?: string;
+  settings?: string;
+}
+
+export interface ClubMemberWithUser {
+  id: string;
+  username: string;
+  role: ClubMemberRole;
+  joinedAt: Date;
+  status: string;
+  emailConfirmed: boolean;
+  createdAt: Date;
+}
+
+export interface ClubProgress {
+  progress: {
+    totalChapters: number;
+    currentChapter: number;
+    progress: number;
+  };
+}
+
+// Получить все клубы для каталога (не требует аутентификации)
+export function useCatalogClubs() {
+  return useQuery({
+    queryKey: ["catalog-clubs"],
+    queryFn: async (): Promise<ClubWithDetails[]> => {
+      // Используем простой fetch без авторизации для публичного эндпоинта
+      const res = await fetch("/api/clubs/catalog");
+      if (!res.ok) {
+        throw new Error("Failed to fetch clubs");
+      }
+      return res.json();
+    },
+    refetchInterval: 1000 * 60 * 60 * 24, // Обновлять раз в сутки (24 часа)
+    refetchIntervalInBackground: false, // Не обновлять в фоне
+    staleTime: 1000 * 60 * 60 * 23, // Считать данные устаревшими через 23 часа
+  });
+}
+
+// Получить все клубы текущего пользователя
+export function useClubs() {
+  return useQuery({
+    queryKey: ["clubs"],
+    queryFn: async (): Promise<ClubWithDetails[]> => {
+      return apiRequest<ClubWithDetails[]>("/api/clubs");
+    },
+  });
+}
+
+// Alias для обратной совместимости
+export function useUserClubs() {
+  return useClubs();
+}
+
+// Получить конкретный клуб
+export function useClub(clubId: string) {
+  return useQuery({
+    queryKey: ["club", clubId],
+    queryFn: async (): Promise<ClubWithDetails> => {
+      return apiRequest<ClubWithDetails>(`/api/clubs/${clubId}`);
+    },
+    enabled: !!clubId,
+  });
+}
+
+// Создать клуб
+export function useCreateClub() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (data: CreateClubRequest): Promise<Club> => {
+      return apiRequest<Club>("/api/clubs", {
+        method: "POST",
+        body: JSON.stringify(data),
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["clubs"] });
+    },
+  });
+}
+
+// Обновить клуб
+export function useUpdateClub() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      clubId,
+      data,
+    }: {
+      clubId: string;
+      data: UpdateClubRequest;
+    }): Promise<Club> => {
+      return apiRequest<Club>(`/api/clubs/${clubId}`, {
+        method: "PUT",
+        body: JSON.stringify(data),
+      });
+    },
+    onSuccess: (_, { clubId }) => {
+      queryClient.invalidateQueries({ queryKey: ["clubs"] });
+      queryClient.invalidateQueries({ queryKey: ["club", clubId] });
+    },
+  });
+}
+
+// Удалить клуб
+export function useDeleteClub() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (clubId: string): Promise<void> => {
+      await apiRequest<void>(`/api/clubs/${clubId}`, {
+        method: "DELETE",
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["clubs"] });
+    },
+  });
+}
+
+// Получить участников клуба
+export function useClubMembers(clubId: string) {
+  return useQuery({
+    queryKey: ["club-members", clubId],
+    queryFn: async (): Promise<ClubMemberWithUser[]> => {
+      return apiRequest<ClubMemberWithUser[]>(`/api/clubs/${clubId}/members`);
+    },
+    enabled: !!clubId,
+  });
+}
+
+// Изменить роль участника
+export function useUpdateMemberRole() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      clubId,
+      userId,
+      role,
+    }: {
+      clubId: string;
+      userId: string;
+      role: ClubMemberRole;
+    }) => {
+      return apiRequest(`/api/clubs/${clubId}/members/${userId}/role`, {
+        method: "PUT",
+        body: JSON.stringify({ role }),
+      });
+    },
+    onSuccess: (_, { clubId }) => {
+      queryClient.invalidateQueries({ queryKey: ["club-members", clubId] });
+      queryClient.invalidateQueries({ queryKey: ["club", clubId] });
+    },
+  });
+}
+
+// Удалить участника (или выйти самому)
+export function useRemoveMember() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ clubId, userId }: { clubId: string; userId: string }) => {
+      return apiRequest(`/api/clubs/${clubId}/members/${userId}`, {
+        method: "DELETE",
+      });
+    },
+    onSuccess: (_, { clubId }) => {
+      queryClient.invalidateQueries({ queryKey: ["club-members", clubId] });
+      queryClient.invalidateQueries({ queryKey: ["club", clubId] });
+      queryClient.invalidateQueries({ queryKey: ["clubs"] });
+    },
+  });
+}
+
+// Alias для выхода из клуба
+export function useLeaveClub() {
+  return useRemoveMember();
+}
+
+// Alias для вступления (для обратной совместимости, но теперь через приглашения)
+export function useJoinClub() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (clubId: string): Promise<void> => {
+      if (import.meta.env.DEV) {
+        console.warn("useJoinClub: Join through invitations not yet implemented");
+      }
+      throw new Error("Please use invitation link to join club");
+    },
+    onSuccess: (_, clubId) => {
+      queryClient.invalidateQueries({ queryKey: ["clubs"] });
+      queryClient.invalidateQueries({ queryKey: ["club", clubId] });
+    },
+  });
+}
+
+// Получить прогресс чтения клуба (для будущей реализации)
+export function useClubProgress(clubId: string) {
+  return useQuery({
+    queryKey: ["club-progress", clubId],
+    queryFn: async (): Promise<ClubProgress> => {
+      const response = await fetch(`/api/clubs/${clubId}/progress`, {
+        credentials: "include",
+      });
+      if (!response.ok) {
+        throw new Error("Failed to fetch club progress");
+      }
+      return response.json();
+    },
+    enabled: false, // Отключено до реализации endpoint
+  });
+}
+
+// ==== ПРИГЛАШЕНИЯ В КЛУБ ====
+
+// Расширенное приглашение для отображения в UI
+
+// Пригласить пользователя в клуб (по email)
+export function useInviteToClub(clubId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (email: string): Promise<{ message: string }> => {
+      return apiRequest(`/api/clubs/${clubId}/invite`, {
+        method: "POST",
+        body: JSON.stringify({ email }),
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["club-invitations", clubId] });
+    },
+  });
+}
+
+// Получить список приглашений клуба (для владельца/модератора)
+export function useClubInvitations(clubId: string) {
+  return useQuery({
+    queryKey: ["club-invitations", clubId],
+    queryFn: async (): Promise<ClubInvitationWithInviter[]> => {
+      const response = await apiRequest<{ invitations: ClubInvitationWithInviter[] }>(
+        `/api/clubs/${clubId}/invitations`,
+      );
+      return response.invitations;
+    },
+  });
+}
+
+// Отозвать приглашение
+export function useRevokeInvitation(clubId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (invitationId: string): Promise<void> => {
+      return apiRequest(`/api/clubs/${clubId}/invitations/${invitationId}`, {
+        method: "DELETE",
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["club-invitations", clubId] });
+    },
+  });
+}
+
+// Пересоздать приглашение
+export function useResendInvitation(clubId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (invitationId: string): Promise<any> => {
+      return apiRequest(`/api/clubs/${clubId}/invitations/${invitationId}/resend`, {
+        method: "POST",
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["club-invitations", clubId] });
+    },
+  });
+}
+
+// Удалить все приглашения для указанного email (для принятых/отклоненных приглашений)
+export function useRemoveInvitationsByEmail(clubId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (email: string): Promise<{ deletedCount: number }> => {
+      return apiRequest(`/api/clubs/${clubId}/invitations/by-email`, {
+        method: "POST",
+        body: JSON.stringify({ email }),
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["club-invitations", clubId] });
+    },
+  });
+}
+
+// Очистить все приглашения клуба (только для владельца)
+export function useClearAllInvitations(clubId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (): Promise<{ deletedCount: number }> => {
+      return apiRequest(`/api/clubs/${clubId}/invitations`, {
+        method: "DELETE",
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["club-invitations", clubId] });
+    },
+  });
+}
+
+// Получить приглашение по токену (публичный endpoint)
+export function useInvitationByToken(token: string) {
+  return useQuery({
+    queryKey: ["invitation-by-token", token],
+    queryFn: async (): Promise<InvitationWithClub> => {
+      const data = await apiRequest<{ invitation: any; club: any }>(`/api/invitations/${token}`);
+
+      // Приводим ответ к старой форме для совместимости с остальной частью UI
+      const invitation = {
+        id: data.invitation.id,
+        email: data.invitation.email,
+        status: data.invitation.status,
+        createdAt: data.invitation.createdAt,
+        expiresAt: data.invitation.expiresAt,
+        acceptedAt: data.invitation.acceptedAt,
+        inviterName: data.invitation.inviterName,
+        clubName: data.club?.title,
+        club: data.club,
+        inviter: data.invitation.inviterName ? { username: data.invitation.inviterName } : null,
+      } as InvitationWithClub;
+
+      return invitation;
+    },
+    enabled: !!token,
+  });
+}
+
+// Принять приглашение
+export function useAcceptInvitation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ token }: { token: string }): Promise<{ message: string; club: any }> => {
+      return apiRequest(`/api/invitations/${token}/accept`, {
+        method: "POST",
+      });
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["clubs"] });
+      if (data.club?.id) {
+        queryClient.invalidateQueries({ queryKey: ["club", data.club.id] });
+        queryClient.invalidateQueries({ queryKey: ["club-members", data.club.id] });
+      }
+    },
+  });
+}
+
+// Отклонить приглашение
+export function useDeclineInvitation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ token }: { token: string }): Promise<{ message: string }> => {
+      return apiRequest(`/api/invitations/${token}/decline`, {
+        method: "POST",
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["clubs"] });
+    },
+  });
+}
