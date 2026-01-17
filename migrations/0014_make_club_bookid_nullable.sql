@@ -16,7 +16,12 @@ CREATE INDEX IF NOT EXISTS "clubs_book_id_idx" ON "clubs"("book_id");
 
 -- Изменяем каскадное удаление для книг при удалении upload_context
 -- При удалении клуба -> удаляется upload_context -> удаляются все книги клуба
-ALTER TABLE "books" DROP CONSTRAINT IF EXISTS "books_upload_context_id_upload_contexts_id_fk";
+DO $$ BEGIN
+ ALTER TABLE "books" DROP CONSTRAINT IF EXISTS "books_upload_context_id_upload_contexts_id_fk";
+EXCEPTION
+ WHEN undefined_object THEN null;
+END $$;
+--> statement-breakpoint
 ALTER TABLE "books" ADD CONSTRAINT "books_upload_context_id_upload_contexts_id_fk" 
   FOREIGN KEY ("upload_context_id") REFERENCES "public"."upload_contexts"("id") ON DELETE CASCADE;
 
