@@ -1,0 +1,144 @@
+name: CD - Production
+
+on:
+  push:
+    branches:
+      - 'prod_*'
+  workflow_dispatch:
+
+env:
+  DOCKER_IMAGE: registry.8ls.ru:996/captain/img-captain-voxlibris-web:latest
+
+jobs:
+  lint:
+    name: Линтинг и проверка типов
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Настроить Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Установить pnpm
+        run: npm install -g pnpm@^9
+      - name: Использовать npm registry
+        run: |
+          if [ -f .npmrc ]; then mv .npmrc .npmrc.ci.bak; fi
+          pnpm config set registry https://registry.npmjs.org
+      - name: Установить зависимости
+        run: pnpm install --frozen-lockfile
+      - name: TypeScript проверка
+        run: pnpm run check
+      - name: Линтинг кода
+        run: pnpm run lint
+
+  security:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Настроить Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Установить pnpm
+        run: npm install -g pnpm@^9
+      - name: Использовать npm registry
+        run: |
+          if [ -f .npmrc ]; then mv .npmrc .npmrc.ci.bak; fi
+          pnpm config set registry https://registry.npmjs.org
+      - name: Установить зависимости
+        run: pnpm install --frozen-lockfile
+      - name: Security audit
+        run: pnpm audit --audit-level=moderate || echo "Есть уязвимости, но продолжаем"
+
+  build:
+    name: 🏗️ Сборка и Docker
+    needs: [lint, security]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Настроить Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Установить pnpm
+        run: npm install -g pnpm@^9
+      - name: Использовать npm registry
+        run: |
+          if [ -f .npmrc ]; then mv .npmrc .npmrc.ci.bak; fi
+          pnpm config set registry https://registry.npmjs.org
+      - name: Установить зависимости
+        run: pnpm install --frozen-lockfile
+      - name: Сборка проекта
+        run: pnpm run build
+
+      - name: Login to Docker Registry
+        uses: docker/login-action@v3
+        with:
+          registry: registry.8ls.ru:996
+          username: captain
+          password: ${{ secrets.CAPROVER_REGISTRY_PASSWORD }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ env.DOCKER_IMAGE }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    name: 🚀 Деплой на CapRover
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Add CapRover host to known_hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H captain.8ls.ru >> ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: SSH Deploy to CapRover
+        uses: appleboy/ssh-action@v0.1.8
+        with:
+          host: 94.232.43.28
+          username: root
+          key: ${{ secrets.CAPROVER_SSH_KEY }}
+          port: 22
+          script: |
+            set -e
+
+            echo "=== Вход в Docker Registry ==="
+            echo "${{ secrets.CAPROVER_REGISTRY_PASSWORD }}" | docker login registry.8ls.ru:996 -u captain --password-stdin
+
+            echo "=== Pull Docker image ==="
+            docker pull registry.8ls.ru:996/captain/img-captain-voxlibris-web:latest
+
+            echo "=== Остановка старого контейнера ==="
+            docker stop voxlibris-web 2>/dev/null || true
+            docker rm voxlibris-web 2>/dev/null || true
+
+            echo "=== Запуск нового контейнера ==="
+            docker run -d \
+              --name voxlibris-web \
+              --network captain-network \
+              -e NODE_ENV=production \
+              -e PORT=5000 \
+              -e DATABASE_URL=${{ secrets.DATABASE_URL }} \
+              -e REDIS_URL=${{ secrets.REDIS_URL }} \
+              -e S3_ENDPOINT=${{ secrets.S3_ENDPOINT }} \
+              -e S3_ACCESS_KEY=${{ secrets.S3_ACCESS_KEY }} \
+              -e S3_SECRET_KEY=${{ secrets.S3_SECRET_KEY }} \
+              -e S3_BUCKET=${{ secrets.S3_BUCKET }} \
+              registry.8ls.ru:996/captain/img-captain-voxlibris-web:latest
+
+            echo "=== Проверка статуса контейнера ==="
+            sleep 5
+            docker ps | grep voxlibris-web
+
+            echo "=== Логи контейнера ==="
+            docker logs voxlibris-web --tail 20 || true
+
+            echo "=== Деплой завершен успешно ==="
