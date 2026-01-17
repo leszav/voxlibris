@@ -1,160 +1,177 @@
 import dotenv from "dotenv";
+
 dotenv.config();
 
-import express from "express";
-import cors from "cors";
+import { createServer } from "node:http";
 import cookieParser from "cookie-parser";
+import cors from "cors";
+import express from "express";
 import rateLimit from "express-rate-limit";
 import slowDown from "express-slow-down";
 import helmet from "helmet";
-import { registerRoutes } from "./routes";
-import { setupAuthRoutes } from "./auth-routes";
-import adminRoutes from "./admin-routes";
-import analyticsRoutes from "./analytics-routes";
-import readerRoutes from "./routes/reader";
-import clubRoutes from "./club-routes";
-import clubReaderRoutes from "./club-reader-routes";
-
-import { serveStatic } from "./static";
-import { createServer } from "node:http";
 import { Server as SocketIOServer } from "socket.io";
-import { setupWebSocketHandlers } from "./websocket";
-import { initializeReaderWebSocket } from "./websocket-reader";
+import adminRoutes from "./admin-routes";
 import { AIMemoryManager } from "./ai-memory/manager";
-import { initializeMemoryRoutes, autoSaveMiddleware } from "./ai-memory/routes";
+import { autoSaveMiddleware, initializeMemoryRoutes } from "./ai-memory/routes";
+import analyticsRoutes from "./analytics-routes";
+import { setupAuthRoutes } from "./auth-routes";
 import { authService } from "./auth-service";
+import clubReaderRoutes from "./club-reader-routes";
+import clubRoutes from "./club-routes";
+import { validateEnvironment } from "./config/validate";
 import { jwtAuth } from "./jwt-middleware";
 import { metrikaInjectionMiddleware } from "./middleware/metrika-injection";
-import { validateEnvironment } from "./config/validate";
+import { registerRoutes } from "./routes";
+import readerRoutes from "./routes/reader";
+import { serveStatic } from "./static";
+import { setupWebSocketHandlers } from "./websocket";
+import { initializeReaderWebSocket } from "./websocket-reader";
 
 export const app = express();
 const httpServer = createServer(app);
 const io = new SocketIOServer(httpServer, {
-  cors: {
-    origin: process.env.NODE_ENV === 'development' ? "http://localhost:3000" : false,
-    methods: ["GET", "POST"],
-    credentials: true
-  },
-  transports: ['websocket', 'polling']
+	cors: {
+		origin:
+			process.env.NODE_ENV === "development" ? "http://localhost:3000" : false,
+		methods: ["GET", "POST"],
+		credentials: true,
+	},
+	transports: ["websocket", "polling"],
 });
 
 // Utility functions
 export function log(message: string, source = "express") {
-  const formattedTime = new Date().toLocaleTimeString("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: true,
-  });
+	const formattedTime = new Date().toLocaleTimeString("en-US", {
+		hour: "numeric",
+		minute: "2-digit",
+		second: "2-digit",
+		hour12: true,
+	});
 
-  console.log(`${formattedTime} [${source}] ${message}`);
+	console.log(`${formattedTime} [${source}] ${message}`);
 }
 
 // Функция для маскирования чувствительных данных в логах
 function maskSensitiveData(obj: any): any {
-  if (!obj || typeof obj !== 'object') return obj;
-  
-  const sensitiveKeys = ['password', 'token', 'secret', 'apikey', 'api_key', 'accesstoken', 'refreshtoken'];
-  const masked = Array.isArray(obj) ? [...obj] : { ...obj };
-  
-  for (const key in masked) {
-    const lowerKey = key.toLowerCase();
-    if (sensitiveKeys.some(sensitive => lowerKey.includes(sensitive))) {
-      masked[key] = '***';
-    } else if (typeof masked[key] === 'object' && masked[key] !== null) {
-      masked[key] = maskSensitiveData(masked[key]);
-    }
-  }
-  
-  return masked;
+	if (!obj || typeof obj !== "object") return obj;
+
+	const sensitiveKeys = [
+		"password",
+		"token",
+		"secret",
+		"apikey",
+		"api_key",
+		"accesstoken",
+		"refreshtoken",
+	];
+	const masked = Array.isArray(obj) ? [...obj] : { ...obj };
+
+	for (const key in masked) {
+		const lowerKey = key.toLowerCase();
+		if (sensitiveKeys.some((sensitive) => lowerKey.includes(sensitive))) {
+			masked[key] = "***";
+		} else if (typeof masked[key] === "object" && masked[key] !== null) {
+			masked[key] = maskSensitiveData(masked[key]);
+		}
+	}
+
+	return masked;
 }
 
 // Security headers configuration
-app.use(helmet({
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
-      fontSrc: ["'self'", "https://fonts.gstatic.com"],
-      imgSrc: ["'self'", "data:", "https:"],
-      scriptSrc: ["'self'"],
-      connectSrc: ["'self'", "wss:", "https:"],
-      frameSrc: ["'none'"],
-      objectSrc: ["'none'"],
-      baseUri: ["'self'"],
-      formAction: ["'self'"],
-    },
-  },
-  hsts: {
-    maxAge: 31536000,
-    includeSubDomains: true,
-    preload: true
-  },
-  noSniff: true,
-  frameguard: { action: 'deny' },
-  xssFilter: true,
-  referrerPolicy: { policy: 'strict-origin-when-cross-origin' }
-}));
+app.use(
+	helmet({
+		contentSecurityPolicy: {
+			directives: {
+				defaultSrc: ["'self'"],
+				styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+				fontSrc: ["'self'", "https://fonts.gstatic.com"],
+				imgSrc: ["'self'", "data:", "https:"],
+				scriptSrc: ["'self'"],
+				connectSrc: ["'self'", "wss:", "https:"],
+				frameSrc: ["'none'"],
+				objectSrc: ["'none'"],
+				baseUri: ["'self'"],
+				formAction: ["'self'"],
+			},
+		},
+		hsts: {
+			maxAge: 31536000,
+			includeSubDomains: true,
+			preload: true,
+		},
+		noSniff: true,
+		frameguard: { action: "deny" },
+		xssFilter: true,
+		referrerPolicy: { policy: "strict-origin-when-cross-origin" },
+	}),
+);
 
 // CORS configuration for credentials
-const allowedOrigins = process.env.ALLOWED_ORIGINS 
-  ? process.env.ALLOWED_ORIGINS.split(',') 
-  : ['http://localhost:3000'];
+const allowedOrigins = process.env.ALLOWED_ORIGINS
+	? process.env.ALLOWED_ORIGINS.split(",")
+	: ["http://localhost:3000"];
 
-app.use(cors({
-  origin: allowedOrigins,
-  credentials: true,
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "Cookie"],
-  exposedHeaders: ["X-Total-Count"]
-}));
+app.use(
+	cors({
+		origin: allowedOrigins,
+		credentials: true,
+		methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+		allowedHeaders: ["Content-Type", "Authorization", "Cookie"],
+		exposedHeaders: ["X-Total-Count"],
+	}),
+);
 
 // Rate limiting configuration
 // Строгий rate limiting для auth endpoints
 const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 минут
-  max: 5, // максимум 5 попыток
-  message: {
-    error: 'Too many authentication attempts. Please try again later.',
-    retryAfter: '15 minutes'
-  },
-  standardHeaders: true,
-  legacyHeaders: false,
-  skipSuccessfulRequests: true
+	windowMs: 15 * 60 * 1000, // 15 минут
+	max: 5, // максимум 5 попыток
+	message: {
+		error: "Too many authentication attempts. Please try again later.",
+		retryAfter: "15 minutes",
+	},
+	standardHeaders: true,
+	legacyHeaders: false,
+	skipSuccessfulRequests: true,
 });
 
 // General rate limiting
 const generalLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 100, // 100 запросов в 15 минут
-  message: {
-    error: 'Too many requests. Please slow down.',
-    retryAfter: '15 minutes'
-  },
-  standardHeaders: true,
-  legacyHeaders: false
+	windowMs: 15 * 60 * 1000,
+	max: 100, // 100 запросов в 15 минут
+	message: {
+		error: "Too many requests. Please slow down.",
+		retryAfter: "15 minutes",
+	},
+	standardHeaders: true,
+	legacyHeaders: false,
 });
 
 // Slow down for repeated requests
 const speedLimiter = slowDown({
-  windowMs: 15 * 60 * 1000,
-  delayAfter: 50, // после 50 запросов
-  delayMs: 500 // добавить 500ms задержку на каждый запрос
+	windowMs: 15 * 60 * 1000,
+	delayAfter: 50,
+	delayMs: (used, req) => {
+		const delayAfter = req.slowDown.limit;
+		return (used - delayAfter) * 500;
+	},
+	validate: { delayMs: false },
 });
 
 declare module "http" {
-  interface IncomingMessage {
-    rawBody: unknown;
-  }
+	interface IncomingMessage {
+		rawBody: unknown;
+	}
 }
 
 app.use(
-  express.json({
-    limit: '50mb',
-    verify: (req, _res, buf) => {
-      req.rawBody = buf;
-    },
-  }),
+	express.json({
+		limit: "50mb",
+		verify: (req, _res, buf) => {
+			req.rawBody = buf;
+		},
+	}),
 );
 
 app.use(express.urlencoded({ extended: false }));
@@ -164,22 +181,25 @@ app.use(cookieParser());
 
 // Setup JWT-based authentication routes
 // Применить rate limiting middleware
-app.use('/api/auth/login', authLimiter);
-app.use('/api/auth/register', authLimiter);
-app.use('/api/auth/forgot-password', authLimiter);
-app.use('/api/auth', speedLimiter);
+app.use("/api/auth/login", authLimiter);
+app.use("/api/auth/register", authLimiter);
+app.use("/api/auth/forgot-password", authLimiter);
+app.use("/api/auth", speedLimiter);
 app.use(generalLimiter);
 
 setupAuthRoutes(app);
 
 // Periodic cleanup of expired refresh tokens (every hour)
-setInterval(async () => {
-  try {
-    await authService.cleanupExpiredTokens();
-  } catch (error) {
-    console.error('Failed to cleanup expired tokens:', error);
-  }
-}, 60 * 60 * 1000); // 1 hour
+setInterval(
+	async () => {
+		try {
+			await authService.cleanupExpiredTokens();
+		} catch (error) {
+			console.error("Failed to cleanup expired tokens:", error);
+		}
+	},
+	60 * 60 * 1000,
+); // 1 hour
 
 // Setup WebSocket handlers for live reading
 const socketIO = setupWebSocketHandlers(io);
@@ -188,129 +208,134 @@ const socketIO = setupWebSocketHandlers(io);
 const readerIO = initializeReaderWebSocket(httpServer);
 
 app.use((req, res, next) => {
-  const start = Date.now();
-  const path = req.path;
-  let capturedJsonResponse: Record<string, any> | undefined = undefined;
+	const start = Date.now();
+	const path = req.path;
+	let capturedJsonResponse: Record<string, any> | undefined;
 
-  const originalResJson = res.json;
-  res.json = function (bodyJson, ...args) {
-    capturedJsonResponse = bodyJson;
-    return originalResJson.apply(res, [bodyJson, ...args]);
-  };
+	const originalResJson = res.json;
+	res.json = (bodyJson, ...args) => {
+		capturedJsonResponse = bodyJson;
+		return originalResJson.apply(res, [bodyJson, ...args]);
+	};
 
-  res.on("finish", () => {
-    const duration = Date.now() - start;
-    if (path.startsWith("/api")) {
-      let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
-        const safeResponse = maskSensitiveData(capturedJsonResponse);
-        logLine += ` :: ${JSON.stringify(safeResponse)}`;
-      }
+	res.on("finish", () => {
+		const duration = Date.now() - start;
+		if (path.startsWith("/api")) {
+			let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
+			if (capturedJsonResponse) {
+				const safeResponse = maskSensitiveData(capturedJsonResponse);
+				logLine += ` :: ${JSON.stringify(safeResponse)}`;
+			}
 
-      log(logLine);
-    }
-  });
+			log(logLine);
+		}
+	});
 
-  next();
+	next();
 });
 
 // Initialize AI Memory Manager (DEVELOPMENT ONLY)
 let aiMemoryManager: AIMemoryManager | null = null;
 
-if (process.env.NODE_ENV === 'development') {
-  aiMemoryManager = new AIMemoryManager({
-    maxContextSize: 50000,
-    retentionDays: 30,
-    priorityThreshold: 2
-  });
+if (process.env.NODE_ENV === "development") {
+	aiMemoryManager = new AIMemoryManager({
+		maxContextSize: 50000,
+		retentionDays: 30,
+		priorityThreshold: 2,
+	});
 
-  // Enable auto-save middleware for AI conversations
-  app.use('/api', autoSaveMiddleware);
+	// Enable auto-save middleware for AI conversations
+	app.use("/api", autoSaveMiddleware);
 }
 
 // Проверка окружения перед запуском
 try {
-  validateEnvironment();
-  log('Environment validation passed');
+	validateEnvironment();
+	log("Environment validation passed");
 } catch (error: any) {
-  console.error('Environment validation failed:', error.message);
-  process.exit(1);
+	console.error("Environment validation failed:", error.message);
+	process.exit(1);
 }
 
 // Асинхронная инициализация
 try {
-  // Инициализация AI Memory (только для development)
-  if (process.env.NODE_ENV === 'development' && aiMemoryManager) {
-    try {
-      await aiMemoryManager.initialize();
-      log('🧠 AI Memory System initialized (DEV MODE)', 'ai-memory');
-    } catch (error) {
-      log(`⚠️  AI Memory initialization failed: ${error}`, 'ai-memory');
-      console.error('⚠️  AI Memory disabled - continuing without AI features');
-    }
-  } else if (process.env.NODE_ENV !== 'development') {
-    log('ℹ️  AI Memory disabled in production mode', 'ai-memory');
-  }
+	// Инициализация AI Memory (только для development)
+	if (process.env.NODE_ENV === "development" && aiMemoryManager) {
+		try {
+			await aiMemoryManager.initialize();
+			log("🧠 AI Memory System initialized (DEV MODE)", "ai-memory");
+		} catch (error) {
+			log(`⚠️  AI Memory initialization failed: ${error}`, "ai-memory");
+			console.error("⚠️  AI Memory disabled - continuing without AI features");
+		}
+	} else if (process.env.NODE_ENV !== "development") {
+		log("ℹ️  AI Memory disabled in production mode", "ai-memory");
+	}
 
-  // Регистрация основных роутов
-  await registerRoutes(httpServer, app);
+	// Регистрация основных роутов
+	await registerRoutes(httpServer, app);
 
-  // Setup Admin routes
-  app.use('/api/v1/admin', adminRoutes);
+	// Setup Admin routes
+	app.use("/api/v1/admin", adminRoutes);
 
-  // Setup Analytics routes
-  app.use('/api/v1/analytics', analyticsRoutes);
+	// Setup Analytics routes
+	app.use("/api/v1/analytics", analyticsRoutes);
 
-  // Setup Club routes (JWT применяется индивидуально в каждом роуте)
-  app.use('/api/clubs', clubRoutes);
-  
-  // Setup Club Reader routes (JWT protected)
-  app.use('/api/clubs', clubReaderRoutes);
+	// Setup Club routes (JWT применяется индивидуально в каждом роуте)
+	app.use("/api/clubs", clubRoutes);
 
-  // Setup Reader routes (JWT protected)
-  app.use('/api/v1/books', jwtAuth, readerRoutes);
+	// Setup Club Reader routes (JWT protected)
+	app.use("/api/clubs", clubReaderRoutes);
 
-  // Setup AI Memory routes (DEVELOPMENT ONLY)
-  if (process.env.NODE_ENV === 'development' && aiMemoryManager) {
-    app.use('/api/ai-memory', initializeMemoryRoutes(aiMemoryManager));
+	// Setup Reader routes (JWT protected)
+	app.use("/api/v1/books", jwtAuth, readerRoutes);
 
-    // Добавляем периодическую проверку состояния AI Memory
-    setInterval(async () => {
-      const health = aiMemoryManager.getHealthStatus();
-      if (!health.isHealthy) {
-        log('⚠️  AI Memory System is unhealthy', 'ai-memory');
-      }
-    }, 30000); // Каждые 30 секунд
-  }
+	// Setup AI Memory routes (DEVELOPMENT ONLY)
+	if (process.env.NODE_ENV === "development" && aiMemoryManager) {
+		app.use("/api/ai-memory", initializeMemoryRoutes(aiMemoryManager));
 
-  // Error handling middleware
-  app.use((err: any, _req: any, res: any, _next: any) => {
-    const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
-    res.status(status).json({ message });
-    throw err;
-  });
+		// Добавляем периодическую проверку состояния AI Memory
+		setInterval(async () => {
+			const health = aiMemoryManager.getHealthStatus();
+			if (!health.isHealthy) {
+				log("⚠️  AI Memory System is unhealthy", "ai-memory");
+			}
+		}, 30000); // Каждые 30 секунд
+	}
 
-  // Setup static serving for production
-  if (process.env.NODE_ENV === "production") {
-    // Внедряем Yandex.Metrika в HTML перед отдачей статики
-    app.use(metrikaInjectionMiddleware());
-    serveStatic(app);
-  } else {
-    // In development, serve a simple backend info page instead of the full React app
-    // Use a generic middleware (no route pattern strings) to avoid path-to-regexp issues
-    app.use((req, res, next) => {
-      // Skip API routes, websocket, and asset routes
-      if (req.path.startsWith('/api') ||
-        req.path.startsWith('/socket.io') ||
-        req.path.startsWith('/vite-hmr') ||
-        req.path.startsWith('/@') ||
-        req.path.startsWith('/__vite')) {
-        return next();
-      }
+	// Error handling middleware
+	app.use((err: any, _req: any, res: any, _next: any) => {
+		const status = err.status || err.statusCode || 500;
+		const message = err.message || "Internal Server Error";
+		res.status(status).json({ message });
+		throw err;
+	});
 
-      // Serve backend info page for all other routes
-      res.status(200).set({ "Content-Type": "text/html" }).send(`
+	// Setup static serving for production
+	if (process.env.NODE_ENV === "production") {
+		// Внедряем Yandex.Metrika в HTML перед отдачей статики
+		app.use(metrikaInjectionMiddleware());
+		serveStatic(app);
+	} else {
+		// In development, serve a simple backend info page instead of the full React app
+		// Use a generic middleware (no route pattern strings) to avoid path-to-regexp issues
+		app.use((req, res, next) => {
+			// Skip API routes, websocket, and asset routes
+			if (
+				req.path.startsWith("/api") ||
+				req.path.startsWith("/socket.io") ||
+				req.path.startsWith("/vite-hmr") ||
+				req.path.startsWith("/@") ||
+				req.path.startsWith("/__vite")
+			) {
+				return next();
+			}
+
+			// Serve backend info page for all other routes
+			res
+				.status(200)
+				.set({ "Content-Type": "text/html" })
+				.send(`
         <!DOCTYPE html>
         <html lang="ru">
         <head>
@@ -339,23 +364,27 @@ try {
               <strong>Для открытия интерфейса приложения перейдите на:</strong><br>
               <a href="http://localhost:3000" class="link">http://localhost:3000</a>
             </div>
-            ${process.env.NODE_ENV === 'development' && aiMemoryManager ? `
+            ${
+							process.env.NODE_ENV === "development" && aiMemoryManager
+								? `
             <div class="info">
               <strong>🧠 AI Memory System (DEV ONLY):</strong><br>
               <span id="ai-status">🔄 Checking status...</span><br>
               <a href="/api/ai-memory/health" class="link" target="_blank">Health Check</a> |
               <a href="/api/ai-memory/status" class="link" target="_blank">Detailed Status</a>
             </div>
-            ` : ''}
+            `
+								: ""
+						}
             <h3>API Endpoints:</h3>
             <ul>
               <li><code>/api/auth/*</code> - Аутентификация</li>
               <li><code>/api/clubs/*</code> - Клубы чтения</li>
               <li><code>/api/books/*</code> - Книги и контент</li>
-              ${process.env.NODE_ENV === 'development' ? `<li><code>/api/ai-memory/*</code> - AI Memory система (DEV ONLY)</li>` : ''}
+              ${process.env.NODE_ENV === "development" ? `<li><code>/api/ai-memory/*</code> - AI Memory система (DEV ONLY)</li>` : ""}
               <li><code>/socket.io</code> - WebSocket подключение</li>
             </ul>
-            <p><small>Порт: ${port} | Env: ${process.env.NODE_ENV || 'development'}</small></p>
+            <p><small>Порт: ${port} | Env: ${process.env.NODE_ENV || "development"}</small></p>
             <script>
               fetch('/api/ai-memory/health')
                 .then(res => res.json())
@@ -379,22 +408,22 @@ try {
         </body>
         </html>
       `);
-    });
-  }
+		});
+	}
 
-  // ALWAYS serve the app on the port specified in the environment variable PORT
-  const port = Number.parseInt(process.env.PORT || "5000", 10);
-  httpServer.listen(
-    {
-      port,
-      host: "0.0.0.0",
-      reusePort: true,
-    },
-    () => {
-      log(`serving on port ${port}`);
-    },
-  );
+	// ALWAYS serve the app on the port specified in the environment variable PORT
+	const port = Number.parseInt(process.env.PORT || "5000", 10);
+	httpServer.listen(
+		{
+			port,
+			host: "0.0.0.0",
+			reusePort: true,
+		},
+		() => {
+			log(`serving on port ${port}`);
+		},
+	);
 } catch (error) {
-  console.error('❌ Fatal error during server initialization:', error);
-  process.exit(1);
+	console.error("❌ Fatal error during server initialization:", error);
+	process.exit(1);
 }
