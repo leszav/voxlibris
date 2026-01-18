@@ -18,7 +18,7 @@ async function buildAll() {
   await execAsync("npx tsc --project tsconfig.server.json");
 
   console.log("copying assets...");
-  await cp("dist/public", join("dist", "public"), { recursive: true });
+  // Assets are already in dist/public after vite build, no need to copy
 }
 
 try {
