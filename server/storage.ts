@@ -22,7 +22,6 @@ import {
   type ReadingProgress,
   type InsertReadingProgress,
   type ReadingHistory,
-  type InsertReadingHistory,
   type ReaderRating,
   type InsertReaderRating,
   type UserProfile,
@@ -68,10 +67,10 @@ import {
   personalBooks,
   clubBooks,
   bookAccessLogs
-} from "@shared/schema";
+} from "../shared/schema.js";
 import { randomUUID } from "node:crypto";
 import { drizzle } from "drizzle-orm/postgres-js";
-import { eq, desc, asc, count, and, sql, isNull, inArray, exists, or, ne, isNotNull } from "drizzle-orm";
+import { eq, desc, asc, count, and, sql, isNull, inArray, exists, or, ne } from "drizzle-orm";
 import postgres from "postgres";
 
 // Type aliases for union types

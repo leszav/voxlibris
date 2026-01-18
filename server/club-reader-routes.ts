@@ -1,11 +1,11 @@
 import express from 'express';
-import { jwtAuth } from './jwt-middleware';
+import { jwtAuth } from './jwt-middleware.js';
 import {
   clubBooks,
   clubMembers,
   readingProgress
-} from '@shared/schema';
-import { db } from './db';
+} from '../shared/schema.js';
+import { db } from './db.js';
 import { eq, and } from 'drizzle-orm';
 
 const router = express.Router();

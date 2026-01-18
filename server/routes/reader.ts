@@ -1,5 +1,5 @@
 import express, { Request, Response } from "express";
-import { db } from "../db";
+import { db } from "../db.js";
 import {
   books,
   bookContent,
@@ -10,17 +10,12 @@ import {
   personalBooks,
   clubBooks,
   clubMembers,
-  type Bookmark,
-  type Note,
-} from "@shared/schema";
+} from "../../shared/schema.js";
 import { eq, and, desc } from "drizzle-orm";
-import { sanitizeBookContent } from "../content-sanitizer";
+import { sanitizeBookContent } from "../content-sanitizer.js";
 import {
-  decryptContent,
-  decryptContentKey,
   generateShortLivedToken,
-  verifyContentToken,
-} from "../encryption";
+} from "../encryption.js";
 
 const router = express.Router();
 
@@ -65,7 +60,7 @@ router.get("/:id/content", async (req: Request, res: Response) => {
 
     if (chapter) {
       contentQuery = contentQuery.where(
-        eq(bookContent.chapterNumber, parseInt(chapter as string))
+        eq(bookContent.chapterNumber, Number.parseInt(chapter as string, 10))
       );
     }
 

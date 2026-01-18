@@ -1,18 +1,18 @@
 import type { Express, Request, Response } from "express";
 import type { Server } from "node:http";
 import multer from "multer";
-import { storage } from "./storage";
-import { fileStorage } from "./file-storage";
-import { emailService } from "./services/email-service";
-import personalBooksRouter from "./personal-books-routes";
-import clubBooksRouter from "./club-books-routes";
-import accessRouter from "./access-routes";
-import { jwtAuth, requireActiveUser } from "./jwt-middleware";
+import { storage } from "./storage.js";
+import { fileStorage } from "./file-storage.js";
+import { emailService } from "./services/email-service.js";
+import personalBooksRouter from "./personal-books-routes.js";
+import clubBooksRouter from "./club-books-routes.js";
+import accessRouter from "./access-routes.js";
+import { jwtAuth, requireActiveUser } from "./jwt-middleware.js";
 import {
   insertClubSchema,
   insertBookSchema,
   type InsertBook
-} from "@shared/schema";
+} from "../shared/schema.js";
 
 // Helper: robust lookup of invitation by token with fallbacks
 async function findInvitationByToken(token: string) {

@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
-import { AIMemoryManager } from './manager';
-import { MemoryChunk } from './types';
-import { jwtAuth } from '../jwt-middleware';
+import { AIMemoryManager } from './manager.js';
+import { MemoryChunk } from './types.js';
+import { jwtAuth } from '../jwt-middleware.js';
 
 const router = Router();
 let memoryManager: AIMemoryManager;
@@ -113,7 +113,7 @@ router.get('/search/tag/:tag', jwtAuth, async (req: Request, res: Response) => {
     const results = await memoryManager.searchByTag(
       tag,
       userId,
-      parseInt(limit as string)
+      Number.parseInt(limit as string, 10)
     );
 
     res.json({
@@ -148,7 +148,7 @@ router.get('/search/type/:type', jwtAuth, async (req: Request, res: Response) =>
     const results = await memoryManager.searchByType(
       type,
       userId,
-      parseInt(limit as string)
+      Number.parseInt(limit as string, 10)
     );
 
     res.json({

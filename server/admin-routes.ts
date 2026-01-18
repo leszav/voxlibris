@@ -1,11 +1,11 @@
 import express from 'express';
-import { jwtAuth, requireAdmin } from './jwt-middleware';
-import { storage } from './storage';
-import { emailService } from './services/email-service';
-import type { UserRole, UserStatus } from '../shared/schema';
+import { jwtAuth, requireAdmin } from './jwt-middleware.js';
+import { storage } from './storage.js';
+import { emailService } from './services/email-service.js';
+import type { UserRole, UserStatus } from '../shared/schema.js';
 import postgres from 'postgres';
-import { sql, eq, count } from 'drizzle-orm';
-import { clubs } from '../shared/schema';
+import { eq, count } from 'drizzle-orm';
+import { clubs } from '../shared/schema.js';
 const PostgresError = postgres.PostgresError;
 
 const router = express.Router();
@@ -572,6 +572,57 @@ router.get('/books', jwtAuth, requireAdmin, async (req, res) => {
   }
 });
 
+// Вспомогательные функции для изменения статуса книг
+async function updatePersonalBookStatus(id: string, status: string): Promise<{ success: boolean; error?: string }> {
+  const book = await storage.getPersonalBook(id);
+  if (!book) {
+    return { success: false, error: 'Personal book not found' };
+  }
+  
+  let success = false;
+  if (status === 'blocked') {
+    success = await storage.deletePersonalBook(id);
+  } else if (status === 'active') {
+    success = await storage.restorePersonalBook(id);
+  }
+  
+  return { success };
+}
+
+async function updateClubBookStatus(id: string, status: string): Promise<{ success: boolean; error?: string }> {
+  const book = await storage.getClubBook(id);
+  if (!book) {
+    return { success: false, error: 'Club book not found' };
+  }
+  
+  let success = false;
+  if (status === 'blocked') {
+    success = await storage.deleteClubBook(id);
+  } else if (status === 'active') {
+    success = await storage.restoreClubBook(id);
+  }
+  
+  return { success };
+}
+
+async function updateRegularBookStatus(id: string, status: string, userId: string): Promise<{ success: boolean; error?: string }> {
+  const book = await storage.getBook(id);
+  if (!book) {
+    return { success: false, error: 'Book not found' };
+  }
+
+  const statusMap: { [key: string]: 'draft' | 'published' | 'archived' } = {
+    'active': 'published',
+    'blocked': 'archived',
+    'pending': 'draft'
+  };
+
+  const newStatus = statusMap[status] || 'draft';
+  const success = await storage.updateBookStatus(id, newStatus, userId);
+  
+  return { success };
+}
+
 // Изменить статус книги (поддерживает все типы: books, personal_books, club_books)
 router.put('/books/:id/status', jwtAuth, requireAdmin, async (req, res) => {
   try {
@@ -582,46 +633,19 @@ router.put('/books/:id/status', jwtAuth, requireAdmin, async (req, res) => {
       return res.status(400).json({ message: 'Invalid book status' });
     }
 
-    let success = false;
+    let result: { success: boolean; error?: string };
 
     if (source === 'personal_books') {
-      const book = await storage.getPersonalBook(id);
-      if (!book) {
-        return res.status(404).json({ message: 'Personal book not found' });
-      }
-      if (status === 'blocked') {
-        success = await storage.deletePersonalBook(id);
-      } else if (status === 'active') {
-        success = await storage.restorePersonalBook(id);
-      }
+      result = await updatePersonalBookStatus(id, status);
     } else if (source === 'club_books') {
-      const book = await storage.getClubBook(id);
-      if (!book) {
-        return res.status(404).json({ message: 'Club book not found' });
-      }
-      if (status === 'blocked') {
-        success = await storage.deleteClubBook(id);
-      } else if (status === 'active') {
-        success = await storage.restoreClubBook(id);
-      }
+      result = await updateClubBookStatus(id, status);
     } else {
-      const book = await storage.getBook(id);
-      if (!book) {
-        return res.status(404).json({ message: 'Book not found' });
-      }
-
-      const statusMap: { [key: string]: 'draft' | 'published' | 'archived' } = {
-        'active': 'published',
-        'blocked': 'archived',
-        'pending': 'draft'
-      };
-
-      const newStatus = statusMap[status] || 'draft';
-      success = await storage.updateBookStatus(id, newStatus, req.user!.userId);
+      result = await updateRegularBookStatus(id, status, req.user!.userId);
     }
 
-    if (!success) {
-      return res.status(500).json({ message: 'Failed to update book status' });
+    if (!result.success) {
+      const statusCode = result.error?.includes('not found') ? 404 : 500;
+      return res.status(statusCode).json({ message: result.error || 'Failed to update book status' });
     }
 
     res.json({ message: 'Book status updated successfully', status });
@@ -631,41 +655,62 @@ router.put('/books/:id/status', jwtAuth, requireAdmin, async (req, res) => {
   }
 });
 
+// Вспомогательные функции для удаления книг
+async function deletePersonalBookAdmin(id: string): Promise<{ success: boolean; bookInfo?: { title: string; status?: string }; error?: string }> {
+  const book = await storage.getPersonalBook(id);
+  if (!book) {
+    return { success: false, error: 'Personal book not found' };
+  }
+  
+  const bookInfo = { title: book.title, status: book.isDeleted ? 'deleted' : 'active' };
+  const deleted = await storage.permanentDeletePersonalBook(id);
+  
+  return { success: deleted, bookInfo };
+}
+
+async function deleteClubBookAdmin(id: string): Promise<{ success: boolean; bookInfo?: { title: string; status?: string }; error?: string }> {
+  const book = await storage.getClubBook(id);
+  if (!book) {
+    return { success: false, error: 'Club book not found' };
+  }
+  
+  const bookInfo = { title: book.title, status: book.isDeleted ? 'deleted' : 'active' };
+  const deleted = await storage.permanentDeleteClubBook(id);
+  
+  return { success: deleted, bookInfo };
+}
+
+async function deleteRegularBookAdmin(id: string): Promise<{ success: boolean; bookInfo?: { title: string; status?: string }; error?: string }> {
+  const book = await storage.getBook(id);
+  if (!book) {
+    return { success: false, error: 'Book not found' };
+  }
+  
+  const bookInfo = { title: book.title, status: book.status };
+  await storage.deleteBook(id);
+  
+  return { success: true, bookInfo };
+}
+
 // Удалить книгу окончательно (поддерживает все типы: books, personal_books, club_books)
 router.delete('/books/:id', jwtAuth, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const { source } = req.query;
 
-    let bookInfo: { title: string; status?: string } | undefined;
-    let deleted = false;
+    let result: { success: boolean; bookInfo?: { title: string; status?: string }; error?: string };
 
     if (source === 'personal_books') {
-      const book = await storage.getPersonalBook(id);
-      if (!book) {
-        return res.status(404).json({ message: 'Personal book not found' });
-      }
-      bookInfo = { title: book.title, status: book.isDeleted ? 'deleted' : 'active' };
-      deleted = await storage.permanentDeletePersonalBook(id);
+      result = await deletePersonalBookAdmin(id);
     } else if (source === 'club_books') {
-      const book = await storage.getClubBook(id);
-      if (!book) {
-        return res.status(404).json({ message: 'Club book not found' });
-      }
-      bookInfo = { title: book.title, status: book.isDeleted ? 'deleted' : 'active' };
-      deleted = await storage.permanentDeleteClubBook(id);
+      result = await deleteClubBookAdmin(id);
     } else {
-      const book = await storage.getBook(id);
-      if (!book) {
-        return res.status(404).json({ message: 'Book not found' });
-      }
-      bookInfo = { title: book.title, status: book.status };
-      await storage.deleteBook(id);
-      deleted = true;
+      result = await deleteRegularBookAdmin(id);
     }
 
-    if (!deleted) {
-      return res.status(500).json({ message: 'Failed to delete book' });
+    if (!result.success) {
+      const statusCode = result.error?.includes('not found') ? 404 : 500;
+      return res.status(statusCode).json({ message: result.error || 'Failed to delete book' });
     }
 
     await logAction(
@@ -673,8 +718,8 @@ router.delete('/books/:id', jwtAuth, requireAdmin, async (req, res) => {
       'delete_book',
       'book',
       id,
-      `Book deleted by admin (source: ${source || 'books'})`,
-      bookInfo?.status,
+      `Book deleted by admin (source: ${typeof source === 'string' ? source : 'books'})`,
+      result.bookInfo?.status,
       'deleted'
     );
 
@@ -780,7 +825,7 @@ router.put('/clubs/:id', jwtAuth, requireAdmin, async (req, res) => {
 
     if (maxMembers !== undefined) {
       const newMaxMembers = Number(maxMembers);
-      if (isNaN(newMaxMembers) || newMaxMembers < 2 || newMaxMembers > 2000) {
+      if (Number.isNaN(newMaxMembers) || newMaxMembers < 2 || newMaxMembers > 2000) {
         return res.status(400).json({ message: 'maxMembers must be between 2 and 2000' });
       }
 

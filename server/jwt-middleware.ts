@@ -1,5 +1,5 @@
 import type { Request, Response, NextFunction } from "express";
-import { authService } from "./auth-service";
+import { authService } from "./auth-service.js";
 import type { JWTPayload } from "./auth-service";
 
 // Расширяем JWTPayload для включения id

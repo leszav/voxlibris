@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { MemoryChunk, MemorySearchResult, MemoryConfig, ConversationContext } from './types';
-import { AIMemoryStorage } from './storage';
+import { MemoryChunk, MemorySearchResult, MemoryConfig, ConversationContext } from './types.js';
+import { AIMemoryStorage } from './storage.js';
 
 export class AIMemoryManager {
   private readonly storage: AIMemoryStorage;

@@ -1,8 +1,8 @@
 import express from 'express';
-import { jwtAuth, requireActiveUser } from './jwt-middleware';
-import { storage } from './storage';
-import type { InsertClub, ClubMemberRole, InsertClubInvitation, Club, UserRole } from '../shared/schema';
-import { emailService } from './services/email-service';
+import { jwtAuth, requireActiveUser } from './jwt-middleware.js';
+import { storage } from './storage.js';
+import type { InsertClub, ClubMemberRole, InsertClubInvitation, Club, UserRole } from '../shared/schema.js';
+import { emailService } from './services/email-service.js';
 import crypto from 'node:crypto';
 
 const router = express.Router();

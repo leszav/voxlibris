@@ -2,7 +2,7 @@
  * KPI Calculator - Вычисление ключевых показателей эффективности VoxLibris
  */
 
-import { db } from '../db';
+import { db } from '../db.js';
 import { 
   users, 
   books, 
@@ -11,7 +11,7 @@ import {
   clubMembers, 
   readingProgress,
   analyticsEvents 
-} from '../../shared/schema';
+} from '../../shared/schema.js';
 import { sql, count, avg, sum, gte, eq, and, lte } from 'drizzle-orm';
 
 export interface ProjectKPIs {

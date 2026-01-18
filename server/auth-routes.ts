@@ -1,10 +1,10 @@
 import type { Express, Request, Response } from "express";
 import { z } from "zod";
 import cookieParser from "cookie-parser";
-import { authService } from "./auth-service";
-import { storage } from "./storage";
-import { jwtAuth } from "./jwt-middleware";
-import { insertUserSchema } from "@shared/schema";
+import { authService } from "./auth-service.js";
+import { storage } from "./storage.js";
+import { jwtAuth } from "./jwt-middleware.js";
+import { insertUserSchema } from "../shared/schema.js";
 
 // Password validation schema
 const passwordSchema = z.string()

@@ -1,8 +1,8 @@
 import { Router } from 'express';
-import { storage } from './storage';
-import { insertBookAccessLogSchema } from '@shared/schema';
+import { storage } from './storage.js';
+import { insertBookAccessLogSchema } from '../shared/schema.js';
 import { z } from 'zod';
-import { jwtAuth } from './jwt-middleware';
+import { jwtAuth } from './jwt-middleware.js';
 
 const router = Router();
 

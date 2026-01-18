@@ -1,14 +1,41 @@
 import { Server as SocketIOServer, Socket } from "socket.io";
-import { storage } from "./storage";
+import { storage } from "./storage.js";
 import type { 
-  WebSocketMessage, 
   SessionPositionUpdate, 
   ListenerUpdate 
-} from "@shared/schema";
+} from "../shared/schema.js";
 
 interface AuthenticatedSocket extends Socket {
   userId?: string;
   currentSession?: string;
+}
+
+// Helper function to handle leaving current session
+async function leaveCurrentSession(socket: AuthenticatedSocket) {
+  if (!socket.currentSession || !socket.userId) return;
+
+  try {
+    // Remove from session listeners
+    await storage.leaveSession(socket.currentSession, socket.userId);
+    
+    // Notify others in the session
+    const listenerUpdate: ListenerUpdate = {
+      sessionId: socket.currentSession,
+      userId: socket.userId,
+      action: 'leave',
+      timestamp: new Date().toISOString()
+    };
+
+    socket.to(`session_${socket.currentSession}`).emit("listener_update", listenerUpdate);
+    
+    // Leave socket room
+    await socket.leave(`session_${socket.currentSession}`);
+    
+    console.log(`User ${socket.userId} left session ${socket.currentSession}`);
+    socket.currentSession = undefined;
+  } catch (error) {
+    console.error("Error leaving session:", error);
+  }
 }
 
 export function setupWebSocketHandlers(io: SocketIOServer) {
@@ -53,7 +80,7 @@ export function setupWebSocketHandlers(io: SocketIOServer) {
 
         // Verify session exists and is active
         const session = await storage.getReadingSession(sessionId);
-        if (!session || !session.isLive) {
+        if (session?.isLive !== true) {
           socket.emit("error", { message: "Session not found or not active" });
           return;
         }
@@ -99,114 +126,105 @@ export function setupWebSocketHandlers(io: SocketIOServer) {
     });
 
     // Reader starts a session
-    socket.on("start_reading", async (sessionId: string) => {
+    socket.on("start_session", async (data: { bookId: string; chapterNumber: number; clubId: string }) => {
       try {
         if (!socket.userId) {
           socket.emit("error", { message: "User not authenticated" });
           return;
         }
 
-        const session = await storage.getReadingSession(sessionId);
-        if (!session || session.readerId !== socket.userId) {
-          socket.emit("error", { message: "Unauthorized to start this session" });
-          return;
-        }
-
-        // Start the session
-        await storage.startSession(sessionId);
-        
-        // Join the session room as reader
-        await socket.join(`session_${sessionId}`);
-        socket.currentSession = sessionId;
-
-        // Notify all listeners that reading has started
-        io.to(`session_${sessionId}`).emit("session_started", {
-          sessionId,
+        // Create new reading session
+        const session = await storage.createReadingSession({
           readerId: socket.userId,
-          timestamp: new Date().toISOString()
+          clubId: data.clubId,
+          bookId: data.bookId,
+          currentChapter: data.chapterNumber,
+          currentPosition: "0",
+          title: `Reading Session - Chapter ${data.chapterNumber}`
         });
 
-        console.log(`Reader ${socket.userId} started session ${sessionId}`);
+        await socket.join(`session_${session.id}`);
+        socket.currentSession = session.id;
+
+        socket.emit("session_started", {
+          sessionId: session.id,
+          bookId: data.bookId,
+          currentChapter: data.chapterNumber
+        });
+
+        console.log(`User ${socket.userId} started session ${session.id}`);
       } catch (error) {
         console.error("Error starting session:", error);
         socket.emit("error", { message: "Failed to start session" });
       }
     });
 
-    // Reader updates position (chapter/page)
-    socket.on("update_position", async (data: SessionPositionUpdate) => {
+    // Reader updates position in session
+    socket.on("position_update", async (data: SessionPositionUpdate) => {
       try {
-        if (!socket.userId) {
-          socket.emit("error", { message: "User not authenticated" });
+        if (!socket.userId || !socket.currentSession) {
+          socket.emit("error", { message: "No active session" });
           return;
         }
 
-        const session = await storage.getReadingSession(data.sessionId);
-        if (!session || session.readerId !== socket.userId) {
-          socket.emit("error", { message: "Unauthorized to update position" });
-          return;
-        }
-
-        // Update session position in database
+        // Update session position
         await storage.updateSessionPosition(
-          data.sessionId,
+          socket.currentSession,
           data.currentChapter,
           data.currentPosition
         );
 
-        // Broadcast position update to all listeners
-        socket.to(`session_${data.sessionId}`).emit("position_update", data);
+        // Broadcast to all listeners in the session
+        socket.to(`session_${socket.currentSession}`).emit("position_update", {
+          sessionId: socket.currentSession,
+          currentChapter: data.currentChapter,
+          currentPosition: data.currentPosition,
+          timestamp: new Date().toISOString()
+        });
 
-        console.log(`Position updated for session ${data.sessionId}: Chapter ${data.currentChapter}`);
+        console.log(`Position updated in session ${socket.currentSession}: Chapter ${data.currentChapter}, Position ${data.currentPosition}`);
       } catch (error) {
         console.error("Error updating position:", error);
         socket.emit("error", { message: "Failed to update position" });
       }
     });
 
-    // Reader ends session
-    socket.on("end_reading", async (sessionId: string) => {
+    // End session
+    socket.on("end_session", async () => {
       try {
-        if (!socket.userId) {
-          socket.emit("error", { message: "User not authenticated" });
+        if (!socket.userId || !socket.currentSession) {
+          socket.emit("error", { message: "No active session" });
           return;
         }
 
-        const session = await storage.getReadingSession(sessionId);
-        if (!session || session.readerId !== socket.userId) {
-          socket.emit("error", { message: "Unauthorized to end this session" });
-          return;
-        }
-
-        // End the session
-        await storage.endSession(sessionId);
-
-        // Notify all listeners that reading has ended
-        io.to(`session_${sessionId}`).emit("session_ended", {
-          sessionId,
-          readerId: socket.userId,
+        // Mark session as ended
+        await storage.endSession(socket.currentSession);
+        
+        // Notify all listeners
+        socket.to(`session_${socket.currentSession}`).emit("session_ended", {
+          sessionId: socket.currentSession,
+          endedBy: socket.userId,
           timestamp: new Date().toISOString()
         });
 
-        console.log(`Reader ${socket.userId} ended session ${sessionId}`);
+        console.log(`Session ${socket.currentSession} ended by ${socket.userId}`);
+        socket.currentSession = undefined;
       } catch (error) {
         console.error("Error ending session:", error);
         socket.emit("error", { message: "Failed to end session" });
       }
     });
 
-    // Rate a reader
-    socket.on("rate_reader", async (data: { sessionId: string; readerId: string; rating: number; feedback?: string }) => {
+    // Rate reader after session
+    socket.on("rate_reader", async (data: { sessionId: string; readerId: string; rating: number }) => {
       try {
         if (!socket.userId) {
           socket.emit("error", { message: "User not authenticated" });
           return;
         }
 
-        // Verify user is/was a listener in this session
-        const session = await storage.getReadingSession(data.sessionId);
-        if (!session) {
-          socket.emit("error", { message: "Session not found" });
+        if (data.rating < 1 || data.rating > 5) {
+          socket.emit("error", { message: "Rating must be between 1 and 5" });
           return;
         }
 
@@ -215,12 +233,10 @@ export function setupWebSocketHandlers(io: SocketIOServer) {
           sessionId: data.sessionId,
           readerId: data.readerId,
           raterId: socket.userId,
-          rating: data.rating,
-          feedback: data.feedback
+          rating: data.rating
         });
 
-        // Calculate new average rating
-        const averageRating = await storage.getReaderAverageRating(data.readerId);
+        // Rating calculation handled internally by storage
 
         // Notify the reader about the new rating
         socket.emit("rating_submitted", { 
@@ -230,49 +246,21 @@ export function setupWebSocketHandlers(io: SocketIOServer) {
 
         console.log(`User ${socket.userId} rated reader ${data.readerId}: ${data.rating} stars`);
       } catch (error) {
-        console.error("Error rating reader:", error);
+        console.error("Error submitting rating:", error);
         socket.emit("error", { message: "Failed to submit rating" });
       }
     });
 
     // Handle disconnect
-    socket.on("disconnect", async () => {
-      console.log(`User ${socket.userId} disconnected`);
+    socket.on("disconnect", async (reason) => {
+      console.log(`User ${socket.userId} disconnected: ${reason}`);
       
       if (socket.currentSession && socket.userId) {
         await leaveCurrentSession(socket);
       }
     });
-
-    // Helper function to leave current session
-    async function leaveCurrentSession(socket: AuthenticatedSocket) {
-      const sessionId = socket.currentSession!;
-      const userId = socket.userId!;
-
-      try {
-        // Leave session in database
-        await storage.leaveSession(sessionId, userId);
-        
-        // Leave socket room
-        await socket.leave(`session_${sessionId}`);
-
-        // Notify others in the session
-        const listenerUpdate: ListenerUpdate = {
-          sessionId,
-          userId,
-          action: 'leave',
-          timestamp: new Date().toISOString()
-        };
-
-        socket.to(`session_${sessionId}`).emit("listener_update", listenerUpdate);
-
-        socket.currentSession = undefined;
-        console.log(`User ${userId} left session ${sessionId}`);
-      } catch (error) {
-        console.error("Error leaving session:", error);
-      }
-    }
   });
+
 
   return io;
 }

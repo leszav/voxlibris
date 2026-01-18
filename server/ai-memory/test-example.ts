@@ -1,4 +1,4 @@
-import { AIMemoryManager } from './manager';
+import { AIMemoryManager } from './manager.js';
 
 /**
  * Демо-пример использования AI Memory системы

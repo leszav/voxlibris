@@ -1,6 +1,6 @@
 // Re-export db from storage for direct database access
 // This is needed for advanced queries not covered by storage methods
-import { storage } from "./storage";
+import { storage } from "./storage.js";
 
 // Type assertion to access db property
 export const db = (storage as any).db;

@@ -1,15 +1,14 @@
-import { Server as HttpServer } from "http";
+import { Server as HttpServer } from "node:http";
 import { Server, Socket } from "socket.io";
 import jwt, { JwtPayload } from "jsonwebtoken";
-import { db } from "./db";
-import { users, readingProgress, bookmarks, notes } from "@shared/schema";
+import { db } from "./db.js";
+import { users, readingProgress, bookmarks, notes, books, clubMembers } from "../shared/schema.js";
 import { eq, and } from "drizzle-orm";
 import type {
-  WebSocketMessage,
   ReaderProgressUpdate,
   BookmarkUpdate,
   NoteUpdate,
-} from "@shared/schema";
+} from "../shared/schema.js";
 
 const JWT_SECRET = (() => {
   const secret = process.env.JWT_SECRET;
@@ -46,7 +45,7 @@ async function authenticateSocket(socket: Socket, next: (err?: Error) => void) {
 
     // Проверить существование пользователя
     const [user] = await db.select().from(users).where(eq(users.id, decoded.userId)).limit(1);
-    if (!user || user.status !== 'active') {
+    if (!user?.status || user.status !== 'active') {
       return next(new Error('User not found or inactive'));
     }
 
@@ -217,13 +216,12 @@ export function initializeReaderWebSocket(httpServer: HttpServer) {
 }
 
 // Вспомогательная функция проверки доступа к книге
-import { books, clubMembers } from "@shared/schema";
 
 async function verifyBookAccess(userId: string, bookId: string, clubId?: string): Promise<boolean> {
   try {
     // Проверка существования пользователя
     const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
-    if (!user || user.status !== 'active') return false;
+    if (!user?.status || user.status !== 'active') return false;
 
     // Проверка существования книги
     const [book] = await db.select().from(books).where(eq(books.id, bookId)).limit(1);

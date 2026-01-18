@@ -1,6 +1,5 @@
 import { io, Socket } from "socket.io-client";
 import type {
-  WebSocketMessage,
   ReaderProgressUpdate,
   Bookmark,
   Note,

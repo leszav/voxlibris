@@ -3,8 +3,8 @@
  * Обнаруживает дубликаты книг по автору и названию с учётом различий в издательствах
  */
 
-import { db } from './db';
-import { personalBooks, clubBooks } from '../shared/schema';
+import { db } from './db.js';
+import { personalBooks, clubBooks } from '../shared/schema.js';
 import { eq } from 'drizzle-orm';
 
 /**

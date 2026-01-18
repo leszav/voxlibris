@@ -1,13 +1,13 @@
 import { Router } from 'express';
 import multer from 'multer';
-import { storage } from './storage';
-import { BookFormat } from '@shared/schema';
-import { jwtAuth, requireActiveUser } from './jwt-middleware';
+import { storage } from './storage.js';
+import { BookFormat } from '../shared/schema.js';
+import { jwtAuth, requireActiveUser } from './jwt-middleware.js';
 import crypto from 'node:crypto';
-import { BookParserFactory } from './book-parser';
-import { CryptoService } from './crypto-service';
-import { fileStorage } from './file-storage';
-import { duplicateDetectionService } from './duplicate-detection-service';
+import { BookParserFactory } from './book-parser.js';
+import { CryptoService } from './crypto-service.js';
+import { fileStorage } from './file-storage.js';
+import { duplicateDetectionService } from './duplicate-detection-service.js';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage() });

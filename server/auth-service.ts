@@ -1,9 +1,9 @@
 import jwt from "jsonwebtoken";
 import bcrypt from "bcrypt";
 import { randomBytes } from "node:crypto";
-import { storage } from "./storage";
-import type { User } from "@shared/schema";
-import { emailService } from "./services/email-service";
+import { storage } from "./storage.js";
+import type { User } from "../shared/schema.js";
+import { emailService } from "./services/email-service.js";
 
 export type SessionType = 'normal' | 'remember_me';
 

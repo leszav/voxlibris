@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import { MemoryChunk, MemorySearchResult, MemoryConfig } from './types';
+import { MemoryChunk, MemorySearchResult, MemoryConfig } from './types.js';
 import fs from 'fs/promises';
 import path from 'path';
 
