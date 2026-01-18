@@ -86,8 +86,6 @@ jobs:
           context: .
           push: true
           tags: ${{ env.DOCKER_IMAGE }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
 
   deploy:
     name: 🚀 Деплой на CapRover
