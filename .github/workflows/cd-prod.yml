@@ -93,9 +93,6 @@ jobs:
     name: 🚀 Деплой на CapRover
     needs: build
     runs-on: ubuntu-latest
-    environment:
-      name: production
-      url: https://voxli.ru
     steps:
       - name: Add CapRover host to known_hosts
         run: |
