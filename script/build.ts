@@ -17,9 +17,8 @@ async function buildAll() {
   console.log("building server...");
   await execAsync("npx tsc --project tsconfig.server.json");
 
-  console.log("copying assets and necessary files...");
-
-  await cp("dist/server", join("dist", "server"), { recursive: true });
+  console.log("copying assets...");
+  await cp("dist/public", join("dist", "public"), { recursive: true });
 }
 
 try {
