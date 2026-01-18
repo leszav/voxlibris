@@ -105,6 +105,7 @@ jobs:
           username: root
           key: ${{ secrets.CAPROVER_SSH_KEY }}
           port: 22
+          envs: DATABASE_URL,REDIS_URL,S3_ENDPOINT,S3_ACCESS_KEY,S3_SECRET_KEY,S3_BUCKET
           script: |
             set -e
 
@@ -124,12 +125,12 @@ jobs:
               --network captain-overlay-network \
               -e NODE_ENV=production \
               -e PORT=5000 \
-              -e DATABASE_URL=${{ secrets.DATABASE_URL }} \
-              -e REDIS_URL=${{ secrets.REDIS_URL }} \
-              -e S3_ENDPOINT=${{ secrets.S3_ENDPOINT }} \
-              -e S3_ACCESS_KEY=${{ secrets.S3_ACCESS_KEY }} \
-              -e S3_SECRET_KEY=${{ secrets.S3_SECRET_KEY }} \
-              -e S3_BUCKET=${{ secrets.S3_BUCKET }} \
+              -e DATABASE_URL=${DATABASE_URL} \
+              -e REDIS_URL=${REDIS_URL} \
+              -e S3_ENDPOINT=${S3_ENDPOINT} \
+              -e S3_ACCESS_KEY=${S3_ACCESS_KEY} \
+              -e S3_SECRET_KEY=${S3_SECRET_KEY} \
+              -e S3_BUCKET=${S3_BUCKET} \
               registry.8ls.ru:996/captain/img-captain-voxlibris-web:latest
 
             echo "=== Проверка статуса контейнера ==="
