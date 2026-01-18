@@ -142,9 +142,15 @@ jobs:
 
             echo "=== Проверка статуса контейнера ==="
             sleep 5
-            docker ps | grep voxlibris-web
+            if docker ps | grep voxlibris-web; then
+              echo "Контейнер запущен успешно"
+            else
+              echo "Контейнер не найден в списке запущенных"
+              echo "=== Все контейнеры ==="
+              docker ps -a
+            fi
 
             echo "=== Логи контейнера ==="
-            docker logs voxlibris-web --tail 20 || true
+            docker logs voxlibris-web --tail 50 || true
 
             echo "=== Деплой завершен успешно ==="
