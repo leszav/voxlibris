@@ -204,7 +204,7 @@ class EmailService {
     try {
       const template = await this.loadTemplate('club-invitation');
       
-      const inviteUrl = `${process.env.CLIENT_URL || 'http://localhost:3000'}/invite/${params.inviteToken}`;
+      const inviteUrl = process.env.CLIENT_URL ? `${process.env.CLIENT_URL}/invite/${params.inviteToken}` : `/invite/${params.inviteToken}`;
       const expiresIn = Math.ceil((params.expiresAt.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
 
       const html = this.replaceVariables(template, {
@@ -237,7 +237,7 @@ class EmailService {
     try {
       const template = await this.loadTemplate('registration-confirmation');
       
-      const confirmUrl = `${process.env.CLIENT_URL || 'http://localhost:3000'}/confirm-email/${params.confirmationToken}`;
+      const confirmUrl = process.env.CLIENT_URL ? `${process.env.CLIENT_URL}/confirm-email/${params.confirmationToken}` : `/confirm-email/${params.confirmationToken}`;
 
       const html = this.replaceVariables(template, {
         username: params.username,
@@ -266,7 +266,7 @@ class EmailService {
     try {
       const template = await this.loadTemplate('invitation-accepted');
       
-      const clubUrl = `${process.env.CLIENT_URL || 'http://localhost:3000'}/clubs`;
+      const clubUrl = process.env.CLIENT_URL ? `${process.env.CLIENT_URL}/clubs` : `/clubs`;
 
       const html = this.replaceVariables(template, {
         clubName: params.clubName,

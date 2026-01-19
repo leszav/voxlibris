@@ -28,6 +28,9 @@ import { setupWebSocketHandlers } from "./websocket.js";
 import { initializeReaderWebSocket } from "./websocket-reader.js";
 
 export const app = express();
+
+// Trust proxy для корректной работы rate limiting за reverse proxy
+app.set('trust proxy', true);
 const httpServer = createServer(app);
 const io = new SocketIOServer(httpServer, {
 	cors: {
@@ -139,7 +142,7 @@ const authLimiter = rateLimit({
 // General rate limiting
 const generalLimiter = rateLimit({
 	windowMs: 15 * 60 * 1000,
-	max: 100, // 100 запросов в 15 минут
+	max: 500, // 500 запросов в 15 минут
 	message: {
 		error: "Too many requests. Please slow down.",
 		retryAfter: "15 minutes",
@@ -151,7 +154,7 @@ const generalLimiter = rateLimit({
 // Slow down for repeated requests
 const speedLimiter = slowDown({
 	windowMs: 15 * 60 * 1000,
-	delayAfter: 50,
+	delayAfter: 1000,
 	delayMs: (used, req) => {
 		const delayAfter = req.slowDown.limit;
 		return (used - delayAfter) * 500;
