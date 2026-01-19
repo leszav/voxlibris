@@ -113,14 +113,18 @@ function validateStoragePath(path: string): { valid: boolean; normalizedPath?: s
 
   // Разрешить только определенные паттерны
   const allowedPatterns = [
-    /^covers\/[a-f0-9-]+\.(jpg|jpeg|png|webp)$/,
-    /^covers\/(club|personal)\/[a-f0-9-]+\/[a-f0-9-]+-cover\.(jpg|jpeg|png|webp)$/,
-    /^books\/[a-f0-9-]+\/content\.(epub|fb2|html)$/,
-    /^avatars\/[a-f0-9-]+\.(jpg|jpeg|png|webp)$/
+    /^covers\/[a-zA-Z0-9-]+\.(jpg|jpeg|png|webp)$/,
+    /^covers\/(club|personal)\/[a-fA-F0-9-]+\/[a-fA-F0-9-]+-cover\.(jpg|jpeg|png|webp)$/,
+    /^books\/[a-fA-F0-9-]+\/content\.(epub|fb2|html)$/,
+    /^avatars\/[a-zA-Z0-9-]+\.(jpg|jpeg|png|webp)$/
   ];
 
-  const isAllowed = allowedPatterns.some(pattern => pattern.test(normalizedPath));
-  console.log(`[validateStoragePath] Pattern match result: ${isAllowed}`);
+  const isAllowed = allowedPatterns.some(pattern => {
+    const matches = pattern.test(normalizedPath);
+    console.log(`[validateStoragePath] Testing pattern ${pattern} against "${normalizedPath}": ${matches}`);
+    return matches;
+  });
+  console.log(`[validateStoragePath] Final result: ${isAllowed}`);
   return { valid: isAllowed, normalizedPath: isAllowed ? normalizedPath : undefined };
 }
 
