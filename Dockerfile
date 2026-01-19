@@ -33,6 +33,7 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./
 COPY --from=builder /app/migrations ./migrations
 COPY --from=builder /app/shared ./shared
+COPY --from=builder /app/email-templates ./email-templates
 
 # Create uploads directory
 RUN mkdir -p uploads && chown -R nodejs:nodejs uploads
