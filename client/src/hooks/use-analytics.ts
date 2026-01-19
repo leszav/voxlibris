@@ -61,28 +61,38 @@ export function useAnalytics() {
   // Мутация для отправки одного события
   const { mutate: trackEvent } = useMutation({
     mutationFn: async (data: AnalyticsEventData) => {
-      // Отправляем в собственную систему
-      const response = await apiRequest('/api/v1/analytics/event', {
-        method: 'POST',
-        body: JSON.stringify(data),
-      });
+      console.log('[Analytics] Отправка события:', data);
+      
+      try {
+        // Отправляем в собственную систему
+        const response = await apiRequest('/api/v1/analytics/event', {
+          method: 'POST',
+          body: JSON.stringify(data),
+        });
+        
+        console.log('[Analytics] Событие успешно отправлено:', response);
 
-      // Отправляем в Yandex.Metrika
-      sendToMetrika(data.eventType, {
-        book_id: data.bookId,
-        club_id: data.clubId,
-        chapter: data.chapterNumber,
-        duration: data.duration,
-        progress: data.progress,
-        ...data.metadata,
-      });
+        // Отправляем в Yandex.Metrika
+        sendToMetrika(data.eventType, {
+          book_id: data.bookId,
+          club_id: data.clubId,
+          chapter: data.chapterNumber,
+          duration: data.duration,
+          progress: data.progress,
+          ...data.metadata,
+        });
 
-      return response;
+        return response;
+      } catch (error) {
+        console.error('[Analytics] Ошибка при отправке события:', error);
+        throw error;
+      }
     },
     onError: (error) => {
-      if (import.meta.env.DEV) {
-        console.error('[Analytics] Failed to track event:', error);
-      }
+      console.error('[Analytics] Failed to track event:', error);
+    },
+    onSuccess: (data, variables) => {
+      console.log('[Analytics] Событие обработано успешно:', variables.eventType);
     },
   });
 
