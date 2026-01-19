@@ -194,6 +194,39 @@ start_dev() {
     pnpm run dev:both
 }
 
+# Запуск приложения в продакшен режиме
+start_prod() {
+    print_log "$BLUE" "INFO" "🚀 Запуск приложения в продакшен режиме..."
+    
+    # Проверка соединений
+    print_log "$CYAN" "INFO" "🔍 Проверка соединений..."
+    if npx tsx script/check-connections.ts; then
+        print_log "$GREEN" "INFO" "✅ Проверка соединений пройдена"
+    else
+        print_log "$RED" "ERROR" "❌ Ошибка проверки соединений"
+        return 1
+    fi
+    
+    # Сборка проекта
+    print_log "$BLUE" "INFO" "🔨 Сборка проекта для продакшена..."
+    if pnpm run build; then
+        print_log "$GREEN" "INFO" "✅ Проект собран успешно"
+    else
+        print_log "$RED" "ERROR" "❌ Ошибка сборки проекта"
+        return 1
+    fi
+    
+    # Запуск сервисов
+    start_docker_services || return 1
+    
+    # Инициализация хранилища
+    init_storage || return 1
+    
+    # Запуск продакшен сервера
+    print_log "$GREEN" "INFO" "🌟 Запуск продакшен сервера..."
+    pnpm start
+}
+
 # Сборка проекта
 build_project() {
     print_log "$BLUE" "INFO" "🔨 Сборка проекта..."
@@ -617,6 +650,7 @@ compliance_setup() {
         echo -e "${YELLOW}🚀 Новые shortcuts:${NC}"
         echo -e "   • ${GREEN}xcheck${NC} → ./xlibris-manager.sh compliance-check"
         echo -e "   • ${GREEN}xdev${NC} → ./xlibris-manager.sh start"
+        echo -e "   • ${GREEN}xprod${NC} → ./xlibris-manager.sh prod"
         echo -e "   • ${GREEN}xstatus${NC} → ./xlibris-manager.sh status"
         
         echo ""
@@ -638,7 +672,8 @@ show_help() {
     echo -e "  $0 [команда]"
     echo ""
     echo -e "${YELLOW}Основные команды:${NC}"
-    echo -e "  ${GREEN}start${NC}        Запуск всех сервисов и приложения"
+    echo -e "  ${GREEN}start${NC}        Запуск всех сервисов и приложения (dev режим)"
+    echo -e "  ${GREEN}prod${NC}         Запуск в продакшен режиме (с проверками и сборкой)"
     echo -e "  ${GREEN}stop${NC}         Остановка всех сервисов"
     echo -e "  ${GREEN}restart${NC}      Перезапуск всех сервисов"
     echo -e "  ${GREEN}status${NC}       Показать статус сервисов"
@@ -657,6 +692,7 @@ show_help() {
     echo ""
     echo -e "${YELLOW}Примеры:${NC}"
     echo -e "  $0 start                 # Полный запуск для разработки"
+    echo -e "  $0 prod                  # Запуск в продакшен режиме"
     echo -e "  $0 services              # Только Docker сервисы"
     echo -e "  $0 status                # Проверить статус"
     echo -e "  $0 compliance-check      # Быстрая проверка compliance"
@@ -674,6 +710,11 @@ main() {
             check_dependencies
             check_env_file
             start_dev
+            ;;
+        "prod")
+            check_dependencies
+            check_env_file
+            start_prod
             ;;
         "stop")
             stop_docker_services
