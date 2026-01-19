@@ -233,11 +233,14 @@ class EmailService {
     email: string;
     username: string;
     confirmationToken: string;
+    baseUrl?: string;
   }): Promise<boolean> {
     try {
       const template = await this.loadTemplate('registration-confirmation');
       
-      const confirmUrl = process.env.CLIENT_URL ? `${process.env.CLIENT_URL}/confirm-email/${params.confirmationToken}` : `/confirm-email/${params.confirmationToken}`;
+      // Используем переданный baseUrl или fallback к CLIENT_URL
+      const baseUrl = params.baseUrl || process.env.CLIENT_URL || 'http://localhost:3000';
+      const confirmUrl = `${baseUrl}/confirm-email/${params.confirmationToken}`;
 
       const html = this.replaceVariables(template, {
         username: params.username,

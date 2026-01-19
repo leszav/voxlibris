@@ -199,12 +199,13 @@ export class AuthService {
    * Регистрация нового пользователя
    */
   async register(
-    username: string, 
-    email: string, 
-    password: string, 
+    username: string,
+    email: string,
+    password: string,
     invitedBy?: string,
     invitedToClub?: string,
-    rememberMe: boolean = false
+    rememberMe: boolean = false,
+    baseUrl?: string
   ): Promise<AuthResult> {
     try {
       // Проверяем, существует ли пользователь с таким username
@@ -240,7 +241,7 @@ export class AuthService {
 
       // Отправляем email подтверждения
       try {
-        await this.sendConfirmationEmail(newUser, confirmationToken);
+        await this.sendConfirmationEmail(newUser, confirmationToken, baseUrl);
         console.log(`Confirmation email sent to ${email}`);
       } catch (emailError) {
         console.error('Failed to send confirmation email:', emailError);
@@ -361,12 +362,13 @@ export class AuthService {
   /**
    * Отправляет email подтверждения
    */
-  private async sendConfirmationEmail(user: User, confirmationToken: string): Promise<void> {
+  private async sendConfirmationEmail(user: User, confirmationToken: string, baseUrl?: string): Promise<void> {
     try {
       await emailService.sendRegistrationConfirmation({
         email: user.email,
         username: user.username,
         confirmationToken,
+        baseUrl,
       });
     } catch (error) {
       console.error('Failed to send confirmation email:', error);

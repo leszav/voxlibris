@@ -108,13 +108,17 @@ export function setupAuthRoutes(app: Express): void {
 
       const { invitedBy, invitedToClub } = inviteValidation;
 
+      // Извлекаем базовый URL из запроса
+      const baseUrl = `${req.protocol}://${req.get('host')}`;
+
       const authResult = await authService.register(
         username,
         email,
         password,
         invitedBy,
         invitedToClub,
-        rememberMe
+        rememberMe,
+        baseUrl
       );
 
       // Присоединение к клубу по приглашению
