@@ -270,10 +270,12 @@ export async function registerRoutes(
       // Отправляем уведомление владельцу клуба
       const inviter = await storage.getUser(invitation.invitedBy);
       if (inviter) {
+        const baseUrl = `${req.protocol}://${req.get('host')}`;
         await emailService.sendInvitationAccepted({
           email: inviter.username, // assuming username is email
           clubName: club.title,
           memberName: req.user.username,
+          baseUrl,
         });
       }
 

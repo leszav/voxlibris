@@ -200,11 +200,14 @@ class EmailService {
     inviterName: string;
     inviteToken: string;
     expiresAt: Date;
+    baseUrl?: string;
   }): Promise<boolean> {
     try {
       const template = await this.loadTemplate('club-invitation');
       
-      const inviteUrl = process.env.CLIENT_URL ? `${process.env.CLIENT_URL}/invite/${params.inviteToken}` : `/invite/${params.inviteToken}`;
+      // Используем переданный baseUrl или fallback к CLIENT_URL
+      const baseUrl = params.baseUrl || process.env.CLIENT_URL || 'http://localhost:3000';
+      const inviteUrl = `${baseUrl}/invite/${params.inviteToken}`;
       const expiresIn = Math.ceil((params.expiresAt.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
 
       const html = this.replaceVariables(template, {
@@ -265,11 +268,14 @@ class EmailService {
     email: string;
     clubName: string;
     memberName: string;
+    baseUrl?: string;
   }): Promise<boolean> {
     try {
       const template = await this.loadTemplate('invitation-accepted');
-      
-      const clubUrl = process.env.CLIENT_URL ? `${process.env.CLIENT_URL}/clubs` : `/clubs`;
+
+      // Используем переданный baseUrl или fallback к CLIENT_URL
+      const baseUrl = params.baseUrl || process.env.CLIENT_URL || 'http://localhost:3000';
+      const clubUrl = `${baseUrl}/clubs`;
 
       const html = this.replaceVariables(template, {
         clubName: params.clubName,

@@ -460,6 +460,7 @@ router.post('/:id/invite', jwtAuth, async (req, res) => {
     const createdInvitation = await storage.createClubInvitation(invitation);
 
     // Отправляем email
+    const baseUrl = `${req.protocol}://${req.get('host')}`;
     const emailSent = await emailService.sendClubInvitation({
       email,
       clubName: club.title,
@@ -467,6 +468,7 @@ router.post('/:id/invite', jwtAuth, async (req, res) => {
       inviterName: req.user.username,
       inviteToken,
       expiresAt,
+      baseUrl,
     });
 
     if (!emailSent) {
@@ -647,10 +649,12 @@ router.post('/invitations/:token/accept', jwtAuth, async (req, res) => {
     // Отправляем уведомление владельцу клуба
     const inviter = await storage.getUser(invitation.invitedBy);
     if (inviter) {
+      const baseUrl = `${req.protocol}://${req.get('host')}`;
       await emailService.sendInvitationAccepted({
         email: inviter.username, // assuming username is email
         clubName: club.title,
         memberName: req.user.username,
+        baseUrl,
       });
     }
 
@@ -941,6 +945,7 @@ router.post('/:clubId/invitations/:invitationId/resend', jwtAuth, async (req, re
     const createdInvitation = await storage.createClubInvitation(newInvitation);
 
     // Отправляем email
+    const baseUrl = `${req.protocol}://${req.get('host')}`;
     const emailSent = await emailService.sendClubInvitation({
       email: oldInvitation.email,
       clubName: club.title,
@@ -948,6 +953,7 @@ router.post('/:clubId/invitations/:invitationId/resend', jwtAuth, async (req, re
       inviterName: req.user.username,
       inviteToken,
       expiresAt,
+      baseUrl,
     });
 
     if (!emailSent) {
