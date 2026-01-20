@@ -3,7 +3,7 @@ name: CD - Production
 on:
   push:
     branches:
-      - 'prod_*'
+      - 'prod_v*'
   workflow_dispatch:
 
 env:
@@ -104,6 +104,20 @@ jobs:
           mkdir -p ~/.ssh
           ssh-keyscan -H captain.8ls.ru >> ~/.ssh/known_hosts
           chmod 600 ~/.ssh/known_hosts
+
+      - name: Fix /root ownership if needed
+        uses: appleboy/ssh-action@v0.1.8
+        with:
+          host: 94.232.43.28
+          username: root
+          key: ${{ secrets.CAPROVER_SSH_KEY }}
+          script: |
+            current_uid=$(stat -c '%u' /root)
+            if [ "$current_uid" != "0" ]; then
+              echo "WARNING: /root owned by $current_uid, fixing..."
+              chown -R root:root /root
+              chmod 700 /root
+            fi
 
       - name: SSH Deploy to CapRover
         uses: appleboy/ssh-action@v0.1.8
