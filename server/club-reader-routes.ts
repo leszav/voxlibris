@@ -226,10 +226,10 @@ router.get('/:clubId/books/:bookId/content', jwtAuth, async (req, res) => {
     }
 
     // Используем CryptoService и BookParserFactory как в оригинальной задумке
-    const { CryptoService } = await import('./crypto-service');
-    const { fileStorage } = await import('./file-storage');
-    const { BookParserFactory } = await import('./book-parser');
-    const { sanitizeBookContent } = await import('./content-sanitizer');
+    const { CryptoService } = await import('./crypto-service.js');
+    const { fileStorage } = await import('./file-storage.js');
+    const { BookParserFactory } = await import('./book-parser.js');
+    const { sanitizeBookContent } = await import('./content-sanitizer.js');
 
     // Получаем зашифрованный файл из MinIO
     const encryptedFile = await fileStorage.getFile(clubBook.storagePath);
