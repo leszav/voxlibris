@@ -351,7 +351,7 @@ export default function KPIDashboard() {
                   Для детальной аналитики посещаемости, источников трафика и поведенческих факторов
                 </p>
                 <a 
-                  href="https://metrika.yandex.ru/dashboard?id=106167747" 
+                  href="https://metrika.yandex.ru/list?id=106167747" 
                   target="_blank" 
                   rel="noopener noreferrer"
                   className="text-blue-600 hover:underline flex items-center"

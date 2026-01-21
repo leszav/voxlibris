@@ -76,7 +76,7 @@ export function YandexMetrika() {
         };
 
         const loadScript = () => {
-          const r = "https://mc.yandex.ru/metrika/tag.js";
+          const r = `https://mc.yandex.ru/metrika/tag.js?id=${YANDEX_METRIKA_ID}`;
           
           for (const script of document.scripts) {
             if (script.src === r) return;
@@ -139,13 +139,13 @@ export function YandexMetrika() {
     return null;
   }
 
-  return (
+    return (
     <noscript>
       <div>
         <img 
           src={`https://mc.yandex.ru/watch/${YANDEX_METRIKA_ID}`}
           style={{ position: 'absolute', left: '-9999px' }} 
-          alt="" 
+          alt=""
         />
       </div>
     </noscript>
