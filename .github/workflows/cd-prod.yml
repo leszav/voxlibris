@@ -5,9 +5,25 @@ on:
     branches:
       - 'prod_v*'
   workflow_dispatch:
+    inputs:
+      target_app:
+        description: 'Целевое приложение CapRover'
+        required: true
+        default: 'voxlibris-web'
+        type: choice
+        options:
+          - voxlibris-web
+          - voxlibris-test
+          - voxlibris-stage
+      docker_tag:
+        description: 'Docker tag'
+        required: false
+        default: 'latest'
+        type: string
 
 env:
-  DOCKER_IMAGE: registry.8ls.ru:996/captain/img-captain-voxlibris-web:latest
+  DOCKER_IMAGE: registry.8ls.ru:996/captain/img-captain-voxlibris-web:${{ inputs.docker_tag || 'latest' }}
+  TARGET_APP: ${{ inputs.target_app || 'voxlibris-web' }}
 
 jobs:
   lint:
@@ -126,37 +142,42 @@ jobs:
           username: root
           key: ${{ secrets.CAPROVER_SSH_KEY }}
           port: 22
-          envs: DATABASE_URL,REDIS_URL,S3_ENDPOINT,S3_ACCESS_KEY,S3_SECRET_KEY,S3_BUCKET
+          envs: DATABASE_URL,REDIS_URL,S3_ENDPOINT,S3_ACCESS_KEY,S3_SECRET_KEY,S3_BUCKET,TARGET_APP
           script: |
             set -e
+            APP_NAME="${TARGET_APP}"
+            DOCKER_TAG="${{ env.DOCKER_IMAGE }}"
+
+            echo "=== Деплой в приложение: ${APP_NAME} ==="
+            echo "=== Docker image: ${DOCKER_TAG} ==="
 
             echo "=== Вход в Docker Registry ==="
             echo "${{ secrets.CAPROVER_REGISTRY_PASSWORD }}" | docker login registry.8ls.ru:996 -u captain --password-stdin
 
             echo "=== Pull Docker image ==="
-            docker pull registry.8ls.ru:996/captain/img-captain-voxlibris-web:latest
+            docker pull "${DOCKER_TAG}"
 
             echo "=== Остановка старого контейнера ==="
-            docker stop voxlibris-web 2>/dev/null || true
-            docker rm voxlibris-web 2>/dev/null || true
+            docker stop "${APP_NAME}" 2>/dev/null || true
+            docker rm "${APP_NAME}" 2>/dev/null || true
 
             echo "=== Запуск нового контейнера ==="
             docker run -d \
-              --name voxlibris-web \
+              --name "${APP_NAME}" \
               --network captain-overlay-network \
               -e NODE_ENV=production \
               -e PORT=5000 \
-              -e DATABASE_URL=${DATABASE_URL} \
-              -e REDIS_URL=${REDIS_URL} \
-              -e S3_ENDPOINT=${S3_ENDPOINT} \
-              -e S3_ACCESS_KEY=${S3_ACCESS_KEY} \
-              -e S3_SECRET_KEY=${S3_SECRET_KEY} \
-              -e S3_BUCKET=${S3_BUCKET} \
-              registry.8ls.ru:996/captain/img-captain-voxlibris-web:latest
+              -e DATABASE_URL="${DATABASE_URL}" \
+              -e REDIS_URL="${REDIS_URL}" \
+              -e S3_ENDPOINT="${S3_ENDPOINT}" \
+              -e S3_ACCESS_KEY="${S3_ACCESS_KEY}" \
+              -e S3_SECRET_KEY="${S3_SECRET_KEY}" \
+              -e S3_BUCKET="${S3_BUCKET}" \
+              "${DOCKER_TAG}"
 
             echo "=== Проверка статуса контейнера ==="
             sleep 5
-            if docker ps | grep voxlibris-web; then
+            if docker ps | grep "${APP_NAME}"; then
               echo "Контейнер запущен успешно"
             else
               echo "Контейнер не найден в списке запущенных"
@@ -165,6 +186,6 @@ jobs:
             fi
 
             echo "=== Логи контейнера ==="
-            docker logs voxlibris-web --tail 50 || true
+            docker logs "${APP_NAME}" --tail 50 || true
 
             echo "=== Деплой завершен успешно ==="

@@ -2297,6 +2297,7 @@ export class PostgreSQLStorage implements IStorage {
         .set({
           displayName: profileData.displayName,
           avatar: profileData.avatar,
+          coverImage: profileData.coverImage,
           bio: profileData.bio,
           favoriteGenres: profileData.favoriteGenres,
           isReader: profileData.isReader ?? false,
@@ -2317,6 +2318,7 @@ export class PostgreSQLStorage implements IStorage {
           userId,
           displayName: profileData.displayName,
           avatar: profileData.avatar,
+          coverImage: profileData.coverImage,
           bio: profileData.bio,
           favoriteGenres: profileData.favoriteGenres,
           isReader: profileData.isReader ?? false,

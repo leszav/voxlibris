@@ -29,8 +29,9 @@ import { initializeReaderWebSocket } from "./websocket-reader.js";
 
 export const app = express();
 
-// Trust proxy для корректной работы rate limiting за reverse proxy
-app.set('trust proxy', true);
+// Trust proxy для корректной работы rate limiting за reverse proxy (CapRover/Traefik)
+// trust proxy: 1 — trust only first hop, предотвращает spoofing от пользователей
+app.set('trust proxy', 1);
 const httpServer = createServer(app);
 const io = new SocketIOServer(httpServer, {
 	cors: {
