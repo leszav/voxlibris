@@ -360,7 +360,7 @@ export default function KPIDashboard() {
                 </a>
               </div>
               <img 
-                src="https://upload.wikimedia.org/wikipedia/commons/9/91/Yandex.Metrica_logo.svg" 
+                src="/images/ymetrika_logo.png" 
                 alt="Yandex.Metrika" 
                 className="h-12"
               />
