@@ -1,6 +1,7 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useParams } from "wouter";
 import { useClubBookContent, useClubReadingProgress, useUpdateClubProgress, useClubBookmarks } from "../../hooks/use-club-reader";
+import { useAnalytics } from "../../hooks/use-analytics";
 import { ClubContentRenderer } from "./club/ClubContentRenderer";
 import { ClubReaderControls } from "./club/ClubReaderControls";
 import { ClubChapterList } from "./club/ClubNavigation";
@@ -94,6 +95,9 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
 
   const { mutate: updateProgress } = useUpdateClubProgress(clubId);
 
+  // Analytics tracking
+  const analytics = useAnalytics();
+
   // Адаптация данных
   const bookData = useMemo(() => {
     if (allContent?.chapters) {
@@ -127,6 +131,31 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
       isPersonalBook: false,
     };
   }, [allContent, content]);
+
+  // Analytics: Track book open when content loads
+  useEffect(() => {
+    if (allContent && bookId) {
+      analytics.trackBookOpen(bookId, { clubId });
+    }
+  }, [allContent, bookId, clubId, analytics]);
+
+  // Analytics: Track chapter start when chapter changes
+  useEffect(() => {
+    if (currentChapter != null && bookId) {
+      analytics.trackChapterStart(bookId, currentChapter);
+      analytics.startReadingSession(bookId, currentChapter);
+    }
+    return () => {
+      analytics.stopReadingSession();
+    };
+  }, [currentChapter, bookId, analytics]);
+
+  // Analytics: Track book completion when progress reaches 100%
+  useEffect(() => {
+    if (progress?.userProgress?.progress === 100 && bookId) {
+      analytics.trackBookComplete(bookId);
+    }
+  }, [progress?.userProgress?.progress, bookId, analytics]);
 
   // Получение текущей главы
   const currentChapterContent = useMemo(() => {

@@ -16,6 +16,7 @@ import { sanitizeBookContent } from "../content-sanitizer.js";
 import {
   generateShortLivedToken,
 } from "../encryption.js";
+import { analyticsEvents } from "../../shared/schema.js";
 
 const router = express.Router();
 
@@ -165,6 +166,20 @@ router.put("/:id/progress", async (req: Request, res: Response) => {
               completedAt: new Date(),
             });
             console.log(`[Reader API] Книга "${bookData[0].title}" добавлена в историю пользователя ${userId}`);
+
+            // Записываем событие book_complete в аналитику
+            try {
+              const [analyticsEvent] = await db.insert(analyticsEvents).values({
+                eventType: 'book_complete',
+                userId,
+                bookId,
+                progress: 100,
+                clubId: clubId || null,
+              }).returning();
+              console.log(`[Reader API] Analytics event recorded: ${analyticsEvent.id}`);
+            } catch (analyticsError) {
+              console.error('[Reader API] Error recording analytics event:', analyticsError);
+            }
           }
         }
       } catch (historyError) {
