@@ -151,7 +151,16 @@
   h1, h2, h3, h4, h5, h6 {
     @apply font-serif font-medium;
   }
+  .container {
+    width: 100%;
+    margin-left: auto;
+    margin-right: auto;
+    padding-left: 2rem;
+    padding-right: 2rem;
+    max-width: 1400px;
+  }
 }
+
 
 /* Custom Scrollbar */
 ::-webkit-scrollbar {
