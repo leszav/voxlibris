@@ -82,7 +82,7 @@ const parseSchedule = (schedule: string | null): ScheduleItem[] => {
 };
 
 // eslint-disable-next-line sonarjs/cognitive-complexity
-export default function ClubDetails() {
+function ClubDetails() {
   const [, params] = useRoute("/clubs/:id");
   const clubId = params?.id || "";
   const [, setLocation] = useLocation();
@@ -753,3 +753,12 @@ export default function ClubDetails() {
     </MainLayout>
   );
 }
+
+function ClubDetailsWithChat() {
+  const [, params] = useRoute("/clubs/:id");
+  const clubId = params?.id || "";
+
+  return <ClubDetails />;
+}
+
+export default ClubDetails;

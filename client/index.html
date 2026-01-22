@@ -5,32 +5,31 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
     
     <!-- Primary Meta Tags -->
-    <title>VoxLibris - Социальные книжные клубы с живыми чтецами</title>
-    <meta name="title" content="VoxLibris - Социальные книжные клубы с живыми чтецами" />
-    <meta name="description" content="Вступайте в живые книжные клубы, слушайте талантливых чтецов и обсуждайте книги в реальном времени. Платформа для любителей аудиокниг и живого чтения." />
-    <meta name="keywords" content="аудиокниги, книжные клубы, живое чтение, чтецы, социальная платформа для чтения, обсуждение книг" />
-    <meta name="author" content="VoxLibris" />
+    <title>{{TITLE}}</title>
+    <meta name="title" content="{{TITLE}}" />
+    <meta name="description" content="{{DESCRIPTION}}" />
+    <meta name="keywords" content="{{KEYWORDS}}" />
+    <meta name="author" content="{{SITE_NAME}}" />
     <meta name="robots" content="index, follow" />
     
     <!-- Open Graph / Facebook -->
     <meta property="og:type" content="website" />
-    <meta property="og:url" content="https://voxlibris.com/" />
-    <meta property="og:title" content="VoxLibris - Социальные книжные клубы с живыми чтецами" />
-    <meta property="og:description" content="Вступайте в живые книжные клубы, слушайте талантливых чтецов и обсуждайте книги в реальном времени." />
-    <meta property="og:image" content="https://voxlibris.com/og-image.png" />
-    <meta property="og:site_name" content="VoxLibris" />
+    <meta property="og:url" content="{{OG_URL}}" />
+    <meta property="og:title" content="{{TITLE}}" />
+    <meta property="og:description" content="{{DESCRIPTION}}" />
+    <meta property="og:image" content="{{OG_IMAGE}}" />
+    <meta property="og:site_name" content="{{SITE_NAME}}" />
     <meta property="og:locale" content="ru_RU" />
     
     <!-- Twitter -->
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:url" content="https://voxlibris.com/" />
-    <meta name="twitter:title" content="VoxLibris - Социальные книжные клубы с живыми чтецами" />
-    <meta name="twitter:description" content="Вступайте в живые книжные клубы, слушайте талантливых чтецов и обсуждайте книги в реальном времени." />
-    <meta name="twitter:image" content="https://voxlibris.com/og-image.png" />
+    <meta name="twitter:url" content="{{OG_URL}}" />
+    <meta name="twitter:title" content="{{TITLE}}" />
+    <meta name="twitter:description" content="{{DESCRIPTION}}" />
+    <meta name="twitter:image" content="{{OG_IMAGE}}" />
     
-    <!-- Verification Meta Tags -->
-    <meta name="yandex-verification" content="your-yandex-verification-code" />
-    <meta name="google-site-verification" content="your-google-verification-code" />
+    <!-- Yandex.Metrika -->
+    {{YANDEX_METRIKA_SCRIPT}}
 
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="alternate icon" type="image/png" href="/favicon.png" />
@@ -43,17 +42,16 @@
     {
       "@context": "https://schema.org",
       "@type": "WebSite",
-      "name": "VoxLibris",
+      "name": "{{SITE_NAME}}",
       "description": "Социальные книжные клубы с живыми чтецами",
-      "url": "https://voxlibris.com",
+      "url": "https://{{DOMAIN}}",
       "potentialAction": {
         "@type": "SearchAction",
-        "target": "https://voxlibris.com/catalog?search={search_term_string}",
+        "target": "{{SEARCH_URL}}",
         "query-input": "required name=search_term_string"
       },
       "sameAs": [
-        "https://vk.com/voxlibris",
-        "https://t.me/voxlibris"
+        "{{VK_LINK}}"
       ]
     }
     </script>
@@ -63,14 +61,14 @@
     {
       "@context": "https://schema.org",
       "@type": "Organization",
-      "name": "VoxLibris",
+      "name": "{{SITE_NAME}}",
       "description": "Платформа социальных книжных клубов с живыми чтецами",
-      "url": "https://voxlibris.com",
-      "logo": "https://voxlibris.com/logo.png",
+      "url": "https://{{DOMAIN}}",
+      "logo": "https://{{DOMAIN}}/logo.png",
       "contactPoint": {
         "@type": "ContactPoint",
         "contactType": "Customer Service",
-        "email": "support@voxlibris.com"
+        "email": "support@{{DOMAIN}}"
       }
     }
     </script>
