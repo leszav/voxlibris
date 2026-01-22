@@ -132,28 +132,34 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
     };
   }, [allContent, content]);
 
-  // Analytics: Track book open when content loads
+  // Analytics: Track book open when content loads (only once)
+  const hasTrackedBookOpen = useRef(false);
   useEffect(() => {
-    if (allContent && bookId) {
+    if (allContent && bookId && !hasTrackedBookOpen.current) {
       analytics.trackBookOpen(bookId, { clubId });
+      hasTrackedBookOpen.current = true;
     }
   }, [allContent, bookId, clubId, analytics]);
 
-  // Analytics: Track chapter start when chapter changes
+  // Analytics: Track chapter start when chapter changes (prevent duplicates)
+  const lastTrackedChapter = useRef<number | null>(null);
   useEffect(() => {
-    if (currentChapter != null && bookId) {
+    if (currentChapter != null && bookId && currentChapter !== lastTrackedChapter.current) {
       analytics.trackChapterStart(bookId, currentChapter);
       analytics.startReadingSession(bookId, currentChapter);
+      lastTrackedChapter.current = currentChapter;
     }
     return () => {
       analytics.stopReadingSession();
     };
   }, [currentChapter, bookId, analytics]);
 
-  // Analytics: Track book completion when progress reaches 100%
+  // Analytics: Track book completion when progress reaches 100% (only once)
+  const hasTrackedCompletion = useRef(false);
   useEffect(() => {
-    if (progress?.userProgress?.progress === 100 && bookId) {
+    if (progress?.userProgress?.progress === 100 && bookId && !hasTrackedCompletion.current) {
       analytics.trackBookComplete(bookId);
+      hasTrackedCompletion.current = true;
     }
   }, [progress?.userProgress?.progress, bookId, analytics]);
 

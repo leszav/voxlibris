@@ -61,7 +61,9 @@ export function useAnalytics() {
   // Мутация для отправки одного события
   const { mutate: trackEvent } = useMutation({
     mutationFn: async (data: AnalyticsEventData) => {
-      console.log('[Analytics] Отправка события:', data);
+      if (import.meta.env.DEV) {
+        console.log('[Analytics] Отправка события:', data);
+      }
       
       try {
         // Отправляем в собственную систему
@@ -70,7 +72,9 @@ export function useAnalytics() {
           body: JSON.stringify(data),
         });
         
-        console.log('[Analytics] Событие успешно отправлено:', response);
+        if (import.meta.env.DEV) {
+          console.log('[Analytics] Событие успешно отправлено:', response);
+        }
 
         // Отправляем в Yandex.Metrika
         sendToMetrika(data.eventType, {
@@ -84,15 +88,22 @@ export function useAnalytics() {
 
         return response;
       } catch (error) {
-        console.error('[Analytics] Ошибка при отправке события:', error);
+        if (import.meta.env.DEV) {
+          console.error('[Analytics] Ошибка при отправке события:', error);
+        }
         throw error;
       }
     },
+    retry: false,
     onError: (error) => {
-      console.error('[Analytics] Failed to track event:', error);
+      if (import.meta.env.DEV) {
+        console.error('[Analytics] Failed to track event:', error);
+      }
     },
     onSuccess: (data, variables) => {
-      console.log('[Analytics] Событие обработано успешно:', variables.eventType);
+      if (import.meta.env.DEV) {
+        console.log('[Analytics] Событие обработано успешно:', variables.eventType);
+      }
     },
   });
 
@@ -255,24 +266,8 @@ export function useAnalytics() {
     const handlePopState = () => trackPageView();
     globalThis.addEventListener('popstate', handlePopState as EventListener);
 
-    // Перехватываем pushState и replaceState для React Router
-    const originalPushState = globalThis.history.pushState;
-    const originalReplaceState = globalThis.history.replaceState;
-
-    globalThis.history.pushState = function(...args: any[]) {
-      (originalPushState as any).apply(globalThis.history, args);
-      trackPageView();
-    };
-
-    globalThis.history.replaceState = function(...args: any[]) {
-      (originalReplaceState as any).apply(globalThis.history, args);
-      trackPageView();
-    };
-
     return () => {
       globalThis.removeEventListener('popstate', handlePopState as EventListener);
-      globalThis.history.pushState = originalPushState;
-      globalThis.history.replaceState = originalReplaceState;
     };
   }, []);
 
