@@ -1,11 +1,13 @@
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Route, Switch } from "wouter";
+import { useEffect, useState } from "react";
 import { YandexMetrika } from "@/components/analytics/YandexMetrika";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { ClubReader } from "@/components/reader/ClubReader";
 import { ReaderWorkspace } from "@/components/reader/ReaderWorkspace";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { EmailVerificationModal } from "@/components/ui/email-verification-modal";
 import { AuthProvider } from "@/hooks/use-auth";
 import AdminAnalytics from "@/pages/admin/analytics";
 import AdminBooks from "@/pages/admin/books";
@@ -86,6 +88,20 @@ function Router() {
 }
 
 function App() {
+  const [showEmailVerificationModal, setShowEmailVerificationModal] = useState(false);
+
+  useEffect(() => {
+    const handleEmailVerificationRequired = () => {
+      setShowEmailVerificationModal(true);
+    };
+
+    globalThis.addEventListener('email-verification-required', handleEmailVerificationRequired);
+    
+    return () => {
+      globalThis.removeEventListener('email-verification-required', handleEmailVerificationRequired);
+    };
+  }, []);
+
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
@@ -94,6 +110,10 @@ function App() {
             <YandexMetrika />
             <Toaster />
             <Router />
+            <EmailVerificationModal 
+              isOpen={showEmailVerificationModal}
+              onClose={() => setShowEmailVerificationModal(false)}
+            />
           </TooltipProvider>
         </ErrorBoundary>
       </AuthProvider>

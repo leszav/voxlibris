@@ -184,6 +184,13 @@ export async function apiRequest<T = unknown>(
           throw new Error(statusMessage);
         }
         
+        // Ошибка подтверждения email
+        if (errorData.code === 'EMAIL_NOT_CONFIRMED') {
+          // Генерируем событие для показа модального окна
+          globalThis.dispatchEvent(new CustomEvent('email-verification-required'));
+          throw new Error('Необходимо подтвердить email для доступа к этой функции.');
+        }
+        
         // Ошибка доступа к приватному клубу
         if (errorData.code === 'PRIVATE_CLUB_ACCESS_DENIED') {
           throw new Error(errorData.message || 'Это закрытый клуб. Для доступа необходимо получить приглашение.');

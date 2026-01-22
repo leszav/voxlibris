@@ -27,11 +27,14 @@ export function injectMetrikaCode(html: string): string {
     })(window, document, 'script', 'https://mc.yandex.ru/metrika/tag.js', 'ym');
 
     ym(${YANDEX_METRIKA_ID}, 'init', {
-        clickmap: true,
-        trackLinks: true,
-        accurateTrackBounce: true,
+        ssr: true,
         webvisor: true,
-        ecommerce: "dataLayer"
+        clickmap: true,
+        ecommerce: "dataLayer",
+        referrer: document.referrer,
+        url: location.href,
+        accurateTrackBounce: true,
+        trackLinks: true
     });
 </script>
 <noscript><div><img src="https://mc.yandex.ru/watch/${YANDEX_METRIKA_ID}" style="position:absolute; left:-9999px;" alt="" /></div></noscript>

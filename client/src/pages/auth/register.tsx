@@ -6,6 +6,8 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { useAuth } from '@/hooks/use-auth';
 import { useToast } from '@/hooks/use-toast';
+import { RegistrationSuccessModal } from '@/components/ui/registration-success-modal';
+import { RegistrationErrorModal } from '@/components/ui/registration-error-modal';
 import { Mic, Eye, EyeOff, Check, X } from 'lucide-react';
 
 export default function Register() {
@@ -17,6 +19,9 @@ export default function Register() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [showErrorModal, setShowErrorModal] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
   const [, setLocation] = useLocation();
   const { register } = useAuth();
   const { toast } = useToast();
@@ -45,22 +50,43 @@ export default function Register() {
     setIsLoading(true);
     try {
       await register(username, email, password, rememberMe, inviteToken);
-      toast({
-        title: "Добро пожаловать!",
-        description: rememberMe 
-          ? "Аккаунт успешно создан. Сессия активна 30 дней." 
-          : "Аккаунт успешно создан. Добро пожаловать в VoxLibris!",
-      });
-      setLocation('/');
+      setShowSuccessModal(true);
     } catch (error) {
-      toast({
-        title: "Ошибка регистрации",
-        description: error instanceof Error ? error.message : "Не удалось создать аккаунт",
-        variant: "destructive",
-      });
+      let errorMsg = "Не удалось создать аккаунт";
+      
+      if (error instanceof Error) {
+        try {
+          const errorData = JSON.parse(error.message);
+          if (errorData.errors && Array.isArray(errorData.errors)) {
+            const passwordError = errorData.errors.find((err: any) => err.path && err.path.includes('password'));
+            if (passwordError) {
+              errorMsg = "Ошибка валидации данных. Пароль должен содержать только латинские буквы, цифры и спецсимволы.";
+            } else {
+              errorMsg = errorData.message || "Ошибка валидации данных";
+            }
+          } else {
+            errorMsg = errorData.message || error.message;
+          }
+        } catch {
+          errorMsg = error.message;
+        }
+      }
+      
+      setErrorMessage(errorMsg);
+      setShowErrorModal(true);
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleCloseSuccessModal = () => {
+    setShowSuccessModal(false);
+    setLocation('/');
+  };
+
+  const handleCloseErrorModal = () => {
+    setShowErrorModal(false);
+    setErrorMessage('');
   };
 
   return (
@@ -237,6 +263,18 @@ export default function Register() {
           </CardContent>
         </Card>
       </div>
+      
+      <RegistrationSuccessModal 
+        isOpen={showSuccessModal}
+        onClose={handleCloseSuccessModal}
+        email={email}
+      />
+      
+      <RegistrationErrorModal 
+        isOpen={showErrorModal}
+        onClose={handleCloseErrorModal}
+        error={errorMessage}
+      />
     </div>
   );
 }

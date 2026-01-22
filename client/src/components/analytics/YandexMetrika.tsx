@@ -5,11 +5,14 @@ import { useEffect } from 'react';
 const YANDEX_METRIKA_ID = 106167747;
 
 interface YandexMetrikaInitParams {
-  clickmap: boolean;
-  trackLinks: boolean;
-  accurateTrackBounce: boolean;
+  ssr: boolean;
   webvisor: boolean;
+  clickmap: boolean;
   ecommerce: string;
+  referrer: string;
+  url: string;
+  accurateTrackBounce: boolean;
+  trackLinks: boolean;
 }
 
 interface YandexMetrika {
@@ -63,50 +66,49 @@ export function YandexMetrika() {
      */
     const initializeMetrika = () => {
       try {
-        const setupQueue = () => {
-          const m = globalThis as WindowWithYandexMetrika;
-          if (!m.ym) {
-            m.ym = function(this: YandexMetrika) {
-              if (!this.a) this.a = [];
-              this.a.push(arguments as unknown as IArguments);
-            } as unknown as YandexMetrika;
-            m.ym.a = [];
-            m.ym.l = Date.now();
-          }
-        };
+        // Setup queue function
+        const m = globalThis as WindowWithYandexMetrika;
+        if (!m.ym) {
+          m.ym = function() {
+            const args = arguments as unknown as IArguments;
+            (m.ym as YandexMetrika).a ??= [];
+            (m.ym as YandexMetrika).a!.push(args);
+          } as unknown as YandexMetrika;
+          m.ym.a = [];
+          m.ym.l = Date.now();
+        }
 
-        const loadScript = () => {
-          const r = `https://mc.yandex.ru/metrika/tag.js?id=${YANDEX_METRIKA_ID}`;
-          
-          for (const script of document.scripts) {
-            if (script.src === r) return;
-          }
-          
-          const k = document.createElement("script");
-          const a = document.getElementsByTagName("script")[0];
-          k.async = true;
-          k.src = r;
-          
-          if (import.meta.env.DEV) {
-            k.onerror = () => console.error('[YandexMetrika] Failed to load script');
-            k.onload = () => console.log('[YandexMetrika] Script loaded successfully');
-          }
-          
-          a?.parentNode?.insertBefore(k, a);
-        };
+        // Load script function
+        const scriptUrl = `https://mc.yandex.ru/metrika/tag.js?id=${YANDEX_METRIKA_ID}`;
         
-        setupQueue();
-        loadScript();
+        // Check if script already exists
+        const existingScript = Array.from(document.scripts).find(script => script.src === scriptUrl);
+        if (existingScript) return;
+        
+        const script = document.createElement("script");
+        const firstScript = document.getElementsByTagName("script")[0];
+        script.async = true;
+        script.src = scriptUrl;
+        
+        if (import.meta.env.DEV) {
+          script.onerror = () => console.error('[YandexMetrika] Failed to load script');
+          script.onload = () => console.log('[YandexMetrika] Script loaded successfully');
+        }
+        
+        firstScript?.parentNode?.insertBefore(script, firstScript);
 
-        // Инициализируем счетчик
+        // Инициализируем счетчик согласно официальной инструкции
         const ym = (globalThis as WindowWithYandexMetrika).ym;
         if (ym) {
           ym(YANDEX_METRIKA_ID, "init", {
-            clickmap: true,
-            trackLinks: true,
-            accurateTrackBounce: true,
+            ssr: true,
             webvisor: true,
-            ecommerce: "dataLayer"
+            clickmap: true,
+            ecommerce: "dataLayer",
+            referrer: document.referrer,
+            url: location.href,
+            accurateTrackBounce: true,
+            trackLinks: true
           });
         }
 
