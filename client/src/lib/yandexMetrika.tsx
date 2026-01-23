@@ -4,8 +4,56 @@ import { useLocation } from "wouter";
 // Объявляем глобальную функцию счётчика, чтобы TypeScript не ругался
 declare global {
   interface Window {
-    ym?: (...args: any[]) => void;
+    ym?: ((...args: any[]) => void) & {
+      a?: any[];
+      l?: number;
+    };
   }
+}
+
+/**
+ * Глобальная инициализация Яндекс.Метрики без inline-скриптов.
+ * Загружает tag.js и вызывает ym('init', ...). Вызывается лениво и только один раз.
+ */
+function ensureYandexMetrikaInitialized() {
+  const g = globalThis as any;
+  const win = g.window as Window | undefined;
+  const doc = g.document as Document | undefined;
+
+  if (!win || !doc) {
+    return;
+  }
+
+  // Защита от повторной инициализации
+  if (g.__ymInitialized) {
+    return;
+  }
+  g.__ymInitialized = true;
+
+  // Очередь вызовов до загрузки tag.js (аналог официального сниппета)
+  const ym: Window["ym"] = (...args: any[]) => {
+    if (!ym.a) {
+      ym.a = [];
+    }
+    ym.a.push(args);
+  };
+  ym.l = Date.now();
+
+  (win as any).ym = ym;
+
+  const script = doc.createElement("script");
+  script.async = true;
+  script.src = "https://mc.yandex.ru/metrika/tag.js";
+  doc.head?.appendChild(script);
+
+  // Инициализация счётчика с настройками для SPA
+  (win as any).ym(106167747, "init", {
+    defer: true,
+    clickmap: true,
+    trackLinks: true,
+    accurateTrackBounce: true,
+    webvisor: true,
+  });
 }
 
 /**
@@ -17,8 +65,11 @@ export function YandexMetrikaTracker() {
   const prevPathRef = useRef<string | null>(null);
 
   useEffect(() => {
-    const win = (globalThis as any).window as (Window & { ym?: (...args: any[]) => void }) | undefined;
-    if (!win) {
+    ensureYandexMetrikaInitialized();
+
+    const g = globalThis as any;
+    const win = g.window as (Window & { ym?: (...args: any[]) => void }) | undefined;
+    if (!win || !win.ym) {
       return;
     }
 
@@ -26,11 +77,11 @@ export function YandexMetrikaTracker() {
       win.location.pathname + win.location.search + win.location.hash;
     const referrer = prevPathRef.current
       ? prevPathRef.current
-      : globalThis.document?.referrer || undefined;
+      : g.document?.referrer || undefined;
 
-    win.ym?.(106167747, "hit", currentUrl, {
+    win.ym(106167747, "hit", currentUrl, {
       referer: referrer,
-      title: globalThis.document?.title,
+      title: g.document?.title,
     });
 
     prevPathRef.current = currentUrl;

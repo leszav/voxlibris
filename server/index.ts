@@ -90,7 +90,7 @@ app.use(
 				styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
 				fontSrc: ["'self'", "https://fonts.gstatic.com"],
 				imgSrc: ["'self'", "data:", "https:"],
-				scriptSrc: ["'self'"],
+				scriptSrc: ["'self'", "https://mc.yandex.ru"],
 				connectSrc: ["'self'", "wss:", "https:"],
 				frameSrc: ["'none'"],
 				objectSrc: ["'none'"],
