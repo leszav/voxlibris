@@ -33,6 +33,7 @@ import Pricing from "@/pages/pricing";
 import ReaderStudio from "@/pages/reader-studio";
 import Readers from "@/pages/readers";
 import { queryClient } from "./lib/queryClient";
+import { YandexMetrikaTracker } from "./lib/yandexMetrika";
 
 function Router() {
   return (
@@ -107,6 +108,8 @@ function App() {
         <ErrorBoundary>
           <TooltipProvider>
             <Toaster />
+            {/* Отслеживание просмотров страниц в Яндекс.Метрике для SPA */}
+            <YandexMetrikaTracker />
             <Router />
             <EmailVerificationModal 
               isOpen={showEmailVerificationModal}
