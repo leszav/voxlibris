@@ -3,7 +3,6 @@ import { useMutation } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
 import { useAuth } from './use-auth';
 
-const YANDEX_METRIKA_ID = 106167747;
 
 export type AnalyticsEventType = 
   | 'book_open'
@@ -35,28 +34,12 @@ interface ReadingSessionTracker {
 
 /**
  * Хук для отправки событий аналитики
- * Автоматически отправляет события в собственную систему и Yandex.Metrika
+ * Автоматически отправляет события в собственную систему аналитики
  */
 export function useAnalytics() {
-  const { user } = useAuth();
   const sessionTracker = useRef<ReadingSessionTracker | null>(null);
   const sessionInterval = useRef<NodeJS.Timeout | null>(null);
 
-  // Отправка события в Yandex.Metrika
-  const sendToMetrika = useCallback((eventType: AnalyticsEventType, params?: Record<string, any>) => {
-    if (typeof globalThis !== 'undefined' && (globalThis as any).ym) {
-      try {
-        (globalThis as any).ym(YANDEX_METRIKA_ID, 'reachGoal', eventType, {
-          ...params,
-          user_id: user?.id,
-        });
-      } catch (error) {
-        if (import.meta.env.DEV) {
-          console.error('[Analytics] Yandex.Metrika error:', error);
-        }
-      }
-    }
-  }, [user]);
 
   // Мутация для отправки одного события
   const { mutate: trackEvent } = useMutation({
@@ -76,15 +59,6 @@ export function useAnalytics() {
           console.log('[Analytics] Событие успешно отправлено:', response);
         }
 
-        // Отправляем в Yandex.Metrika
-        sendToMetrika(data.eventType, {
-          book_id: data.bookId,
-          club_id: data.clubId,
-          chapter: data.chapterNumber,
-          duration: data.duration,
-          progress: data.progress,
-          ...data.metadata,
-        });
 
         return response;
       } catch (error) {
@@ -242,34 +216,6 @@ export function useAnalytics() {
     };
   }, []);
 
-  // Автоматический трекинг просмотров страниц для SPA
-  useEffect(() => {
-    const trackPageView = () => {
-      if (typeof globalThis !== 'undefined' && (globalThis as any).ym) {
-        try {
-          (globalThis as any).ym(YANDEX_METRIKA_ID, 'hit', globalThis.location.href, {
-            title: document.title,
-            referer: document.referrer,
-          });
-        } catch (error) {
-          if (import.meta.env.DEV) {
-            console.error('[Analytics] Page view tracking error:', error);
-          }
-        }
-      }
-    };
-
-    // Трекаем первый просмотр
-    trackPageView();
-
-    // Слушаем изменения истории для SPA навигации
-    const handlePopState = () => trackPageView();
-    globalThis.addEventListener('popstate', handlePopState as EventListener);
-
-    return () => {
-      globalThis.removeEventListener('popstate', handlePopState as EventListener);
-    };
-  }, []);
 
   return {
     trackBookOpen,

@@ -20,7 +20,6 @@ import clubReaderRoutes from "./club-reader-routes.js";
 import clubRoutes from "./club-routes.js";
 import { validateEnvironment } from "./config/validate.js";
 import { jwtAuth } from "./jwt-middleware.js";
-import { metrikaInjectionMiddleware } from "./middleware/metrika-injection.js";
 import { registerRoutes } from "./routes.js";
 import readerRoutes from "./routes/reader.js";
 import { serveStatic } from "./static.js";
@@ -317,8 +316,6 @@ try {
 
 	// Setup static serving for production
 	if (process.env.NODE_ENV === "production") {
-		// Внедряем Yandex.Metrika в HTML перед отдачей статики
-		app.use(metrikaInjectionMiddleware());
 		serveStatic(app);
 	} else {
 		// In development, serve a simple backend info page instead of the full React app
