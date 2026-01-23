@@ -1,13 +1,16 @@
 import { useEffect, useRef } from "react";
 import { useLocation } from "wouter";
 
+// Тип функции Яндекс.Метрики
+export type YandexMetrikaFunction = ((...args: any[]) => void) & {
+  a?: any[];
+  l?: number;
+};
+
 // Объявляем глобальную функцию счётчика, чтобы TypeScript не ругался
 declare global {
   interface Window {
-    ym?: ((...args: any[]) => void) & {
-      a?: any[];
-      l?: number;
-    };
+    ym?: YandexMetrikaFunction;
   }
 }
 
@@ -31,10 +34,8 @@ function ensureYandexMetrikaInitialized() {
   g.__ymInitialized = true;
 
   // Очередь вызовов до загрузки tag.js (аналог официального сниппета)
-  const ym: Window["ym"] = (...args: any[]) => {
-    if (!ym.a) {
-      ym.a = [];
-    }
+  const ym: YandexMetrikaFunction = (...args: any[]) => {
+    ym.a ??= [];
     ym.a.push(args);
   };
   ym.l = Date.now();
