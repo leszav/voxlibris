@@ -21,8 +21,9 @@ export function ChatWidget({ clubId, channel = "general", onCleanupDeleted, canC
   const [hasUnread, setHasUnread] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
-  const [chatSize, setChatSize] = useState({ width: 320, height: 384 });
+  const [chatSize, setChatSize] = useState({ width: 335, height: 409 });
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
   const lastMessageCountRef = useRef(0);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const chatRef = useRef<HTMLDivElement | null>(null);
@@ -65,12 +66,6 @@ export function ChatWidget({ clubId, channel = "general", onCleanupDeleted, canC
     setInput("");
   };
 
-  const onEmojiClick = (emojiObject: any) => {
-    const emoji = emojiObject.emoji;
-    setInput(prev => prev + emoji);
-    setShowEmojiPicker(false);
-  };
-
   const handleCleanupDeleted = async () => {
     if (!onCleanupDeleted) return;
     const confirmed = confirm(
@@ -84,6 +79,113 @@ export function ChatWidget({ clubId, channel = "general", onCleanupDeleted, canC
       }
     }
   };
+
+  // Безопасные эмоджи в соответствии с традиционными ценностями
+  const safeEmojis = [
+    // === Смайлики (нейтральные, одиночные, без ЛГБТ-ассоциаций) ===
+    {"id": "smile", "char": "🙂", "keywords": ["улыбка", "вежливо", "добро"]},
+    {"id": "grin", "char": "😄", "keywords": ["радость", "смех", "весело"]},
+    {"id": "laugh", "char": "😂", "keywords": ["смех", "слёзы от смеха"]},
+    {"id": "blush", "char": "😊", "keywords": ["смущение", "тёплая улыбка"]},
+    {"id": "neutral", "char": "😐", "keywords": ["нейтрально", "равнодушие"]},
+    {"id": "thinking", "char": "🤔", "keywords": ["размышление", "сомнение"]},
+    {"id": "confused", "char": "😕", "keywords": ["растерянность", "непонимание"]},
+    {"id": "sad", "char": "😞", "keywords": ["грусть", "разочарование"]},
+    {"id": "crying", "char": "😢", "keywords": ["слёзы", "печаль", "трогательно"]},
+    {"id": "angry", "char": "😠", "keywords": ["злость", "раздражение"]},
+    {"id": "fearful", "char": "😨", "keywords": ["страх", "тревога"]},
+    {"id": "scream", "char": "😱", "keywords": ["ужас", "шок"]},
+    {"id": "surprised", "char": "😮", "keywords": ["удивление", "изумление"]},
+    {"id": "yawning", "char": "🥱", "keywords": ["зевота", "усталость"]},
+    {"id": "sleepy", "char": "😴", "keywords": ["сон", "покой"]},
+    {"id": "dizzy", "char": "😵", "keywords": ["головокружение", "растерянность"]},
+    {"id": "nauseated", "char": "🤢", "keywords": ["тошнота", "отвращение"]},
+    {"id": "sick", "char": "🤒", "keywords": ["болезнь", "температура"]},
+    {"id": "mask", "char": "😷", "keywords": ["маска", "болезнь", "осторожность"]},
+    {"id": "nerd", "char": "🤓", "keywords": ["очкарик", "умник", "энтузиазм"]},
+    {"id": "cool", "char": "😎", "keywords": ["крутой", "солнечные очки", "уверенность"]},
+    {"id": "wink", "char": "😉", "keywords": ["подмигивание", "шутка", "тайна"]},
+    {"id": "expressionless", "char": "😑", "keywords": ["без выражения", "сдержанность"]},
+    {"id": "disappointed", "char": "😔", "keywords": ["тихая грусть", "меланхолия"]},
+    {"id": "relieved", "char": "😌", "keywords": ["облегчение", "спокойствие"]},
+    {"id": "innocent", "char": "😇", "keywords": ["невинность", "доброта", "ангел"]},
+    {"id": "sweat", "char": "😅", "keywords": ["нервный смех", "стресс"]},
+    {"id": "grimace", "char": "😬", "keywords": ["неловкость", "стиснутые зубы"]},
+    {"id": "zipper_mouth", "char": "🤐", "keywords": ["молчание", "секрет"]},
+    {"id": "shushing", "char": "🤫", "keywords": ["тише", "тишина", "конфиденциально"]},
+
+    // === Поэтические / тематические эмодзи ===
+    {"id": "book", "char": "📚", "keywords": ["книга", "чтение", "литература"]},
+    {"id": "scroll", "char": "📜", "keywords": ["свиток", "рукопись", "архив"]},
+    {"id": "pen", "char": "✒️", "keywords": ["перо", "письмо", "автор"]},
+    {"id": "candle", "char": "🕯️", "keywords": ["свеча", "уют", "ночь", "тишина"]},
+    {"id": "moon", "char": "🌙", "keywords": ["луна", "месяц", "ночь", "мечты"]},
+    {"id": "star", "char": "⭐", "keywords": ["звезда", "надежда", "вдохновение"]},
+    {"id": "teacup", "char": "🍵", "keywords": ["чай", "покой", "размышление"]},
+    {"id": "rain", "char": "🌧️", "keywords": ["дождь", "осень", "меланхолия"]},
+    {"id": "umbrella", "char": "☔", "keywords": ["зонтик", "дождь", "город"]},
+    {"id": "leaf", "char": "🍂", "keywords": ["листья", "осень", "время"]},
+    {"id": "snowflake", "char": "❄️", "keywords": ["снег", "зима", "тишина", "Россия"]},
+    {"id": "fire", "char": "🔥", "keywords": ["огонь", "страсть", "мысль"]},
+    {"id": "clock", "char": "🕰️", "keywords": ["часы", "время", "прошлое"]},
+    {"id": "hourglass", "char": "⏳", "keywords": ["песочные часы", "время", "ожидание"]},
+    {"id": "window", "char": "🪟", "keywords": ["окно", "вид", "размышление"]},
+    {"id": "chair", "char": "🪑", "keywords": ["стул", "одиночество", "чтение"]},
+    {"id": "lamp", "char": "💡", "keywords": ["лампа", "идея", "озарение"]},
+    {"id": "mirror", "char": "🪞", "keywords": ["зеркало", "рефлексия", "душа"]},
+    {"id": "key", "char": "🗝️", "keywords": ["ключ", "тайна", "сердце"]},
+    {"id": "letter", "char": "✉️", "keywords": ["письмо", "любовь", "разлука"]},
+    {"id": "envelope", "char": "📨", "keywords": ["конверт", "сообщение", "ожидание"]},
+    {"id": "quill", "char": "🖋️", "keywords": ["кисть", "поэт", "классика"]},
+    {"id": "violin", "char": "🎻", "keywords": ["скрипка", "музыка", "грусть"]},
+    {"id": "piano", "char": "🎹", "keywords": ["рояль", "вечер", "вдохновение"]},
+    {"id": "rose", "char": "🌹", "keywords": ["роза", "любовь", "поэзия"]},
+    {"id": "lily", "char": "🌷", "keywords": ["тюльпан", "весна", "нежность"]},
+    {"id": "waves", "char": "🌊", "keywords": ["волны", "море", "далёкое"]},
+    {"id": "mountain", "char": "⛰️", "keywords": ["гора", "высота", "размышление"]},
+    {"id": "forest", "char": "🌲", "keywords": ["сосна", "лес", "уединение"]},
+    {"id": "fog", "char": "🌫️", "keywords": ["туман", "неясность", "тайна"]},
+    {"id": "cloud", "char": "☁️", "keywords": ["облако", "мечты", "лёгкость"]},
+    {"id": "sun", "char": "☀️", "keywords": ["солнце", "утро", "ясность"]},
+    {"id": "dusk", "char": "🌆", "keywords": ["сумерки", "город", "прощание"]},
+    {"id": "street", "char": "🌃", "keywords": ["ночной город", "огни", "одиночество"]},
+    {"id": "bridge", "char": "🌉", "keywords": ["мост", "переход", "судьба"]},
+    {"id": "train", "char": "🚂", "keywords": ["паровоз", "дорога", "отъезд"]},
+    {"id": "ship", "char": "⛵", "keywords": ["парус", "путешествие", "свобода"]},
+    {"id": "anchor", "char": "⚓", "keywords": ["якорь", "стабильность", "порт"]},
+    {"id": "compass", "char": "🧭", "keywords": ["компас", "путь", "поиск"]},
+    {"id": "map", "char": "🗺️", "keywords": ["карта", "приключения", "план"]},
+    {"id": "mask_theater", "char": "🎭", "keywords": ["маска", "театр", "лицемерие"]},
+    {"id": "heart", "char": "❤️", "keywords": ["сердце", "любовь", "боль"]},
+    {"id": "broken_heart", "char": "💔", "keywords": ["разбитое сердце", "расставание", "грусть"]},
+    {"id": "thought", "char": "💭", "keywords": ["мысль", "раздумье", "диалог"]},
+    {"id": "speech", "char": "💬", "keywords": ["речь", "чат", "общение"]},
+    {"id": "silence", "char": "🤫", "keywords": ["тишина", "секрет", "молчание"]},
+    {"id": "writing_hand", "char": "✍️", "keywords": ["писать", "автор", "работа"]},
+    {"id": "glasses", "char": "👓", "keywords": ["очки", "учёный", "читатель"]},
+    {"id": "magnifier", "char": "🔍", "keywords": ["лупа", "детектив", "поиск"]},
+    {"id": "lock", "char": "🔒", "keywords": ["замок", "тайна", "доверие"]},
+    {"id": "unlocked", "char": "🔓", "keywords": ["открыто", "доверие", "признание"]},
+    {"id": "ring", "char": "💍", "keywords": ["кольцо", "обет", "память"]},
+    {"id": "diamond", "char": "💎", "keywords": ["бриллиант", "ценность", "душа"]},
+    {"id": "feather", "char": "🪶", "keywords": ["перо", "лёгкость", "мысль"]},
+    {"id": "shell", "char": "🐚", "keywords": ["ракушка", "море", "тайна"]},
+    {"id": "crystal", "char": "🔮", "keywords": ["шар", "судьба", "гадание"]},
+    {"id": "note", "char": "🎵", "keywords": ["нота", "мелодия", "чувство"]},
+    {"id": "paper", "char": "📄", "keywords": ["лист", "документ", "письмо"]}
+  ];
+
+  // Фильтрация эмоджи по поисковому запросу
+  const filteredEmojis = useMemo(() => {
+    if (!searchTerm.trim()) return safeEmojis;
+    
+    const lowerSearchTerm = searchTerm.toLowerCase();
+    return safeEmojis.filter(emoji => 
+      emoji.keywords.some(keyword => 
+        keyword.toLowerCase().includes(lowerSearchTerm)
+      )
+    );
+  }, [searchTerm]);
 
   const handleMouseDown = (e: React.MouseEvent) => {
     if (e.target !== e.currentTarget) return;
@@ -296,10 +398,39 @@ export function ChatWidget({ clubId, channel = "general", onCleanupDeleted, canC
                 <Smile className="w-4 h-4" />
               </Button>
               
-              {/* Emoji Picker */}
+              {/* Custom Safe Emoji Picker */}
               {showEmojiPicker && (
-                <div className="absolute bottom-10 left-0 z-50 shadow-lg rounded-lg border bg-background">
-                  <Picker onEmojiClick={onEmojiClick} />
+                <div className="absolute bottom-10 left-0 z-50 shadow-lg rounded-lg border bg-background p-4">
+                  <div className="w-72 h-80 flex flex-col">
+                    {/* Search */}
+                    <input
+                      type="text"
+                      placeholder="Поиск эмоджи..."
+                      className="w-full p-2 border rounded mb-3 text-sm"
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                    />
+                    
+                    {/* Emoji Grid */}
+                    <div className="flex-1 overflow-hidden">
+                      <div className="grid grid-cols-5 gap-2 max-h-full overflow-y-auto">
+                        {filteredEmojis.map((emoji) => (
+                          <button
+                            key={emoji.id}
+                            className="text-2xl hover:bg-gray-100 p-1 rounded transition-colors"
+                            onClick={() => {
+                              setInput(prev => prev + emoji.char);
+                              setShowEmojiPicker(false);
+                              setSearchTerm('');
+                            }}
+                            title={emoji.keywords.join(', ')}
+                          >
+                            {emoji.char}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
