@@ -139,10 +139,13 @@ function getParticipants(room: string): Array<{ userId: string; username: string
 export function initializeChatWebSocket(httpServer: HttpServer) {
   const io = new Server(httpServer, {
     cors: {
-      origin: process.env.CLIENT_URL || "http://localhost:5173",
+      origin: process.env.NODE_ENV === "development" 
+        ? "http://localhost:5173" 
+        : false, // В продакшн разрешаем все источники, так как прокси управляет CORS
       credentials: true,
     },
     path: "/ws/chat",
+    transports: ["websocket", "polling"], // Явно указываем транспорты
   });
 
   io.use(authenticateSocket);
