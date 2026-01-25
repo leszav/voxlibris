@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { MessageCircle, X, Minimize2, Trash2 } from "lucide-react";
+import { MessageCircle, X, Minimize2, Trash2, Eraser } from "lucide-react";
 import { useChat } from "@/hooks/use-chat";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -9,16 +9,22 @@ import type { ChatMessageWithUser } from "@shared/schema";
 interface ChatWidgetProps {
   clubId: string;
   channel?: string;
+  onCleanupDeleted?: () => Promise<void>;
+  canCleanup?: boolean;
 }
 
-export function ChatWidget({ clubId, channel = "general" }: ChatWidgetProps) {
+export function ChatWidget({ clubId, channel = "general", onCleanupDeleted, canCleanup = false }: ChatWidgetProps) {
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState("");
   const [hasUnread, setHasUnread] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const [chatSize, setChatSize] = useState({ width: 320, height: 384 });
   const lastMessageCountRef = useRef(0);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const chatRef = useRef<HTMLDivElement | null>(null);
 
-  const { messages, participants, sendMessage, deleteMessage, connected } = useChat({
+  const { messages, participants, sendMessage, deleteMessage, connected, client } = useChat({
     clubId,
     channel,
   });
@@ -55,6 +61,52 @@ export function ChatWidget({ clubId, channel = "general" }: ChatWidgetProps) {
     setInput("");
   };
 
+  const handleCleanupDeleted = async () => {
+    if (!onCleanupDeleted) return;
+    const confirmed = confirm(
+      "Очистить все удалённые сообщения из чата? Это действие необратимо."
+    );
+    if (confirmed) {
+      await onCleanupDeleted();
+      // Перезагружаем историю чата после очистки
+      if (client) {
+        client.loadHistory({ clubId, channel, offset: 0, limit: 50 });
+      }
+    }
+  };
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (e.target !== e.currentTarget) return;
+    setIsDragging(true);
+    setDragStart({ x: e.clientX, y: e.clientY });
+  };
+
+  const handleMouseMove = (e: MouseEvent) => {
+    if (!isDragging) return;
+    const deltaX = dragStart.x - e.clientX;
+    const deltaY = dragStart.y - e.clientY;
+    setChatSize(prev => ({
+      width: Math.max(280, prev.width + deltaX),
+      height: Math.max(300, prev.height + deltaY)
+    }));
+    setDragStart({ x: e.clientX, y: e.clientY });
+  };
+
+  const handleMouseUp = () => {
+    setIsDragging(false);
+  };
+
+  useEffect(() => {
+    if (isDragging) {
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+      return () => {
+        document.removeEventListener('mousemove', handleMouseMove);
+        document.removeEventListener('mouseup', handleMouseUp);
+      };
+    }
+  }, [isDragging, dragStart]);
+
   const sortedMessages: ChatMessageWithUser[] = useMemo(
     () =>
       [...messages].sort((a, b) => {
@@ -69,7 +121,17 @@ export function ChatWidget({ clubId, channel = "general" }: ChatWidgetProps) {
     <div className="fixed bottom-4 right-4 z-40 flex flex-col items-end gap-2">
       {/* Окно чата */}
       {open && (
-        <div className="w-80 h-96 rounded-lg shadow-xl border bg-background flex flex-col overflow-hidden">
+        <div 
+          ref={chatRef}
+          className="rounded-lg shadow-xl border bg-background flex flex-col overflow-hidden relative"
+          style={{ width: chatSize.width, height: chatSize.height }}
+        >
+          {/* Resize handle */}
+          <div 
+            className="absolute top-0 left-0 w-4 h-4 cursor-nw-resize bg-muted/20 hover:bg-muted/40 transition-colors"
+            onMouseDown={handleMouseDown}
+            title="Потяните для изменения размера"
+          />
           <div className="flex items-center justify-between px-3 py-2 border-b bg-muted/60">
             <div className="flex items-center gap-2">
               <MessageCircle className="w-4 h-4" />
@@ -81,6 +143,17 @@ export function ChatWidget({ clubId, channel = "general" }: ChatWidgetProps) {
               </div>
             </div>
             <div className="flex items-center gap-1">
+              {canCleanup && (
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  className="h-7 w-7" 
+                  onClick={handleCleanupDeleted}
+                  title="Очистить удалённые сообщения"
+                >
+                  <Eraser className="w-3 h-3" />
+                </Button>
+              )}
               <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setOpen(false)}>
                 <Minimize2 className="w-3 h-3" />
               </Button>

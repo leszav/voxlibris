@@ -805,7 +805,11 @@ export default function ClubDetails() {
         </div>
       </div>
       {/* Плавающий чат клуба */}
-      <ChatWidget clubId={club.id} />
+      <ChatWidget 
+        clubId={club.id} 
+        onCleanupDeleted={() => handleCleanupChat(0)}
+        canCleanup={isOwner}
+      />
     </MainLayout>
   );
 }
