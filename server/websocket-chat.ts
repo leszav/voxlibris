@@ -5,6 +5,7 @@ import { inArray } from "drizzle-orm";
 import { db, eq, and, desc } from "./db.js";
 import {
   users,
+  userProfiles,
   clubs,
   clubMembers,
   chatMessages,
@@ -235,11 +236,19 @@ export function initializeChatWebSocket(httpServer: HttpServer) {
           console.error("[WS Chat] history cleanup error:", cleanupError);
         }
 
+        // Получаем displayName из профиля пользователя
+        const userProfile = await db
+          .select({ displayName: userProfiles.displayName })
+          .from(userProfiles)
+          .where(eq(userProfiles.userId, authSocket.userId))
+          .limit(1);
+
         const messageWithUser: ChatMessageWithUser = {
           ...(inserted as ChatMessage),
           user: {
             id: authSocket.userId,
             username: authSocket.username,
+            displayName: userProfile[0]?.displayName || null,
           } as any,
         };
 
@@ -291,8 +300,12 @@ export function initializeChatWebSocket(httpServer: HttpServer) {
             createdAt: chatMessages.createdAt,
             updatedAt: chatMessages.updatedAt,
             deletedAt: chatMessages.deletedAt,
+            username: users.username,
+            displayName: userProfiles.displayName,
           })
           .from(chatMessages)
+          .innerJoin(users, eq(chatMessages.userId, users.id))
+          .leftJoin(userProfiles, eq(chatMessages.userId, userProfiles.userId))
           .where(
             and(
               eq(chatMessages.clubId, clubId),
@@ -314,9 +327,15 @@ export function initializeChatWebSocket(httpServer: HttpServer) {
           createdAt: Date;
           updatedAt: Date;
           deletedAt: Date | null;
+          username: string;
+          displayName: string | null;
         }) => ({
           ...(row as any as ChatMessage),
-          user: { id: row.userId } as any,
+          user: { 
+            id: row.userId,
+            username: row.username,
+            displayName: row.displayName,
+          } as any,
         }));
 
         socket.emit("history", {

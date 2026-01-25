@@ -638,18 +638,7 @@ export default function ClubDetails() {
           {(isOwner || isModerator) && (
             <div className="mt-6 space-y-3">
               <InvitationsList clubId={clubId} isOwner={isOwner} />
-              {isOwner && (
-                <div className="flex justify-end gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleCleanupChat(0)}
-                  >
-                    <Trash2 className="w-4 h-4 mr-1" />
-                    Очистить удалённые сообщения
-                  </Button>
-                </div>
-              )}
+
             </div>
           )}
         </div>

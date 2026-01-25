@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { MessageCircle, X, Minimize2, Trash2, Eraser } from "lucide-react";
+import { MessageCircle, X, Minimize2, Trash2, Eraser, Smile } from "lucide-react";
+import Picker from 'emoji-picker-react';
 import { useChat } from "@/hooks/use-chat";
+import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
@@ -20,10 +22,12 @@ export function ChatWidget({ clubId, channel = "general", onCleanupDeleted, canC
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [chatSize, setChatSize] = useState({ width: 320, height: 384 });
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const lastMessageCountRef = useRef(0);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const chatRef = useRef<HTMLDivElement | null>(null);
 
+  const { user } = useAuth();
   const { messages, participants, sendMessage, deleteMessage, connected, client } = useChat({
     clubId,
     channel,
@@ -59,6 +63,12 @@ export function ChatWidget({ clubId, channel = "general", onCleanupDeleted, canC
     if (!text) return;
     sendMessage(text);
     setInput("");
+  };
+
+  const onEmojiClick = (emojiObject: any) => {
+    const emoji = emojiObject.emoji;
+    setInput(prev => prev + emoji);
+    setShowEmojiPicker(false);
   };
 
   const handleCleanupDeleted = async () => {
@@ -106,6 +116,23 @@ export function ChatWidget({ clubId, channel = "general", onCleanupDeleted, canC
       };
     }
   }, [isDragging, dragStart]);
+
+  // Закрытие emoji picker при клике вне его
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (showEmojiPicker) {
+        const target = event.target as Element;
+        if (!target.closest('.absolute.bottom-10')) {
+          setShowEmojiPicker(false);
+        }
+      }
+    };
+
+    if (showEmojiPicker) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [showEmojiPicker]);
 
   const sortedMessages: ChatMessageWithUser[] = useMemo(
     () =>
@@ -171,39 +198,112 @@ export function ChatWidget({ clubId, channel = "general", onCleanupDeleted, canC
           </div>
 
           <ScrollArea className="flex-1 px-3 py-2">
-            <div className="space-y-2 text-sm">
-              {sortedMessages.map((m) => (
-                <div key={m.id} className="group flex flex-col gap-0.5">
-                  <div className="flex items-center justify-between">
-                    <span className="font-medium text-xs">
-                      {(m as any).user?.username || "Участник"}
-                    </span>
-                    {m.deletedAt ? (
-                      <span className="text-[10px] text-muted-foreground">удалено</span>
-                    ) : null}
+            <div className="space-y-3 text-sm px-1">
+              {sortedMessages.map((m) => {
+                // Debug: логируем структуру сообщения
+                if (import.meta.env.DEV) {
+                  console.log('Message structure:', m);
+                }
+                
+                const isOwnMessage = user?.id === m.user?.id;
+                const messageTime = m.createdAt ? new Date(m.createdAt as any).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) : '';
+                // Используем displayName, если есть, иначе username
+                const username = m.user?.displayName || m.user?.username || (m as any).user?.displayName || (m as any).user?.username || (m as any).username || "Участник";
+                const userInitial = username.charAt(0).toUpperCase();
+                
+                return (
+                  <div key={m.id} className={`group flex ${isOwnMessage ? 'justify-end' : 'justify-start'}`}>
+                    <div className={`flex items-start gap-2 max-w-[75%] ${isOwnMessage ? 'flex-row-reverse' : 'flex-row'}`}>
+                      {/* Avatar */}
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white shrink-0 ${
+                        isOwnMessage ? 'bg-blue-500' : 'bg-gray-500'
+                      }`}>
+                        {userInitial}
+                      </div>
+                      
+                      {/* Message bubble */}
+                      <div className={`relative px-3 py-2 rounded-2xl shadow-sm ${
+                        isOwnMessage 
+                          ? 'bg-blue-500 text-white rounded-br-md' 
+                          : 'bg-gray-100 text-gray-900 rounded-bl-md'
+                      } ${m.deletedAt ? 'opacity-60' : ''}`}>
+                        {/* Username for other users */}
+                        {!isOwnMessage && (
+                          <div className="text-xs font-medium text-gray-600 mb-1">
+                            {username}
+                          </div>
+                        )}
+                        
+                        {/* Message text */}
+                        <div className={`text-sm leading-relaxed ${
+                          m.deletedAt ? 'italic' : ''
+                        } ${isOwnMessage ? 'text-white' : 'text-gray-900'}`}>
+                          {m.text}
+                        </div>
+                        
+                        {/* Time and delete button */}
+                        <div className={`flex items-center justify-between mt-1 gap-2 ${
+                          isOwnMessage ? 'flex-row-reverse' : 'flex-row'
+                        }`}>
+                          <span className={`text-xs ${
+                            isOwnMessage ? 'text-blue-100' : 'text-gray-500'
+                          }`}>
+                            {messageTime}
+                          </span>
+                          
+                          {!m.deletedAt && (
+                            <button
+                              type="button"
+                              className={`opacity-0 group-hover:opacity-100 transition-opacity ${
+                                isOwnMessage 
+                                  ? 'text-blue-100 hover:text-white' 
+                                  : 'text-gray-400 hover:text-red-500'
+                              }`}
+                              title="Удалить сообщение"
+                              onClick={() => m.id && deleteMessage(m.id)}
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
+                        
+                        {m.deletedAt && (
+                          <div className={`text-xs mt-1 ${
+                            isOwnMessage ? 'text-blue-200' : 'text-gray-400'
+                          }`}>
+                            удалено
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                  <div className="flex items-start gap-2">
-                    <p className={`text-sm ${m.deletedAt ? "italic text-muted-foreground" : ""}`}>
-                      {m.text}
-                    </p>
-                    {!m.deletedAt && (
-                      <button
-                        type="button"
-                        className="opacity-0 group-hover:opacity-100 text-[10px] text-muted-foreground hover:text-destructive flex items-center"
-                        title="Удалить сообщение"
-                        onClick={() => m.id && deleteMessage(m.id)}
-                      >
-                        <Trash2 className="w-3 h-3" />
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ))}
+                );
+              })}
               <div ref={messagesEndRef} />
             </div>
           </ScrollArea>
 
           <form onSubmit={handleSend} className="border-t px-2 py-2 flex items-center gap-2">
+            <div className="relative">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+                title="Выбрать эмоджи"
+              >
+                <Smile className="w-4 h-4" />
+              </Button>
+              
+              {/* Emoji Picker */}
+              {showEmojiPicker && (
+                <div className="absolute bottom-10 left-0 z-50 shadow-lg rounded-lg border bg-background">
+                  <Picker onEmojiClick={onEmojiClick} />
+                </div>
+              )}
+            </div>
+            
             <Input
               value={input}
               onChange={(e) => setInput(e.target.value)}
