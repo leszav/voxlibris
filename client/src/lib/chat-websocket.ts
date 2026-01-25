@@ -27,11 +27,12 @@ export class ChatWebSocketClient {
     const explicitUrl = config.url;
     const envUrl = (import.meta as any).env?.VITE_BACKEND_WS_URL as string | undefined;
     
-    // Для продакшн используем текущий хост, для разработки порт 5000
+    // Для продакшн используем текущий хост с правильным протоколом, для разработки порт 5000
     const isProd = import.meta.env.PROD;
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const fallbackUrl = isProd 
-      ? `${window.location.protocol}//${window.location.hostname}` 
-      : `${window.location.protocol}//${window.location.hostname}:5000`;
+      ? `${protocol}//${window.location.hostname}` 
+      : `${protocol}//${window.location.hostname}:5000`;
 
     this.config = {
       url: explicitUrl || envUrl || fallbackUrl,
