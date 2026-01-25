@@ -25,6 +25,7 @@ import readerRoutes from "./routes/reader.js";
 import { serveStatic } from "./static.js";
 import { setupWebSocketHandlers } from "./websocket.js";
 import { initializeReaderWebSocket } from "./websocket-reader.js";
+import { initializeChatWebSocket } from "./websocket-chat.js";
 
 export const app = express();
 
@@ -209,6 +210,9 @@ const socketIO = setupWebSocketHandlers(io);
 
 // Initialize Reader WebSocket (JWT-based authentication)
 const readerIO = initializeReaderWebSocket(httpServer);
+
+// Initialize Club Chat WebSocket
+const chatIO = initializeChatWebSocket(httpServer);
 
 app.use((req, res, next) => {
 	const start = Date.now();

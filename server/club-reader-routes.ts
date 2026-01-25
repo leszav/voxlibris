@@ -9,11 +9,12 @@ import {
   books,
   users,
   userProfiles,
+  chatMessages,
   type ClubReadingPlan,
   type ClubReadingPlanProgress
 } from '../shared/schema.js';
 import { db } from './db.js';
-import { eq, and, desc, asc, sql } from 'drizzle-orm';
+import { eq, and, desc, asc, sql, lt, isNotNull } from 'drizzle-orm';
 
 const router = express.Router();
 
@@ -519,6 +520,64 @@ router.delete('/:clubId/reading-plan/:planId', jwtAuth, async (req, res) => {
   } catch (error: any) {
     console.error('[Club Reader] Delete reading plan error:', error);
     res.status(500).json({ message: 'Failed to delete reading plan' });
+  }
+});
+
+/**
+ * DELETE /api/clubs/:clubId/chat/cleanup
+ * Ручная очистка удалённых сообщений чата клуба (только владелец или админ)
+ */
+router.delete('/:clubId/chat/cleanup', jwtAuth, async (req, res) => {
+  try {
+    const { clubId } = req.params;
+    const user = req.user;
+
+    if (!user) {
+      return res.status(401).json({ message: 'Unauthorized' });
+    }
+
+    const userId = user.id;
+    const isAdmin = (user as any).role === 'admin';
+
+    // Проверяем, что пользователь участник клуба
+    const [member] = await db
+      .select()
+      .from(clubMembers)
+      .where(and(eq(clubMembers.clubId, clubId), eq(clubMembers.userId, userId)))
+      .limit(1);
+
+    if (!member && !isAdmin) {
+      return res.status(403).json({ message: 'Not a member of this club' });
+    }
+
+    const isOwner = member?.role === 'owner';
+
+    if (!isOwner && !isAdmin) {
+      return res.status(403).json({ message: 'Only club owner or admin can cleanup chat messages' });
+    }
+
+    const olderThanDays = Number.parseInt((req.query.olderThanDays as string) || '30', 10);
+    const cutoffDate = new Date(Date.now() - olderThanDays * 24 * 60 * 60 * 1000);
+
+    const deleted = await db
+      .delete(chatMessages)
+      .where(
+        and(
+          eq(chatMessages.clubId, clubId),
+          isNotNull(chatMessages.deletedAt),
+          lt(chatMessages.deletedAt, cutoffDate),
+        ),
+      )
+      .returning({ id: chatMessages.id });
+
+    res.json({
+      success: true,
+      deletedCount: deleted.length,
+      olderThanDays,
+    });
+  } catch (error: any) {
+    console.error('[Club Reader] Cleanup chat error:', error);
+    res.status(500).json({ message: 'Failed to cleanup chat messages' });
   }
 });
 

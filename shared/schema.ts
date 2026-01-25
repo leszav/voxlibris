@@ -957,6 +957,8 @@ export const commentRatings = pgTable("comment_ratings", {
 export const chatMessages = pgTable("chat_messages", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   clubId: varchar("club_id").notNull().references(() => clubs.id, { onDelete: "cascade" }),
+  // Логический канал внутри клуба (general, voice, announcements и т.п.)
+  channel: varchar("channel", { length: 64 }).notNull().default("general"),
   userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   text: text("text").notNull(),
   mentions: text("mentions"), // JSON array of user_ids
@@ -1049,6 +1051,7 @@ export const insertCommentRatingSchema = createInsertSchema(commentRatings).pick
 
 export const insertChatMessageSchema = createInsertSchema(chatMessages).pick({
   clubId: true,
+  channel: true,
   text: true,
   mentions: true,
   attachments: true,

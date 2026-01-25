@@ -21,6 +21,7 @@ import { InvitationsList } from "@/components/club/invitations-list";
 import { InviteMemberModal } from "@/components/club/invite-member-modal";
 import { ReadingPlan } from "@/components/club/reading-plan";
 import { MainLayout } from "@/components/layout/MainLayout";
+import { ChatWidget } from "@/components/chat/ChatWidget";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -253,6 +254,8 @@ export default function ClubDetails() {
     return false;
   };
 
+  // ...дальше идёт JSX-разметка ClubDetails, в конце которой мы рендерим ChatWidget
+
   const handleRemoveMember = async (memberId: string, memberName: string) => {
     if (!confirm(`Удалить участника «${memberName}» из клуба?`)) return;
     try {
@@ -312,6 +315,45 @@ export default function ClubDetails() {
       toast({
         title: "Ошибка",
         description: error.message || "Не удалось выйти из клуба",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleCleanupChat = async (olderThanDays: number) => {
+    if (!isOwner) return;
+    const confirmed = confirm(
+      olderThanDays > 0
+        ? `Очистить все удалённые сообщения чата старше ${olderThanDays} дней? Это действие необратимо.`
+        : "Очистить ВСЕ удалённые сообщения чата (включая свежие)? Это действие необратимо.",
+    );
+    if (!confirmed) return;
+
+    try {
+      const res = await fetch(
+        `/api/clubs/${clubId}/chat/cleanup?olderThanDays=${olderThanDays}`,
+        {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${localStorage.getItem("accessToken") || ""}`,
+        },
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.message || "Не удалось очистить чат");
+      }
+
+      const data = await res.json().catch(() => ({}));
+      toast({
+        title: "Чат очищен",
+        description: `Удалено сообщений: ${data.deletedCount ?? 0}`,
+      });
+    } catch (error: any) {
+      toast({
+        title: "Ошибка очистки чата",
+        description: error.message || "Не удалось очистить чат",
         variant: "destructive",
       });
     }
@@ -594,8 +636,20 @@ export default function ClubDetails() {
 
           {/* Invitations List - только для владельца и модератора */}
           {(isOwner || isModerator) && (
-            <div className="mt-6">
+            <div className="mt-6 space-y-3">
               <InvitationsList clubId={clubId} isOwner={isOwner} />
+              {isOwner && (
+                <div className="flex justify-end gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleCleanupChat(0)}
+                  >
+                    <Trash2 className="w-4 h-4 mr-1" />
+                    Очистить удалённые сообщения
+                  </Button>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -750,6 +804,8 @@ export default function ClubDetails() {
           </Tabs>
         </div>
       </div>
+      {/* Плавающий чат клуба */}
+      <ChatWidget clubId={club.id} />
     </MainLayout>
   );
 }
