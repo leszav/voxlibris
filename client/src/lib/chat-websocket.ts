@@ -23,10 +23,15 @@ export class ChatWebSocketClient {
     // Определяем базовый URL для WebSocket чата:
     // 1) Если явно передан в config.url — используем его.
     // 2) Если есть VITE_BACKEND_WS_URL — используем его.
-    // 3) Иначе по умолчанию коннектимся на backend-порт 5000 текущего хоста.
+    // 3) В продакшн используем текущий хост, в разработке порт 5000.
     const explicitUrl = config.url;
     const envUrl = (import.meta as any).env?.VITE_BACKEND_WS_URL as string | undefined;
-    const fallbackUrl = `${window.location.protocol}//${window.location.hostname}:5000`;
+    
+    // Для продакшн используем текущий хост, для разработки порт 5000
+    const isProd = import.meta.env.PROD;
+    const fallbackUrl = isProd 
+      ? `${window.location.protocol}//${window.location.hostname}` 
+      : `${window.location.protocol}//${window.location.hostname}:5000`;
 
     this.config = {
       url: explicitUrl || envUrl || fallbackUrl,
