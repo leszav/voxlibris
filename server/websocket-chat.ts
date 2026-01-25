@@ -45,37 +45,56 @@ async function authenticateSocket(socket: Socket, next: (err?: Error) => void) {
   try {
     const token =
       (socket.handshake.auth && (socket.handshake.auth as any).token) ||
-      socket.handshake.headers.authorization?.replace("Bearer ", "");
+      socket.handshake.headers.authorization?.replace("Bearer ", "") ||
+      socket.handshake.headers.cookie?.match(/accessToken=([^;]+)/)?.[1];
 
     if (!token) {
       return next(new Error("Authentication token required"));
     }
 
+    // Используем ту же логику аутентификации, что и основная платформа
     const secret = process.env.JWT_SECRET;
     if (!secret) {
       return next(new Error("JWT_SECRET not configured"));
     }
 
+    // Проверяем токен и получаем payload
     const decoded = jwt.verify(token, secret) as JwtPayload & {
       userId: string;
       username: string;
+      role: string;
+      status?: string;
+      iat?: number;
+      exp?: number;
     };
 
     if (!decoded.userId || !decoded.username) {
       return next(new Error("Invalid token payload"));
     }
 
+    // Проверяем срок действия токена
+    const now = Math.floor(Date.now() / 1000);
+    if (decoded.exp && decoded.exp < now) {
+      return next(new Error("Token expired"));
+    }
+
     const [user] = await db.select().from(users).where(eq(users.id, decoded.userId)).limit(1);
-    if (!user || user.status !== "active") {
-      return next(new Error("User not found or inactive"));
+    if (!user || user.status !== "active" || !user.emailConfirmed) {
+      return next(new Error("User not found, inactive, or not confirmed"));
     }
 
     (socket as AuthenticatedSocket).userId = decoded.userId;
     (socket as AuthenticatedSocket).username = decoded.username;
 
+    console.log(`[WS Chat] User ${decoded.username} (${decoded.userId}) authenticated successfully`);
     next();
   } catch (error) {
     console.error("[WS Chat] Authentication error:", error);
+    
+    if (error instanceof jwt.TokenExpiredError) {
+      return next(new Error("Token expired - please re-authenticate"));
+    }
+    
     next(new Error("Authentication failed"));
   }
 }

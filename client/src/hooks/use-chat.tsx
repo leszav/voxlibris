@@ -27,10 +27,80 @@ export function useChat(options: UseChatOptions) {
     participants: [],
   });
 
-  const token = typeof window !== "undefined" ? localStorage.getItem("accessToken") || "" : "";
+  const getToken = () => {
+    if (typeof window === "undefined") return "";
+    const token = localStorage.getItem("accessToken");
+    if (!token) {
+      console.warn("[useChat] No authentication token found");
+      return "";
+    }
+    
+    // Проверим базовую валидность токена (формат)
+    try {
+      const parts = token.split('.');
+      if (parts.length !== 3) {
+        console.warn("[useChat] Invalid token format");
+        return "";
+      }
+      // Декодируем payload для проверки срока действия
+      const payload = JSON.parse(atob(parts[1]));
+      const now = Math.floor(Date.now() / 1000);
+      if (payload.exp && payload.exp < now) {
+        console.warn("[useChat] Token expired");
+        localStorage.removeItem("accessToken");
+        return "";
+      }
+    } catch (e) {
+      console.warn("[useChat] Token validation failed:", e);
+      localStorage.removeItem("accessToken");
+      return "";
+    }
+    
+    return token;
+  };
+  
+  const getFreshToken = () => {
+    const token = getToken();
+    if (!token) return token;
+    
+    // Проверяем свежесть токена перед каждым WebSocket подключением
+    try {
+      const parts = token.split('.');
+      if (parts.length === 3) {
+        const payload = JSON.parse(atob(parts[1]));
+        const now = Math.floor(Date.now() / 1000);
+        const expThreshold = 60; // 60 секунд запаса
+        
+        if (payload.exp && payload.exp < (now - expThreshold)) {
+          console.warn("[useChat] Token too old for WebSocket, removing...");
+          localStorage.removeItem("accessToken");
+          localStorage.removeItem("refreshToken");
+          return "";
+        }
+      }
+    } catch (e) {
+      console.warn("[useChat] Token validation failed:", e);
+      localStorage.removeItem("accessToken");
+      return "";
+    }
+    
+    return token;
+  };
+
+  const token = getFreshToken();
 
   useEffect(() => {
     if (!token || !autoConnect) return;
+    
+    // Проверим аутентификацию перед подключением
+    const currentToken = getToken();
+    if (!currentToken) {
+      setState((prev) => ({ 
+        ...prev, 
+        error: new Error("Требуется авторизация. Войдите в систему.")
+      }));
+      return;
+    }
 
     const config: ChatWebSocketConfig = {
       token,
@@ -50,7 +120,16 @@ export function useChat(options: UseChatOptions) {
         setState((prev) => ({ ...prev, connected: false }));
       },
       onError: (error) => {
-        setState((prev) => ({ ...prev, error }));
+        console.error("[useChat] WebSocket error:", error);
+        // Если ошибка аутентификации, покажем понятное сообщение
+        if (error.message?.includes("Authentication") || error.message?.includes("token")) {
+          setState((prev) => ({ 
+            ...prev, 
+            error: new Error("Ошибка аутентификации. Пожалуйста, обновите страницу.")
+          }));
+        } else {
+          setState((prev) => ({ ...prev, error }));
+        }
       },
     };
 
