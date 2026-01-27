@@ -1,5 +1,7 @@
-import dotenv from "dotenv";
-dotenv.config();
+import { config } from "dotenv";
+import { cpus } from "os";
+
+config();
 
 import {
   type User,
@@ -806,7 +808,7 @@ export class PostgreSQLStorage implements IStorage {
     }
 
     const client = postgres(process.env.DATABASE_URL, {
-      max: Math.max(20, require('os').cpus().length * 4), // Scale with CPU cores
+      max: Math.max(20, cpus().length * 4), // Scale with CPU cores
       idle_timeout: 60, // Increase idle timeout
       connect_timeout: 10,
       max_lifetime: 300, // 5 minutes max lifetime
