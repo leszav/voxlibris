@@ -4,8 +4,8 @@ import { storage } from './storage.js';
 import { emailService } from './services/email-service.js';
 import type { UserRole, UserStatus } from '../shared/schema.js';
 import postgres from 'postgres';
-import { eq, count } from 'drizzle-orm';
-import { clubs } from '../shared/schema.js';
+import { eq, count, and, inArray } from 'drizzle-orm';
+import { clubs, personalBooks, clubMembers } from '../shared/schema.js';
 const PostgresError = postgres.PostgresError;
 
 const router = express.Router();
@@ -104,20 +104,54 @@ router.get('/users', jwtAuth, requireAdmin, async (req, res) => {
     const offset = (Number(page) - 1) * Number(limit);
     const paginatedUsers = filteredUsers.slice(offset, offset + Number(limit));
 
-    const usersWithStats = await Promise.all(paginatedUsers.map(async (user) => {
+    // Optimized: Batch queries for user stats
+    const userIds = paginatedUsers.map(user => user.id);
+
+    // Single query for all personal books counts
+    const personalBooksCounts = await (storage as any).db
+      .select({
+        userId: personalBooks.userId,
+        count: count(personalBooks.id)
+      })
+      .from(personalBooks)
+      .where(and(
+        inArray(personalBooks.userId, userIds),
+        eq(personalBooks.isDeleted, false)
+      ))
+      .groupBy(personalBooks.userId);
+
+    // Single query for all club memberships
+    const clubMemberships = await (storage as any).db
+      .select({
+        userId: clubMembers.userId,
+        count: count(clubMembers.id)
+      })
+      .from(clubMembers)
+      .where(and(
+        inArray(clubMembers.userId, userIds),
+        eq(clubMembers.isActive, true)
+      ))
+      .groupBy(clubMembers.userId);
+
+    // Single query for all created clubs
+    const createdClubs = await (storage as any).db
+      .select({
+        ownerId: clubs.ownerId,
+        count: count(clubs.id)
+      })
+      .from(clubs)
+      .where(and(
+        inArray(clubs.ownerId, userIds),
+        eq(clubs.isActive, true)
+      ))
+      .groupBy(clubs.ownerId);
+
+    const usersWithStats = paginatedUsers.map(user => {
       const { password, createdAt, lastActivityAt, ...rest } = user;
-
-      const personalBooks = await storage.getPersonalBooksByUser(user.id);
-      const booksRead = personalBooks.filter(book => !book.isDeleted).length;
-
-      const clubsByUser = await storage.getClubsByUser(user.id);
-      const clubsJoined = clubsByUser.length;
-
-      const createdClubsResult = await (storage as any).db
-        .select({ count: count(clubs.id) })
-        .from(clubs)
-        .where(eq(clubs.ownerId, user.id));
-      const clubsCreated = createdClubsResult[0]?.count || 0;
+      
+      const booksRead = personalBooksCounts.find((bc: any) => bc.userId === user.id)?.count || 0;
+      const clubsJoined = clubMemberships.find((cm: any) => cm.userId === user.id)?.count || 0;
+      const clubsCreated = createdClubs.find((cc: any) => cc.ownerId === user.id)?.count || 0;
 
       return {
         ...rest,
@@ -132,7 +166,7 @@ router.get('/users', jwtAuth, requireAdmin, async (req, res) => {
         clubs_joined: clubsJoined,
         clubs_created: clubsCreated,
       };
-    }));
+    });
 
     res.json({
       users: usersWithStats,

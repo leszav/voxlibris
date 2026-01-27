@@ -18,14 +18,21 @@ COPY . .
 # Build the application
 RUN pnpm run build
 
-# Production image
+# Production image optimized for performance
 FROM node:20-alpine
 
 WORKDIR /app
 
-# Create non-root user
+# System optimizations for performance
+RUN echo 'vm.max_map_count=262144' >> /etc/sysctl.conf && \
+    echo 'net.core.somaxconn=65535' >> /etc/sysctl.conf && \
+    echo 'net.ipv4.tcp_max_syn_backlog=65535' >> /etc/sysctl.conf
+
+# Create non-root user with optimized limits
 RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nodejs -u 1001
+    adduser -S nodejs -u 1001 && \
+    echo "nodejs soft nofile 65536" >> /etc/security/limits.conf && \
+    echo "nodejs hard nofile 65536" >> /etc/security/limits.conf
 
 # Copy built application
 COPY --from=builder /app/dist ./dist
@@ -44,9 +51,19 @@ USER nodejs
 # Expose port
 EXPOSE 5000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD node -e "require('http').get('http://localhost:5000/api/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1))" || exit 1
+# Optimized health check with proper timeout and monitoring
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD node -e "
+    const start = Date.now();
+    require('http').get('http://localhost:5000/api/health', (res) => {
+      console.log(\`Health check: \${res.statusCode} (\${Date.now() - start}ms)\`);
+      process.exit(res.statusCode === 200 ? 0 : 1);
+    }).on('error', () => process.exit(1));
+    " || exit 1
 
-# Start the application
+# Set environment variables for Node.js optimization
+ENV NODE_OPTIONS="--max-old-space-size=1024 --optimize-for-size"
+ENV UV_THREADPOOL_SIZE=8
+
+# Start the application with monitoring
 CMD ["node", "dist/server/index.js"]

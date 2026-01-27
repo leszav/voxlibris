@@ -150,6 +150,7 @@ CAPROVER_APPS_RESULT.md
 CAPROVER_SETUP.md
 SSH_KEYS.md
 SSH_RECOVERY.md
+PERFORMANCE_OPTIMIZATION_REPORT.md
 scripts/ollama-*.sh
 
 # Local instructions and configs

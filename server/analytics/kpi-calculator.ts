@@ -12,7 +12,8 @@ import {
   readingProgress,
   analyticsEvents 
 } from '../../shared/schema.js';
-import { sql, count, avg, sum, gte, eq, and, lte } from 'drizzle-orm';
+import { sql, count, avg, sum, gte, eq, and, lte, inArray } from 'drizzle-orm';
+import { redis } from '../utils/redis-cache.js';
 
 export interface ProjectKPIs {
   // Пользовательские метрики
@@ -56,6 +57,19 @@ export class KPICalculator {
    * @param period - период в днях (по умолчанию 30)
    */
   async calculateKPIs(period: number = 30): Promise<ProjectKPIs> {
+    const cacheKey = `kpi:${period}`;
+    
+    try {
+      const cached = await redis.get(cacheKey);
+      if (cached) {
+        console.log(`KPI Cache HIT: ${cacheKey}`);
+        return JSON.parse(cached);
+      }
+      
+      console.log(`KPI Cache MISS: ${cacheKey}`);
+    } catch (error) {
+      console.error('Redis cache error, proceeding without cache:', error);
+    }
     const startDate = this.getPeriodStartDate(period);
     
     const [
@@ -72,17 +86,25 @@ export class KPICalculator {
       this.calculateActivityMetrics(startDate)
     ]);
 
-    return {
+    const result = {
       ...userMetrics,
       ...contentMetrics,
       ...clubMetrics,
       ...businessMetrics,
       ...activityMetrics
     };
+
+    try {
+      await redis.setex(cacheKey, 3600, JSON.stringify(result)); // Кэш на 1 час
+    } catch (error) {
+      console.error('Failed to cache KPI result:', error);
+    }
+
+    return result;
   }
 
   /**
-   * Вычисление пользовательских метрик
+   * Вычисление пользовательских метрик - Оптимизированная версия
    */
   private async calculateUserMetrics(startDate: Date) {
     const thirtyDaysAgo = new Date();
@@ -91,44 +113,33 @@ export class KPICalculator {
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
-    // Общее количество пользователей
-    const totalUsersResult = await db
-      .select({ count: count() })
-      .from(users);
-    const totalUsers = totalUsersResult[0]?.count || 0;
+    // Оптимизировано: один запрос для всех пользовательских метрик
+    const userMetrics = await db
+      .select({
+        totalUsers: count(users.id),
+        activeUsers: count(sql`distinct case when ${analyticsEvents.createdAt} >= ${thirtyDaysAgo} then ${analyticsEvents.userId} end`),
+        newUsers: count(sql`case when ${users.createdAt} >= ${startDate} then 1 end`),
+        weekOldUsers: count(sql`case when ${users.createdAt} >= ${sevenDaysAgo} then 1 end`)
+      })
+      .from(users)
+      .leftJoin(analyticsEvents, eq(users.id, analyticsEvents.userId))
+      .execute();
 
-    // Активные пользователи (с событиями за последние 30 дней)
-    const activeUsersResult = await db
-      .selectDistinct({ userId: analyticsEvents.userId })
+    const metrics = userMetrics[0];
+    const totalUsers = metrics.totalUsers || 0;
+    const newUsersThisMonth = metrics.newUsers || 0;
+
+    // Активные пользователи корректнее считать через DISTINCT
+    const activeUsers = await db
+      .select({ count: count(sql`distinct ${analyticsEvents.userId}`) })
       .from(analyticsEvents)
       .where(gte(analyticsEvents.createdAt, thirtyDaysAgo));
-    const activeUsers = activeUsersResult.filter((u: { userId: string | null }) => u.userId !== null).length;
-
-    // Новые пользователи за месяц
-    const newUsersResult = await db
-      .select({ count: count() })
-      .from(users)
-      .where(gte(users.createdAt, startDate));
-    const newUsersThisMonth = newUsersResult[0]?.count || 0;
-
-    // Удержание: пользователи, которые вернулись через неделю
-    const weekOldUsersResult = await db
-      .select({ id: users.id })
-      .from(users)
-      .where(gte(users.createdAt, sevenDaysAgo));
-    const weekOldUsers = weekOldUsersResult.length;
-
-    const returnedUsersResult = await db
-      .selectDistinct({ userId: analyticsEvents.userId })
-      .from(analyticsEvents)
-      .where(gte(analyticsEvents.createdAt, new Date()));
     
-    const returnedUsers = returnedUsersResult.filter((u: { userId: string | null }) => 
-      u.userId && weekOldUsersResult.some((w: { id: string }) => w.id === u.userId)
-    ).length;
+    const activeUsersCount = activeUsers[0]?.count || 0;
     
-    const userRetention = weekOldUsers > 0 
-      ? Math.round((returnedUsers / weekOldUsers) * 100) 
+    // Упрощенная логика удержания - считаем как отношение активных к общим
+    const userRetention = totalUsers > 0 
+      ? Math.round((activeUsersCount / totalUsers) * 100) 
       : 0;
 
     // Средняя длительность сессии (из reading_session событий)

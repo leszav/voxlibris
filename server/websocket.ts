@@ -10,6 +10,11 @@ interface AuthenticatedSocket extends Socket {
   currentSession?: string;
 }
 
+// WebSocket connection tracking for security
+const userConnections = new Map<string, Set<string>>();
+const MAX_CONNECTIONS_PER_USER = 5;
+const MAX_TOTAL_CONNECTIONS = 1000;
+
 // Helper function to handle leaving current session
 async function leaveCurrentSession(socket: AuthenticatedSocket) {
   if (!socket.currentSession || !socket.userId) return;
@@ -39,9 +44,16 @@ async function leaveCurrentSession(socket: AuthenticatedSocket) {
 }
 
 export function setupWebSocketHandlers(io: SocketIOServer) {
-  // Authentication middleware for WebSocket connections
+  // Authentication middleware for WebSocket connections with connection limits
   io.use(async (socket: AuthenticatedSocket, next) => {
     try {
+      // Check total connection limit
+      const totalConnections = io.sockets.sockets.size;
+      if (totalConnections >= MAX_TOTAL_CONNECTIONS) {
+        console.warn('WebSocket connection limit reached:', totalConnections);
+        return next(new Error("Server connection limit reached"));
+      }
+
       // Use session-based authentication for WebSocket
       const userId = socket.handshake.auth.userId;
       console.log('WebSocket auth attempt for userId:', userId);
@@ -49,6 +61,13 @@ export function setupWebSocketHandlers(io: SocketIOServer) {
       if (!userId) {
         console.error('WebSocket auth failed: No userId provided');
         return next(new Error("Authentication required"));
+      }
+
+      // Check per-user connection limit
+      const userConnectionCount = userConnections.get(userId)?.size || 0;
+      if (userConnectionCount >= MAX_CONNECTIONS_PER_USER) {
+        console.warn(`WebSocket user connection limit reached for ${userId}:`, userConnectionCount);
+        return next(new Error("Too many connections"));
       }
 
       // Verify user exists in database
@@ -69,6 +88,26 @@ export function setupWebSocketHandlers(io: SocketIOServer) {
 
   io.on("connection", (socket: AuthenticatedSocket) => {
     console.log(`User ${socket.userId} connected to WebSocket`);
+
+    // Track connection for security
+    if (socket.userId) {
+      const userSockets = userConnections.get(socket.userId) || new Set();
+      userSockets.add(socket.id);
+      userConnections.set(socket.userId, userSockets);
+    }
+
+    // Cleanup on disconnect
+    socket.on("disconnect", () => {
+      if (socket.userId) {
+        const userSockets = userConnections.get(socket.userId);
+        if (userSockets) {
+          userSockets.delete(socket.id);
+          if (userSockets.size === 0) {
+            userConnections.delete(socket.userId);
+          }
+        }
+      }
+    });
 
     // Join a reading session room
     socket.on("join_session", async (sessionId: string) => {

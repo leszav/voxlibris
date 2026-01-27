@@ -806,9 +806,10 @@ export class PostgreSQLStorage implements IStorage {
     }
 
     const client = postgres(process.env.DATABASE_URL, {
-      max: 20, // Connection pool size
-      idle_timeout: 20,
+      max: Math.max(20, require('os').cpus().length * 4), // Scale with CPU cores
+      idle_timeout: 60, // Increase idle timeout
       connect_timeout: 10,
+      max_lifetime: 300, // 5 minutes max lifetime
     });
 
     this.db = drizzle(client);
@@ -965,24 +966,33 @@ export class PostgreSQLStorage implements IStorage {
           .from(clubs)
           .where(and(eq(clubs.ownerId, userId), eq(clubs.isActive, true)));
 
-        const clubsWithMembers = await Promise.all(
-          ownedClubs.map(async (club) => {
-            const memberCountResult = await this.db
-              .select({ count: count(clubMembers.id) })
-              .from(clubMembers)
-              .where(and(
-                eq(clubMembers.clubId, club.id),
-                eq(clubMembers.isActive, true),
-                ne(clubMembers.userId, userId)
-              ));
+        // Optimized: Single query for all club member counts
+        if (ownedClubs.length === 0) {
+          return { success: false, error: 'Cannot delete user: owns clubs with active members', clubsWithMembers: [] };
+        }
 
-            return {
-              id: club.id,
-              title: club.title,
-              memberCount: Number(memberCountResult[0]?.count || 0)
-            };
+        const clubIds = ownedClubs.map(club => club.id);
+        const memberCounts = await this.db
+          .select({
+            clubId: clubMembers.clubId,
+            count: count(clubMembers.id)
           })
-        );
+          .from(clubMembers)
+          .where(and(
+            inArray(clubMembers.clubId, clubIds),
+            eq(clubMembers.isActive, true),
+            ne(clubMembers.userId, userId)
+          ))
+          .groupBy(clubMembers.clubId);
+
+        const clubsWithMembers = ownedClubs.map(club => {
+          const memberCount = memberCounts.find(mc => mc.clubId === club.id)?.count || 0;
+          return {
+            id: club.id,
+            title: club.title,
+            memberCount: Number(memberCount)
+          };
+        });
 
         return { 
           success: false, 

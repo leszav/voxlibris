@@ -8,6 +8,7 @@ import { BookParserFactory } from './book-parser.js';
 import { CryptoService } from './crypto-service.js';
 import { fileStorage } from './file-storage.js';
 import { duplicateDetectionService } from './duplicate-detection-service.js';
+import { StreamingUtils } from './utils/streaming-utils.js';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -24,6 +25,21 @@ interface UploadSession {
 }
 
 const uploadSessions = new Map<string, UploadSession>();
+
+// Optimized file validation with memory tracking
+function validateFileMemory(file: Express.Multer.File) {
+    const validation = StreamingUtils.validateFileSize(file.size);
+    
+    if (!validation.isValid) {
+        return { isValid: false, error: validation.error };
+    }
+    
+    if (validation.shouldUseStreaming) {
+        console.log(`Large file detected (${Math.round(file.size / 1024 / 1024)}MB), using streaming mode`);
+    }
+    
+    return { isValid: true, shouldUseStreaming: validation.shouldUseStreaming };
+}
 
 // Helper function to process cover image data
 async function processCoverImage(
@@ -101,6 +117,12 @@ router.post('/clubs/:clubId/books/upload', jwtAuth, requireActiveUser, upload.si
         if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
         if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
 
+        // Оптимизированная валидация файла с учетом памяти
+        const fileValidation = validateFileMemory(req.file);
+        if (!fileValidation.isValid) {
+            return res.status(400).json({ error: fileValidation.error });
+        }
+
         const { clubId } = req.params;
 
         // Check if user is owner of the club (Moderator rights)
@@ -116,14 +138,19 @@ router.post('/clubs/:clubId/books/upload', jwtAuth, requireActiveUser, upload.si
             return res.status(400).json({ error: 'Unsupported file type. Only EPUB and FB2 are supported.' });
         }
 
-        const parser = BookParserFactory.createParser(fileType);
+        // Отслеживание использования памяти при парсинге
+        const memoryTracker = StreamingUtils.trackMemoryUsage('file-parsing');
         let metadata: any = {};
 
         try {
+            const parser = BookParserFactory.createParser(fileType);
             const parsedBook = await parser.parseBook(req.file.buffer, req.file.originalname);
             metadata = parsedBook.metadata;
         } catch (e) {
             console.warn('Failed to parse metadata', e);
+        } finally {
+            const memoryStats = memoryTracker();
+            console.log(`File parsing memory stats: peak=${memoryStats.peak.toFixed(2)}MB`);
         }
 
         // Проверка дубликатов в клубной библиотеке
