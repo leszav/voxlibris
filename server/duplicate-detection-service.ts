@@ -5,7 +5,7 @@
 
 import { db } from './db.js';
 import { personalBooks, clubBooks } from '../shared/schema.js';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 
 /**
  * Нормализация строки для сравнения
@@ -154,7 +154,7 @@ export class DuplicateDetectionService {
           author: personalBooks.author,
         })
         .from(personalBooks)
-        .where(eq(personalBooks.userId, userId));
+        .where(and(eq(personalBooks.userId, userId), eq(personalBooks.isDeleted, false)));
 
       const duplicates: DuplicateMatch[] = [];
 
@@ -221,7 +221,7 @@ export class DuplicateDetectionService {
           clubId: clubBooks.clubId,
         })
         .from(clubBooks)
-        .where(eq(clubBooks.clubId, clubId));
+        .where(and(eq(clubBooks.clubId, clubId), eq(clubBooks.isDeleted, false)));
 
       const duplicates: DuplicateMatch[] = [];
 

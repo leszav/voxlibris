@@ -66,11 +66,14 @@ import {
   systemSettings,
   personalBooks,
   clubBooks,
-  bookAccessLogs
+  bookAccessLogs,
+  analyticsEvents,
+  clubReadingPlans,
+  clubBookmarks
 } from "../shared/schema.js";
 import { randomUUID } from "node:crypto";
 import { drizzle } from "drizzle-orm/postgres-js";
-import { eq, desc, asc, count, and, sql, isNull, inArray, exists, or, ne } from "drizzle-orm";
+import { eq, desc, asc, count, and, sql, isNull, isNotNull, inArray, exists, or, ne } from "drizzle-orm";
 import postgres from "postgres";
 
 // Type aliases for union types
@@ -2756,15 +2759,38 @@ export class PostgreSQLStorage implements IStorage {
 
   async deletePersonalBook(id: string): Promise<boolean> {
     try {
-      const result = await this.db
-        .update(personalBooks)
-        .set({
-          isDeleted: true,
-          softDeletedAt: new Date(),
-          updatedAt: new Date()
-        })
-        .where(eq(personalBooks.id, id))
-        .returning();
+      const result = await this.db.transaction(async (tx) => {
+        const updated = await tx
+          .update(personalBooks)
+          .set({
+            isDeleted: true,
+            softDeletedAt: new Date(),
+            updatedAt: new Date()
+          })
+          .where(eq(personalBooks.id, id))
+          .returning();
+
+        if (updated.length === 0) return updated;
+
+        // Удаляем все упоминания, кроме истории чтения
+        await tx
+          .delete(readingProgress)
+          .where(and(eq(readingProgress.bookId, id), isNull(readingProgress.clubId)));
+
+        await tx
+          .delete(bookAccessLogs)
+          .where(and(eq(bookAccessLogs.bookId, id), eq(bookAccessLogs.bookType, "PERSONAL")))
+          .catch((error: any) => {
+            if (error?.code === "42P01") return; // table does not exist
+            throw error;
+          });
+
+        await tx
+          .delete(analyticsEvents)
+          .where(eq(analyticsEvents.bookId, id));
+
+        return updated;
+      });
 
       return result.length > 0;
     } catch (error) {
@@ -2794,10 +2820,31 @@ export class PostgreSQLStorage implements IStorage {
 
   async permanentDeletePersonalBook(id: string): Promise<boolean> {
     try {
-      const result = await this.db
-        .delete(personalBooks)
-        .where(eq(personalBooks.id, id))
-        .returning();
+      const result = await this.db.transaction(async (tx) => {
+        // Удаляем все упоминания, кроме истории чтения
+        await tx
+          .delete(readingProgress)
+          .where(and(eq(readingProgress.bookId, id), isNull(readingProgress.clubId)));
+
+        await tx
+          .delete(bookAccessLogs)
+          .where(and(eq(bookAccessLogs.bookId, id), eq(bookAccessLogs.bookType, "PERSONAL")))
+          .catch((error: any) => {
+            if (error?.code === "42P01") return;
+            throw error;
+          });
+
+        await tx
+          .delete(analyticsEvents)
+          .where(eq(analyticsEvents.bookId, id));
+
+        const deleted = await tx
+          .delete(personalBooks)
+          .where(eq(personalBooks.id, id))
+          .returning();
+
+        return deleted;
+      });
 
       return result.length > 0;
     } catch (error) {
@@ -2874,15 +2921,46 @@ export class PostgreSQLStorage implements IStorage {
 
   async deleteClubBook(id: string): Promise<boolean> {
     try {
-      const result = await this.db
-        .update(clubBooks)
-        .set({
-          isDeleted: true,
-          softDeletedAt: new Date(),
-          updatedAt: new Date()
-        })
-        .where(eq(clubBooks.id, id))
-        .returning();
+      const result = await this.db.transaction(async (tx) => {
+        const updated = await tx
+          .update(clubBooks)
+          .set({
+            isDeleted: true,
+            softDeletedAt: new Date(),
+            updatedAt: new Date()
+          })
+          .where(eq(clubBooks.id, id))
+          .returning();
+
+        if (updated.length === 0) return updated;
+
+        // Удаляем все упоминания, кроме истории чтения
+        await tx
+          .delete(clubBookmarks)
+          .where(eq(clubBookmarks.clubBookId, id));
+
+        await tx
+          .delete(clubReadingPlans)
+          .where(eq(clubReadingPlans.clubBookId, id));
+
+        await tx
+          .delete(readingProgress)
+          .where(and(eq(readingProgress.bookId, id), isNotNull(readingProgress.clubId)));
+
+        await tx
+          .delete(bookAccessLogs)
+          .where(and(eq(bookAccessLogs.bookId, id), eq(bookAccessLogs.bookType, "CLUB")))
+          .catch((error: any) => {
+            if (error?.code === "42P01") return;
+            throw error;
+          });
+
+        await tx
+          .delete(analyticsEvents)
+          .where(eq(analyticsEvents.bookId, id));
+
+        return updated;
+      });
 
       return result.length > 0;
     } catch (error) {
@@ -2912,10 +2990,38 @@ export class PostgreSQLStorage implements IStorage {
 
   async permanentDeleteClubBook(id: string): Promise<boolean> {
     try {
-      const result = await this.db
-        .delete(clubBooks)
-        .where(eq(clubBooks.id, id))
-        .returning();
+      const result = await this.db.transaction(async (tx) => {
+        await tx
+          .delete(clubBookmarks)
+          .where(eq(clubBookmarks.clubBookId, id));
+
+        await tx
+          .delete(clubReadingPlans)
+          .where(eq(clubReadingPlans.clubBookId, id));
+
+        await tx
+          .delete(readingProgress)
+          .where(and(eq(readingProgress.bookId, id), isNotNull(readingProgress.clubId)));
+
+        await tx
+          .delete(bookAccessLogs)
+          .where(and(eq(bookAccessLogs.bookId, id), eq(bookAccessLogs.bookType, "CLUB")))
+          .catch((error: any) => {
+            if (error?.code === "42P01") return;
+            throw error;
+          });
+
+        await tx
+          .delete(analyticsEvents)
+          .where(eq(analyticsEvents.bookId, id));
+
+        const deleted = await tx
+          .delete(clubBooks)
+          .where(eq(clubBooks.id, id))
+          .returning();
+
+        return deleted;
+      });
 
       return result.length > 0;
     } catch (error) {

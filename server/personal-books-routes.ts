@@ -343,6 +343,7 @@ router.delete('/:id', jwtAuth, async (req, res) => {
     if (book.userId !== req.user.id) return res.status(403).json({ error: 'Forbidden' });
 
     await storage.deletePersonalBook(req.params.id);
+    bookCache.delete(req.params.id);
     res.json({ success: true });
 });
 

@@ -1,8 +1,9 @@
 import * as path from 'node:path';
-import * as JSZip from 'jszip';
+import JSZip from 'jszip';
 import * as xml2js from 'xml2js';
 import * as mime from 'mime-types';
 import * as crypto from 'node:crypto';
+import { JSDOM } from 'jsdom';
 
 export interface BookMetadata {
   title: string;
@@ -94,7 +95,8 @@ export class EPUBParser extends BaseBookParser {
         throw new Error('OPF file not found in EPUB');
       }
 
-      const opfFileObject = zip.file(opfFile);
+      const normalizedOpfPath = this.normalizeZipPath(opfFile);
+      const opfFileObject = zip.file(normalizedOpfPath);
       if (!opfFileObject) {
         throw new Error('OPF file object not found');
       }
@@ -107,11 +109,13 @@ export class EPUBParser extends BaseBookParser {
       const parser = new xml2js.Parser();
       const opfData = await parser.parseStringPromise(opfContent);
 
+      const opfDir = this.normalizeOpfDir(normalizedOpfPath);
+
       // Извлечь метаданные
-      const metadata = await this.extractMetadata(opfData, zip);
+      const metadata = await this.extractMetadata(opfData, zip, opfDir);
 
       // Извлечь главы
-      const chapters = await this.extractChapters(opfData, zip, path.dirname(opfFile));
+      const chapters = await this.extractChapters(opfData, zip, opfDir, metadata.title);
 
       // Вычислить хеш содержимого
       const contentHash = this.calculateTextContentHash(chapters);
@@ -160,27 +164,30 @@ export class EPUBParser extends BaseBookParser {
     return null;
   }
 
-  private async extractMetadata(opfData: any, zip: any): Promise<Omit<BookMetadata, 'totalChapters'>> {
+  private async extractMetadata(opfData: any, zip: any, opfDir: string): Promise<Omit<BookMetadata, 'totalChapters'>> {
     const metadata = opfData?.package?.metadata?.[0];
     if (!metadata) {
-      throw new Error('No metadata found in OPF');
+      return {
+        title: 'Unknown Title',
+        author: 'Unknown Author',
+      };
     }
 
     // Извлечь основные метаданные
-    const title = this.extractMetaValue(metadata['dc:title']);
-    const author = this.extractMetaValue(metadata['dc:creator']);
-    const description = this.extractMetaValue(metadata['dc:description']);
-    const isbn = this.extractMetaValue(metadata['dc:identifier']);
-    const language = this.extractMetaValue(metadata['dc:language']);
-    const publisher = this.extractMetaValue(metadata['dc:publisher']);
-    const publishDate = this.extractMetaValue(metadata['dc:date']);
+    const title = this.extractMetaValue(metadata['dc:title'] ?? metadata.title);
+    const author = this.extractMetaValue(metadata['dc:creator'] ?? metadata.creator);
+    const description = this.extractMetaValue(metadata['dc:description'] ?? metadata.description);
+    const isbn = this.extractMetaValue(metadata['dc:identifier'] ?? metadata.identifier);
+    const language = this.extractMetaValue(metadata['dc:language'] ?? metadata.language);
+    const publisher = this.extractMetaValue(metadata['dc:publisher'] ?? metadata.publisher);
+    const publishDate = this.extractMetaValue(metadata['dc:date'] ?? metadata.date);
 
     // Попытаться найти обложку
     let coverImageData: Buffer | undefined;
     let coverImageType: string | undefined;
 
     try {
-      const coverInfo = await this.findCoverImage(opfData, zip);
+      const coverInfo = await this.findCoverImage(opfData, zip, opfDir);
       if (coverInfo) {
         coverImageData = coverInfo.data;
         coverImageType = coverInfo.type;
@@ -202,17 +209,25 @@ export class EPUBParser extends BaseBookParser {
     };
   }
 
-  private extractMetaValue(metaArray: any[]): string | undefined {
-    if (!Array.isArray(metaArray) || metaArray.length === 0) return undefined;
+  private extractMetaValue(metaValue: any): string | undefined {
+    if (!metaValue) return undefined;
 
-    const firstItem = metaArray[0];
-    if (typeof firstItem === 'string') return firstItem;
-    if (typeof firstItem === 'object' && firstItem._) return firstItem._;
+    if (typeof metaValue === 'string') return metaValue;
+
+    if (Array.isArray(metaValue)) {
+      if (metaValue.length === 0) return undefined;
+      const firstItem = metaValue[0];
+      if (typeof firstItem === 'string') return firstItem;
+      if (typeof firstItem === 'object' && firstItem._) return firstItem._;
+      return undefined;
+    }
+
+    if (typeof metaValue === 'object' && metaValue._) return metaValue._;
 
     return undefined;
   }
 
-  private async findCoverImage(opfData: any, zip: any): Promise<{ data: Buffer; type: string } | null> {
+  private async findCoverImage(opfData: any, zip: any, opfDir: string): Promise<{ data: Buffer; type: string } | null> {
     const manifest = opfData?.package?.manifest?.[0]?.item || [];
 
     // Искать элемент с id="cover" или media-type содержащий "image"
@@ -223,7 +238,8 @@ export class EPUBParser extends BaseBookParser {
 
       if ((id === 'cover' || id === 'cover-image' || mediaType?.startsWith('image/')) && href) {
         try {
-          const imageFile = zip.file(href);
+          const imagePath = this.resolveZipPath(opfDir, href.split('#')[0]);
+          const imageFile = zip.file(imagePath);
           if (imageFile) {
             const imageData = await imageFile.async('nodebuffer');
             return {
@@ -240,7 +256,12 @@ export class EPUBParser extends BaseBookParser {
     return null;
   }
 
-  private async extractChapters(opfData: any, zip: any, opfDir: string): Promise<BookChapter[]> {
+  private async extractChapters(
+    opfData: any,
+    zip: any,
+    opfDir: string,
+    bookTitle?: string
+  ): Promise<BookChapter[]> {
     const spine = opfData?.package?.spine?.[0]?.itemref || [];
     const manifest = opfData?.package?.manifest?.[0]?.item || [];
 
@@ -250,22 +271,31 @@ export class EPUBParser extends BaseBookParser {
       manifestMap.set(item.$?.id, item);
     });
 
+    const tocMap = await this.extractTocMap(opfData, zip, opfDir);
     const chapters: BookChapter[] = [];
 
     for (let i = 0; i < spine.length; i++) {
       const itemRef = spine[i];
       const idref = itemRef.$?.idref;
+      const linear = itemRef.$?.linear;
 
       if (!idref) continue;
+      if (linear && String(linear).toLowerCase() === 'no') continue;
 
       const manifestItem = manifestMap.get(idref);
       if (!manifestItem) continue;
 
       const href = manifestItem.$?.href;
+      const properties = String(manifestItem.$?.properties || '').toLowerCase();
+      const mediaType = String(manifestItem.$?.['media-type'] || '').toLowerCase();
       if (!href) continue;
+      if (properties.includes('nav') || properties.includes('toc')) continue;
+      if (mediaType && !mediaType.includes('html') && !mediaType.includes('xhtml')) {
+        continue;
+      }
 
       try {
-        const filePath = path.posix.join(opfDir, href);
+        const filePath = this.resolveZipPath(opfDir, href.split('#')[0]);
         const chapterFile = zip.file(filePath);
 
         if (!chapterFile) {
@@ -274,18 +304,20 @@ export class EPUBParser extends BaseBookParser {
         }
 
         const chapterContent = await chapterFile.async('string');
-        const textContent = this.extractTextFromHtml(chapterContent);
+        const { html, text, title } = this.extractReadableHtmlFromEpub(chapterContent);
+        const textContent = text || this.extractTextFromHtml(chapterContent);
+        const tocTitle = tocMap.get(filePath);
+        const nextChapterNumber = chapters.length + 1;
+        const chapterTitle = this.chooseChapterTitle(title, tocTitle, nextChapterNumber, bookTitle);
 
-        // Попытаться извлечь заголовок из HTML
-        const titleMatch = chapterContent.match(/<title[^>]*>([^<]+)<\/title>/i) ||
-          chapterContent.match(/<h[1-6][^>]*>([^<]+)<\/h[1-6]>/i);
-
-        const chapterTitle = titleMatch ? titleMatch[1].trim() : `Chapter ${i + 1}`;
+        if (this.isNonContentChapter(chapterTitle, textContent, html, bookTitle)) {
+          continue;
+        }
 
         chapters.push({
-          chapterNumber: i + 1,
+          chapterNumber: nextChapterNumber,
           title: chapterTitle,
-          content: textContent,
+          content: html || textContent,
           wordCount: this.countWords(textContent),
         });
       } catch (error) {
@@ -294,6 +326,229 @@ export class EPUBParser extends BaseBookParser {
     }
 
     return chapters;
+  }
+
+  private normalizeZipPath(zipPath: string): string {
+    return zipPath.replace(/^[\\/]+/, '');
+  }
+
+  private normalizeOpfDir(opfPath: string): string {
+    const dir = path.posix.dirname(this.normalizeZipPath(opfPath));
+    return dir === '.' ? '' : dir;
+  }
+
+  private resolveZipPath(opfDir: string, href: string): string {
+    const stripped = href.replace(/^[\\/]+/, '');
+    let decoded = stripped;
+    try {
+      decoded = decodeURIComponent(stripped);
+    } catch {
+      decoded = stripped;
+    }
+    return opfDir ? path.posix.join(opfDir, decoded) : decoded;
+  }
+
+  private extractReadableHtmlFromEpub(htmlContent: string): { html: string; text: string; title?: string } {
+    try {
+      const dom = new JSDOM(htmlContent);
+      const doc = dom.window.document;
+
+      // Удаляем наиболее частый "служебный" контент
+      const removeSelectors = [
+        "script", "style", "nav", "header", "footer", "aside", "form",
+        "iframe", "svg", "math", "link", "meta", "button", "input",
+        "textarea", "select",
+        ".toc", "#toc", "[role='doc-toc']", "[role='navigation']",
+        "[epub\\:type='toc']", "[epub\\:type='landmarks']", "[epub\\:type='pagebreak']"
+      ];
+      doc.querySelectorAll(removeSelectors.join(",")).forEach(el => el.remove());
+
+      const body = doc.body || doc.documentElement;
+      if (!body) {
+        return { html: "", text: "" };
+      }
+
+      const titleEl = doc.querySelector("h1, h2, h3, title");
+      const title = titleEl?.textContent?.trim();
+
+      const html = body.innerHTML.trim();
+      const text = body.textContent?.trim() || "";
+
+      return { html, text, title };
+    } catch (error) {
+      console.warn("Failed to extract readable HTML from EPUB:", error);
+      return { html: "", text: "" };
+    }
+  }
+
+  private normalizeTitle(value?: string): string {
+    return (value || "")
+      .toLowerCase()
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  private chooseChapterTitle(
+    htmlTitle: string | undefined,
+    tocTitle: string | undefined,
+    chapterNumber: number,
+    bookTitle?: string
+  ): string {
+    const normalizedBookTitle = this.normalizeTitle(bookTitle);
+    const normalizedHtmlTitle = this.normalizeTitle(htmlTitle);
+
+    if (tocTitle && this.normalizeTitle(tocTitle)) {
+      return tocTitle;
+    }
+
+    if (htmlTitle && normalizedHtmlTitle && normalizedHtmlTitle !== normalizedBookTitle) {
+      return htmlTitle;
+    }
+
+    return `Chapter ${chapterNumber}`;
+  }
+
+  private isNonContentChapter(
+    chapterTitle: string,
+    textContent: string,
+    htmlContent: string,
+    bookTitle?: string
+  ): boolean {
+    const normalizedTitle = this.normalizeTitle(chapterTitle);
+    const normalizedBookTitle = this.normalizeTitle(bookTitle);
+    const normalizedText = this.normalizeTitle(textContent);
+
+    const stopTitles = new Set([
+      "cover",
+      "annotation",
+      "annotaion",
+      "annotation.",
+      "аннотация",
+      "обложка",
+      "титульный лист",
+      "title",
+      "title page",
+      "copyright",
+      "copyright page",
+      "предисловие",
+      "от автора",
+      "оглавление",
+      "contents",
+      "table of contents"
+    ]);
+
+    const hasImages = /<img\b/i.test(htmlContent);
+    const wordCount = this.countWords(textContent);
+
+    if (normalizedTitle && stopTitles.has(normalizedTitle) && wordCount < 120 && !hasImages) {
+      return true;
+    }
+
+    if (normalizedTitle && normalizedBookTitle && normalizedTitle === normalizedBookTitle && wordCount < 200 && !hasImages) {
+      return true;
+    }
+
+    if (!wordCount && !hasImages) {
+      return true;
+    }
+
+    return false;
+  }
+
+  private async extractTocMap(opfData: any, zip: any, opfDir: string): Promise<Map<string, string>> {
+    const tocMap = new Map<string, string>();
+    const manifest = opfData?.package?.manifest?.[0]?.item || [];
+
+    const navItem = manifest.find((item: any) => String(item.$?.properties || "").toLowerCase().includes("nav"));
+    if (navItem?.$?.href) {
+      const navPath = this.resolveZipPath(opfDir, navItem.$.href.split('#')[0]);
+      const navFile = zip.file(navPath);
+      if (navFile) {
+        try {
+          const navContent = await navFile.async("string");
+          this.extractTocFromNavHtml(navContent, opfDir, tocMap);
+        } catch (error) {
+          console.warn("Failed to parse EPUB nav document:", error);
+        }
+      }
+    }
+
+    // EPUB2 fallback: NCX
+    if (tocMap.size === 0) {
+      const ncxItem = manifest.find((item: any) =>
+        String(item.$?.['media-type'] || "").toLowerCase().includes("x-dtbncx+xml")
+      );
+
+      if (ncxItem?.$?.href) {
+        const ncxPath = this.resolveZipPath(opfDir, ncxItem.$.href.split('#')[0]);
+        const ncxFile = zip.file(ncxPath);
+        if (ncxFile) {
+          try {
+            const ncxContent = await ncxFile.async("string");
+            const parser = new xml2js.Parser();
+            const ncxData = await parser.parseStringPromise(ncxContent);
+            this.extractTocFromNcx(ncxData, opfDir, tocMap);
+          } catch (error) {
+            console.warn("Failed to parse EPUB NCX:", error);
+          }
+        }
+      }
+    }
+
+    return tocMap;
+  }
+
+  private extractTocFromNavHtml(htmlContent: string, opfDir: string, tocMap: Map<string, string>): void {
+    try {
+      const dom = new JSDOM(htmlContent);
+      const doc = dom.window.document;
+
+      const nav =
+        doc.querySelector("nav[epub\\:type='toc']") ||
+        doc.querySelector("nav[role='doc-toc']") ||
+        doc.querySelector("nav#toc") ||
+        doc.querySelector("nav");
+
+      if (!nav) return;
+
+      nav.querySelectorAll("a[href]").forEach((link) => {
+        const href = link.getAttribute("href");
+        if (!href) return;
+        const label = link.textContent?.trim();
+        if (!label) return;
+
+        const filePath = this.resolveZipPath(opfDir, href.split('#')[0]);
+        if (!tocMap.has(filePath)) {
+          tocMap.set(filePath, label);
+        }
+      });
+    } catch (error) {
+      console.warn("Failed to extract TOC from nav HTML:", error);
+    }
+  }
+
+  private extractTocFromNcx(ncxData: any, opfDir: string, tocMap: Map<string, string>): void {
+    const navMap = ncxData?.ncx?.navMap?.[0]?.navPoint;
+    if (!Array.isArray(navMap)) return;
+
+    const walk = (points: any[]) => {
+      for (const point of points) {
+        const label = point?.navLabel?.[0]?.text?.[0]?.trim();
+        const src = point?.content?.[0]?.$?.src;
+        if (label && src) {
+          const filePath = this.resolveZipPath(opfDir, src.split('#')[0]);
+          if (!tocMap.has(filePath)) {
+            tocMap.set(filePath, label);
+          }
+        }
+        const children = point?.navPoint;
+        if (Array.isArray(children) && children.length > 0) {
+          walk(children);
+        }
+      }
+    };
+
+    walk(navMap);
   }
 }
 
