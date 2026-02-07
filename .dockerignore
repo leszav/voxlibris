@@ -5,8 +5,7 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# Build outputs
-dist
+# Build outputs (исключаем только локальный dist)
 .cache
 .turbo
 .next
@@ -14,7 +13,6 @@ out
 
 # Git
 .git
-.gitignore
 .gitattributes
 .github
 
@@ -39,9 +37,7 @@ coverage
 __tests__
 __mocks__
 
-# Documentation
-*.md
-!README.md
+# Documentation (кроме важных)
 docs
 
 # Logs
@@ -63,6 +59,3 @@ postgres-data
 .editorconfig
 .prettierrc
 .eslintrc
-tsconfig.json
-tsconfig.*.json
-.npmrc
