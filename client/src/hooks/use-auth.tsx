@@ -27,10 +27,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   const fetchCurrentUser = async () => {
     try {
-      // Сначала проверяем локальное состояние токена
+      // При первой загрузке accessToken может отсутствовать в памяти,
+      // но refreshToken есть в httpOnly cookie. Пробуем восстановить сессию.
       if (!authAPI.isAuthenticated()) {
-        setUser(null);
-        return;
+        // Попытка восстановить сессию через refresh token в cookie
+        const refreshSuccess = await authAPI.forceRefreshToken();
+        if (!refreshSuccess) {
+          setUser(null);
+          return;
+        }
       }
 
       // Получаем актуальные данные пользователя с сервера
@@ -94,21 +99,17 @@ export function AuthProvider({ children }: AuthProviderProps) {
   };
 
   // Принудительная синхронизация состояния с сервером
-  // eslint-disable-next-line sonarjs/no-identical-functions
   const syncAuthState = async () => {
     setIsLoading(true);
     try {
-      // Проверяем локальное состояние токена
+      // Проверяем локальное состояние токена или восстанавливаем из refresh cookie
       if (!authAPI.isAuthenticated()) {
-        setUser(null);
-        return;
-      }
-
-      // Принудительно обновляем токен если нужно
-      const refreshSuccess = await authAPI.forceRefreshToken();
-      if (!refreshSuccess) {
-        setUser(null);
-        return;
+        // Попытка восстановить сессию через refresh token
+        const refreshSuccess = await authAPI.forceRefreshToken();
+        if (!refreshSuccess) {
+          setUser(null);
+          return;
+        }
       }
 
       // Получаем актуальные данные пользователя

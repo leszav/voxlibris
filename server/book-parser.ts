@@ -282,17 +282,8 @@ export class EPUBParser extends BaseBookParser {
       if (!idref) continue;
       if (linear && String(linear).toLowerCase() === 'no') continue;
 
-      const manifestItem = manifestMap.get(idref);
-      if (!manifestItem) continue;
-
-      const href = manifestItem.$?.href;
-      const properties = String(manifestItem.$?.properties || '').toLowerCase();
-      const mediaType = String(manifestItem.$?.['media-type'] || '').toLowerCase();
+      const href = this.getSpineItemHref(manifestMap, idref);
       if (!href) continue;
-      if (properties.includes('nav') || properties.includes('toc')) continue;
-      if (mediaType && !mediaType.includes('html') && !mediaType.includes('xhtml')) {
-        continue;
-      }
 
       try {
         const filePath = this.resolveZipPath(opfDir, href.split('#')[0]);
@@ -359,7 +350,9 @@ export class EPUBParser extends BaseBookParser {
         "iframe", "svg", "math", "link", "meta", "button", "input",
         "textarea", "select",
         ".toc", "#toc", "[role='doc-toc']", "[role='navigation']",
-        "[epub\\:type='toc']", "[epub\\:type='landmarks']", "[epub\\:type='pagebreak']"
+        String.raw`[epub\:type='toc']`,
+        String.raw`[epub\:type='landmarks']`,
+        String.raw`[epub\:type='pagebreak']`
       ];
       doc.querySelectorAll(removeSelectors.join(",")).forEach(el => el.remove());
 
@@ -384,7 +377,7 @@ export class EPUBParser extends BaseBookParser {
   private normalizeTitle(value?: string): string {
     return (value || "")
       .toLowerCase()
-      .replace(/\s+/g, " ")
+      .replaceAll(/\s+/g, " ")
       .trim();
   }
 
@@ -416,7 +409,6 @@ export class EPUBParser extends BaseBookParser {
   ): boolean {
     const normalizedTitle = this.normalizeTitle(chapterTitle);
     const normalizedBookTitle = this.normalizeTitle(bookTitle);
-    const normalizedText = this.normalizeTitle(textContent);
 
     const stopTitles = new Set([
       "cover",
@@ -459,40 +451,11 @@ export class EPUBParser extends BaseBookParser {
     const tocMap = new Map<string, string>();
     const manifest = opfData?.package?.manifest?.[0]?.item || [];
 
-    const navItem = manifest.find((item: any) => String(item.$?.properties || "").toLowerCase().includes("nav"));
-    if (navItem?.$?.href) {
-      const navPath = this.resolveZipPath(opfDir, navItem.$.href.split('#')[0]);
-      const navFile = zip.file(navPath);
-      if (navFile) {
-        try {
-          const navContent = await navFile.async("string");
-          this.extractTocFromNavHtml(navContent, opfDir, tocMap);
-        } catch (error) {
-          console.warn("Failed to parse EPUB nav document:", error);
-        }
-      }
-    }
+    await this.appendNavToc(manifest, zip, opfDir, tocMap);
 
     // EPUB2 fallback: NCX
     if (tocMap.size === 0) {
-      const ncxItem = manifest.find((item: any) =>
-        String(item.$?.['media-type'] || "").toLowerCase().includes("x-dtbncx+xml")
-      );
-
-      if (ncxItem?.$?.href) {
-        const ncxPath = this.resolveZipPath(opfDir, ncxItem.$.href.split('#')[0]);
-        const ncxFile = zip.file(ncxPath);
-        if (ncxFile) {
-          try {
-            const ncxContent = await ncxFile.async("string");
-            const parser = new xml2js.Parser();
-            const ncxData = await parser.parseStringPromise(ncxContent);
-            this.extractTocFromNcx(ncxData, opfDir, tocMap);
-          } catch (error) {
-            console.warn("Failed to parse EPUB NCX:", error);
-          }
-        }
-      }
+      await this.appendNcxToc(manifest, zip, opfDir, tocMap);
     }
 
     return tocMap;
@@ -503,11 +466,7 @@ export class EPUBParser extends BaseBookParser {
       const dom = new JSDOM(htmlContent);
       const doc = dom.window.document;
 
-      const nav =
-        doc.querySelector("nav[epub\\:type='toc']") ||
-        doc.querySelector("nav[role='doc-toc']") ||
-        doc.querySelector("nav#toc") ||
-        doc.querySelector("nav");
+      const nav = this.findTocNavElement(doc);
 
       if (!nav) return;
 
@@ -550,6 +509,93 @@ export class EPUBParser extends BaseBookParser {
 
     walk(navMap);
   }
+
+  private findNavItem(manifest: any[]): Record<string, any> | null {
+    return manifest.find((item: any) => String(item.$?.properties || "").toLowerCase().includes("nav")) || null;
+  }
+
+  private findNcxItem(manifest: any[]): Record<string, any> | null {
+    return manifest.find((item: any) =>
+      String(item.$?.['media-type'] || "").toLowerCase().includes("x-dtbncx+xml")
+    ) || null;
+  }
+
+  private async readZipText(zip: any, filePath: string): Promise<string | null> {
+    const file = zip.file(filePath);
+    if (!file) return null;
+    try {
+      return await file.async("string");
+    } catch (error) {
+      console.warn("Failed to read EPUB file:", error);
+      return null;
+    }
+  }
+
+  private async appendNavToc(manifest: any[], zip: any, opfDir: string, tocMap: Map<string, string>): Promise<void> {
+    const navItem = this.findNavItem(manifest);
+    if (!navItem?.$?.href) return;
+
+    const navPath = this.resolveZipPath(opfDir, navItem.$.href.split('#')[0]);
+    const navContent = await this.readZipText(zip, navPath);
+    if (!navContent) return;
+
+    this.extractTocFromNavHtml(navContent, opfDir, tocMap);
+  }
+
+  private async appendNcxToc(manifest: any[], zip: any, opfDir: string, tocMap: Map<string, string>): Promise<void> {
+    const ncxItem = this.findNcxItem(manifest);
+    if (!ncxItem?.$?.href) return;
+
+    const ncxPath = this.resolveZipPath(opfDir, ncxItem.$.href.split('#')[0]);
+    const ncxContent = await this.readZipText(zip, ncxPath);
+    if (!ncxContent) return;
+
+    try {
+      const parser = new xml2js.Parser();
+      const ncxData = await parser.parseStringPromise(ncxContent);
+      this.extractTocFromNcx(ncxData, opfDir, tocMap);
+    } catch (error) {
+      console.warn("Failed to parse EPUB NCX:", error);
+    }
+  }
+
+  private getSpineItemHref(manifestMap: Map<string, any>, idref: string): string | null {
+    const manifestItem = manifestMap.get(idref);
+    if (!manifestItem) return null;
+
+    const href = manifestItem.$?.href;
+    if (!href) return null;
+
+    const properties = String(manifestItem.$?.properties || '').toLowerCase();
+    if (this.shouldSkipManifestProperties(properties)) return null;
+
+    const mediaType = String(manifestItem.$?.['media-type'] || '').toLowerCase();
+    if (mediaType && !mediaType.includes('html') && !mediaType.includes('xhtml')) {
+      return null;
+    }
+
+    return href;
+  }
+
+  private shouldSkipManifestProperties(properties: string): boolean {
+    if (!properties) return false;
+    return (
+      properties.includes('nav') ||
+      properties.includes('toc') ||
+      properties.includes('cover') ||
+      properties.includes('titlepage') ||
+      properties.includes('frontmatter')
+    );
+  }
+
+  private findTocNavElement(doc: Document): Element | null {
+    return (
+      doc.querySelector(String.raw`nav[epub\:type='toc']`) ||
+      doc.querySelector("nav[role='doc-toc']") ||
+      doc.querySelector("nav#toc") ||
+      doc.querySelector("nav")
+    );
+  }
 }
 
 export class FB2Parser extends BaseBookParser {
@@ -557,7 +603,7 @@ export class FB2Parser extends BaseBookParser {
    * Автоопределение кодировки и декодирование содержимого FB2 файла
    */
   private detectAndDecodeContent(fileBuffer: Buffer): string {
-    let content = fileBuffer.toString('utf-8');
+    const content = fileBuffer.toString('utf-8');
     const encodingMatch = /<?xml[^>]*encoding=["']([^"']+)["']/i.exec(content);
     const declaredEncoding = encodingMatch?.[1]?.toLowerCase();
 

@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { useAuth } from '@/hooks/use-auth';
 import { useToast } from '@/hooks/use-toast';
 import { Mic, Eye, EyeOff, Clock } from 'lucide-react';
+import { getAccessToken } from '@/lib/token-store';
 
 export default function Login() {
   const [username, setUsername] = useState('');
@@ -29,7 +30,7 @@ export default function Login() {
       await login(username, password, rememberMe);
       
       // Проверяем статус пользователя после логина
-      const userDataString = localStorage.getItem('accessToken');
+      const userDataString = getAccessToken();
       if (userDataString) {
         try {
           const payload = JSON.parse(atob(userDataString.split('.')[1]));

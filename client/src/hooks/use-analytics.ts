@@ -1,7 +1,6 @@
 import { useCallback, useRef, useEffect } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
-import { useAuth } from './use-auth';
 
 
 export type AnalyticsEventType = 

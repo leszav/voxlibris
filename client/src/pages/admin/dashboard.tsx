@@ -11,7 +11,6 @@ import {
   TrendingUp,
   AlertTriangle,
   CheckCircle,
-  Clock,
   BarChart3
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
@@ -51,13 +50,23 @@ function StatCard({
   change, 
   icon: Icon, 
   color = "blue" 
-}: {
+}: Readonly<{
   title: string;
   value: string | number;
   change?: string;
   icon: any;
   color?: string;
-}) {
+}>) {
+  const getColorClasses = (color: string): string => {
+    switch (color) {
+      case 'blue': return 'bg-blue-50 text-blue-600';
+      case 'green': return 'bg-green-50 text-green-600';
+      case 'orange': return 'bg-orange-50 text-orange-600';
+      case 'purple': return 'bg-purple-50 text-purple-600';
+      default: return 'bg-gray-50 text-gray-600';
+    }
+  };
+
   return (
     <Card>
       <CardContent className="p-6">
@@ -73,13 +82,7 @@ function StatCard({
               )}
             </div>
           </div>
-          <div className={`p-3 rounded-lg ${
-            color === 'blue' ? 'bg-blue-50 text-blue-600' :
-            color === 'green' ? 'bg-green-50 text-green-600' :
-            color === 'orange' ? 'bg-orange-50 text-orange-600' :
-            color === 'purple' ? 'bg-purple-50 text-purple-600' :
-            'bg-gray-50 text-gray-600'
-          }`}>
+          <div className={`p-3 rounded-lg ${getColorClasses(color)}`}>
             <Icon className="h-6 w-6" />
           </div>
         </div>
@@ -92,11 +95,11 @@ function StatusBreakdown({
   title, 
   data, 
   total 
-}: { 
+}: Readonly<{ 
   title: string; 
   data: Array<{label: string; value: number; color: string}>; 
   total: number;
-}) {
+}>) {
   return (
     <Card>
       <CardHeader>
@@ -126,11 +129,15 @@ function StatusBreakdown({
 }
 
 function StatsSkeleton() {
+  const statKeys = ['stat-sk-1', 'stat-sk-2', 'stat-sk-3', 'stat-sk-4'];
+  const breakdownKeys = ['breakdown-sk-1', 'breakdown-sk-2', 'breakdown-sk-3'];
+  const itemKeys = ['item-sk-1', 'item-sk-2', 'item-sk-3', 'item-sk-4'];
+  
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {[...Array(4)].map((_, i) => (
-          <Card key={i}>
+        {statKeys.map((key) => (
+          <Card key={key}>
             <CardContent className="p-6">
               <div className="flex items-center justify-between">
                 <div className="space-y-2">
@@ -144,14 +151,14 @@ function StatsSkeleton() {
         ))}
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {[...Array(3)].map((_, i) => (
-          <Card key={i}>
+        {breakdownKeys.map((key) => (
+          <Card key={key}>
             <CardHeader>
               <Skeleton className="h-6 w-32" />
             </CardHeader>
             <CardContent className="space-y-3">
-              {[...Array(4)].map((_, j) => (
-                <div key={j} className="flex items-center justify-between">
+              {itemKeys.map((itemKey) => (
+                <div key={`${key}-${itemKey}`} className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <Skeleton className="w-3 h-3 rounded-full" />
                     <Skeleton className="h-4 w-20" />
@@ -185,7 +192,7 @@ export default function AdminDashboard() {
             <AlertTriangle className="h-12 w-12 text-red-500 mx-auto mb-4" />
             <h3 className="text-lg font-semibold text-gray-900">Ошибка загрузки</h3>
             <p className="text-gray-600 mt-2">Не удалось загрузить статистику</p>
-            <Button className="mt-4" onClick={() => window.location.reload()}>
+            <Button className="mt-4" onClick={() => globalThis.location.reload()}>
               Попробовать снова
             </Button>
           </div>
@@ -248,6 +255,7 @@ export default function AdminDashboard() {
           <h1 className="text-3xl font-bold text-gray-900">Панель управления</h1>
           <p className="text-gray-600 mt-2">
             Обзор системы и ключевые метрики
+            {' '}
             <span className="ml-2 text-sm">
               Обновлено: {new Date(stats.timestamp).toLocaleString('ru')}
             </span>

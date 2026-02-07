@@ -1,4 +1,5 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
+import { getAccessToken, setAccessToken, isTokenExpired } from "./token-store";
 
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
@@ -7,38 +8,8 @@ async function throwIfResNotOk(res: Response) {
   }
 }
 
-// Получить JWT токен из localStorage
-function getAuthToken(): string | null {
-  try {
-    return localStorage.getItem('accessToken');
-  } catch {
-    return null;
-  }
-}
-
-// Сохранить токен в localStorage
-function setAuthToken(token: string | null): void {
-  try {
-    if (token) {
-      localStorage.setItem('accessToken', token);
-    } else {
-      localStorage.removeItem('accessToken');
-    }
-  } catch {
-    // Игнорируем ошибки localStorage
-  }
-}
-
-// Проверить, истек ли токен
-function isTokenExpired(token: string): boolean {
-  try {
-    const payload = JSON.parse(atob(token.split('.')[1]));
-    const currentTime = Math.floor(Date.now() / 1000);
-    return payload.exp < currentTime;
-  } catch {
-    return true;
-  }
-}
+// Re-export token functions for backward compatibility
+export { getAccessToken as getAuthToken, setAccessToken as setAuthToken } from "./token-store";
 
 // Обновить access token через refresh token
 let isRefreshing = false;
@@ -63,7 +34,7 @@ async function refreshAccessToken(): Promise<string> {
       }
 
       const data = await response.json();
-      setAuthToken(data.accessToken);
+      setAccessToken(data.accessToken);
       
       // Уведомляем приложение об успешном обновлении токена
       globalThis.dispatchEvent(new CustomEvent('token-refreshed'));
@@ -71,7 +42,7 @@ async function refreshAccessToken(): Promise<string> {
       return data.accessToken;
     } catch (error) {
       // При ошибке обновления очищаем токен
-      setAuthToken(null);
+      setAccessToken(null);
       throw error;
     } finally {
       isRefreshing = false;
@@ -84,7 +55,7 @@ async function refreshAccessToken(): Promise<string> {
 
 // Создать заголовки с аутентификацией
 function createAuthHeaders(additionalHeaders: Record<string, string> = {}): Record<string, string> {
-  const token = getAuthToken();
+  const token = getAccessToken();
   const headers: Record<string, string> = {
     ...additionalHeaders,
   };
@@ -103,15 +74,13 @@ export async function apiRequest<T = unknown>(
   const isFormData = options?.body instanceof FormData;
 
   // Проверяем токен перед запросом
-  const token = getAuthToken();
+  const token = getAccessToken();
   if (token && isTokenExpired(token)) {
     try {
       await refreshAccessToken();
     } catch (error) {
       console.error('Token refresh failed:', error);
-      // Не выбрасываем ошибку сразу - возможно запрос публичный
-      // Очищаем токен и продолжаем запрос без авторизации
-      setAuthToken(null);
+      setAccessToken(null);
     }
   }
 
@@ -131,7 +100,7 @@ export async function apiRequest<T = unknown>(
   });
 
   // Если получили 401 и есть токен, пробуем обновить токен один раз
-  if (res.status === 401 && getAuthToken()) {
+  if (res.status === 401 && getAccessToken()) {
     try {
       await refreshAccessToken();
       
@@ -151,7 +120,7 @@ export async function apiRequest<T = unknown>(
       });
     } catch (error) {
       console.error('Token refresh failed on 401:', error);
-      setAuthToken(null);
+      setAccessToken(null);
       // Не выбрасываем ошибку, а возвращаем 401 как есть - UI обработает
     }
   }
@@ -229,7 +198,7 @@ export const getQueryFn: <T>(options: {
   ({ on401: unauthorizedBehavior }) =>
     async ({ queryKey }) => {
       // Проверяем токен перед запросом
-      const token = getAuthToken();
+      const token = getAccessToken();
       if (token && isTokenExpired(token)) {
         try {
           await refreshAccessToken();

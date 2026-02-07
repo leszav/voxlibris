@@ -1,5 +1,5 @@
 import { io, type Socket } from "socket.io-client";
-import type { ChatMessageWithUser } from "@shared/schema";
+
 
 export interface ChatWebSocketConfig {
   url?: string;
@@ -15,8 +15,8 @@ export type ChatEventHandler = (data: any) => void;
 
 export class ChatWebSocketClient {
   private socket: Socket | null = null;
-  private config: ChatWebSocketConfig;
-  private eventHandlers: Map<string, Set<ChatEventHandler>> = new Map();
+  private readonly config: ChatWebSocketConfig;
+  private readonly eventHandlers: Map<string, Set<ChatEventHandler>> = new Map();
   private isConnecting = false;
 
   constructor(config: ChatWebSocketConfig) {
@@ -29,10 +29,10 @@ export class ChatWebSocketClient {
     
     // Для продакшн используем текущий хост с правильным протоколом, для разработки порт 5000
     const isProd = import.meta.env.PROD;
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const protocol = globalThis.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const fallbackUrl = isProd 
-      ? `${protocol}//${window.location.hostname}` 
-      : `${protocol}//${window.location.hostname}:5000`;
+      ? `${protocol}//${globalThis.location.hostname}` 
+      : `${protocol}//${globalThis.location.hostname}:5000`;
 
     this.config = {
       url: explicitUrl || envUrl || fallbackUrl,
@@ -61,7 +61,7 @@ export class ChatWebSocketClient {
     this.isConnecting = true;
 
     return new Promise((resolve, reject) => {
-      this.socket = io(this.config.url!, {
+      this.socket = io(this.config.url, {
         path: "/ws/chat",
         auth: {
           token: this.config.token,

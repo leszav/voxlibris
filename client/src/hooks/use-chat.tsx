@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChatWebSocketClient, type ChatWebSocketConfig } from "../lib/chat-websocket";
 import type { ChatMessageWithUser } from "@shared/schema";
+import { getAccessToken, setAccessToken } from "@/lib/token-store";
 
 interface UseChatOptions {
   clubId: string;
@@ -29,7 +30,7 @@ export function useChat(options: UseChatOptions) {
 
   const getToken = () => {
     if (typeof window === "undefined") return "";
-    const token = localStorage.getItem("accessToken");
+    const token = getAccessToken();
     if (!token) {
       console.warn("[useChat] No authentication token found");
       return "";
@@ -47,12 +48,12 @@ export function useChat(options: UseChatOptions) {
       const now = Math.floor(Date.now() / 1000);
       if (payload.exp && payload.exp < now) {
         console.warn("[useChat] Token expired");
-        localStorage.removeItem("accessToken");
+        setAccessToken(null);
         return "";
       }
     } catch (e) {
       console.warn("[useChat] Token validation failed:", e);
-      localStorage.removeItem("accessToken");
+      setAccessToken(null);
       return "";
     }
     
@@ -73,14 +74,13 @@ export function useChat(options: UseChatOptions) {
         
         if (payload.exp && payload.exp < (now - expThreshold)) {
           console.warn("[useChat] Token too old for WebSocket, removing...");
-          localStorage.removeItem("accessToken");
-          localStorage.removeItem("refreshToken");
+          setAccessToken(null);
           return "";
         }
       }
     } catch (e) {
       console.warn("[useChat] Token validation failed:", e);
-      localStorage.removeItem("accessToken");
+      setAccessToken(null);
       return "";
     }
     

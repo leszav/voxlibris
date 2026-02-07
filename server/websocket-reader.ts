@@ -60,9 +60,13 @@ async function authenticateSocket(socket: Socket, next: (err?: Error) => void) {
 }
 
 export function initializeReaderWebSocket(httpServer: HttpServer) {
+  const allowedOrigins = process.env.ALLOWED_ORIGINS
+    ? process.env.ALLOWED_ORIGINS.split(",")
+    : ["http://localhost:5173", "http://localhost:3000"];
+
   const io = new Server(httpServer, {
     cors: {
-      origin: process.env.CLIENT_URL || "http://localhost:5173",
+      origin: allowedOrigins,
       credentials: true,
     },
     path: "/ws/reader",

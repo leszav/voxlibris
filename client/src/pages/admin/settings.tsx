@@ -20,6 +20,7 @@ import {
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import * as React from "react";
+import { getAccessToken } from "@/lib/token-store";
 
 type HealthStatus = 'healthy' | 'warning' | 'error';
 
@@ -82,7 +83,7 @@ interface SystemHealth {
 }
 
 async function fetchSystemSettings(): Promise<SystemSettings> {
-  const token = localStorage.getItem('accessToken');
+  const token = getAccessToken();
   if (!token) throw new Error('No auth token');
 
   const response = await fetch('/api/v1/admin/settings', {
@@ -100,7 +101,7 @@ async function fetchSystemSettings(): Promise<SystemSettings> {
 }
 
 async function updateSystemSettings(settings: Partial<SystemSettings>): Promise<void> {
-  const token = localStorage.getItem('accessToken');
+  const token = getAccessToken();
   if (!token) throw new Error('No auth token');
 
   const response = await fetch('/api/v1/admin/settings', {
@@ -118,7 +119,7 @@ async function updateSystemSettings(settings: Partial<SystemSettings>): Promise<
 }
 
 async function fetchSystemHealth(): Promise<SystemHealth> {
-  const token = localStorage.getItem('accessToken');
+  const token = getAccessToken();
   if (!token) throw new Error('No auth token');
 
   const response = await fetch('/api/v1/admin/system/health', {
@@ -542,7 +543,7 @@ function SMTPSettings() {
   const { data: smtpData, isLoading } = useQuery({
     queryKey: ['smtp-settings'],
     queryFn: async () => {
-      const token = localStorage.getItem('accessToken');
+      const token = getAccessToken();
       const response = await fetch('/api/v1/admin/settings/smtp', {
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -572,7 +573,7 @@ function SMTPSettings() {
   // Мутация для сохранения настроек
   const saveMutation = useMutation({
     mutationFn: async (settings: typeof localSettings) => {
-      const token = localStorage.getItem('accessToken');
+      const token = getAccessToken();
       const response = await fetch('/api/v1/admin/settings/smtp', {
         method: 'PUT',
         headers: {
@@ -602,7 +603,7 @@ function SMTPSettings() {
 
     setIsTesting(true);
     try {
-      const token = localStorage.getItem('accessToken');
+      const token = getAccessToken();
       const response = await fetch('/api/v1/admin/settings/smtp/test', {
         method: 'POST',
         headers: {

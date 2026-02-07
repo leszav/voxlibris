@@ -1,9 +1,18 @@
-import crypto from "crypto";
+import crypto from "node:crypto";
 
 const ALGORITHM = "aes-256-gcm";
 const IV_LENGTH = 16;
 const AUTH_TAG_LENGTH = 16;
-const MASTER_KEY = process.env.CONTENT_ENCRYPTION_KEY || crypto.randomBytes(32).toString("hex");
+const MASTER_KEY = (() => {
+  const key = process.env.CONTENT_ENCRYPTION_KEY || process.env.MASTER_KEY;
+  if (!key) {
+    throw new Error('CRITICAL: CONTENT_ENCRYPTION_KEY (or MASTER_KEY) environment variable is required. Generate with: openssl rand -hex 32');
+  }
+  if (key.length !== 64) {
+    throw new Error('CRITICAL: CONTENT_ENCRYPTION_KEY must be exactly 64 hex characters (32 bytes)');
+  }
+  return key;
+})();
 
 // Генерация ключа контента для книги
 export function generateContentKey(): string {
@@ -100,7 +109,13 @@ export function decryptContentKey(encryptedKey: string): string {
 // Генерация краткоживущего токена доступа к контенту (JWT-based)
 import jwt from "jsonwebtoken";
 
-const JWT_SECRET = process.env.JWT_SECRET || "development_secret";
+const JWT_SECRET = (() => {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    throw new Error('CRITICAL: JWT_SECRET environment variable is required for production');
+  }
+  return secret;
+})();
 
 export interface ContentAccessToken {
   userId: string;

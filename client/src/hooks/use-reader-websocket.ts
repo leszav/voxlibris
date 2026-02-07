@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { ReaderWebSocketClient } from "../lib/websocket";
 import type { ReaderProgressUpdate } from "@shared/schema";
+import { getAccessToken } from "@/lib/token-store";
 
 interface UseReaderWebSocketOptions {
   bookId: string;
@@ -23,8 +24,8 @@ export function useReaderWebSocket(options: UseReaderWebSocketOptions) {
     error: null,
   });
 
-  // Получаем токен из localStorage
-  const token = localStorage.getItem("accessToken") || "";
+  // Получаем токен из token-store
+  const token = getAccessToken() || "";
 
   // Инициализация клиента
   useEffect(() => {

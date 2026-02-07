@@ -2,10 +2,62 @@ import jwt from "jsonwebtoken";
 import bcrypt from "bcrypt";
 import { randomBytes } from "node:crypto";
 import { storage } from "./storage.js";
-import type { User } from "../shared/schema.js";
+import type { User, UserRole, UserStatus } from "../shared/schema.js";
 import { emailService } from "./services/email-service.js";
 
 export type SessionType = 'normal' | 'remember_me';
+
+// Строгая типизация для БД результатов с паролем
+interface DatabaseUser {
+  id: string;
+  username: string;
+  email: string;
+  password: string;
+  role: UserRole;
+  status: UserStatus;
+  emailConfirmed: boolean;
+  confirmationToken?: string | null;
+  invitedBy?: string | null;
+  invitedToClub?: string | null;
+  lastActivityAt?: Date | null;
+  suspensionReason?: string | null;
+  suspendedUntil?: Date | null;
+  failedLoginAttempts?: number;
+  createdAt: Date;
+}
+
+// Type guard для безопасной валидации БД результатов
+function isDatabaseUser(obj: any): obj is DatabaseUser {
+  return obj && 
+    typeof obj.id === 'string' &&
+    typeof obj.username === 'string' &&
+    typeof obj.email === 'string' &&
+    typeof obj.password === 'string' &&
+    typeof obj.role === 'string' &&
+    typeof obj.status === 'string' &&
+    typeof obj.emailConfirmed === 'boolean' &&
+    obj.createdAt instanceof Date;
+}
+
+// Безопасное преобразование DatabaseUser в публичный User
+function toSafeUser(dbUser: DatabaseUser): Omit<User, 'password'> {
+  return {
+    id: dbUser.id,
+    username: dbUser.username,
+    email: dbUser.email,
+    role: dbUser.role,
+    status: dbUser.status,
+    emailConfirmed: dbUser.emailConfirmed,
+    confirmationToken: dbUser.confirmationToken ?? undefined,
+    invitedBy: dbUser.invitedBy ?? undefined,
+    invitedToClub: dbUser.invitedToClub ?? undefined,
+    lastActivityAt: dbUser.lastActivityAt ?? undefined,
+    suspensionReason: dbUser.suspensionReason ?? undefined,
+    suspendedUntil: dbUser.suspendedUntil ?? undefined,
+    failedLoginAttempts: dbUser.failedLoginAttempts ?? 0,
+    createdAt: dbUser.createdAt,
+  };
+}
 
 export interface JWTPayload {
   userId: string;
@@ -146,46 +198,47 @@ export class AuthService {
    */
   async authenticate(emailOrUsername: string, password: string, rememberMe: boolean = false): Promise<AuthResult | null> {
     try {
-      // Пытаемся найти пользователя по email или username
-      let user = await storage.getUserByEmail(emailOrUsername);
-      user ??= await storage.getUserByUsername(emailOrUsername);
+      // Безопасно пытаемся найти пользователя по email или username
+      let dbUser: any = await storage.getUserByEmail(emailOrUsername);
+      if (!dbUser) {
+        dbUser = await storage.getUserByUsername(emailOrUsername);
+      }
       
-      if (!user) {
+      // Строгая валидация типов БД результата
+      if (!dbUser || !isDatabaseUser(dbUser)) {
         return null;
       }
 
-      // Проверяем пароль
-      const isValidPassword = await bcrypt.compare(password, user.password);
+      // Проверяем пароль с безопасным доступом к полю
+      const isValidPassword = await bcrypt.compare(password, dbUser.password);
       if (!isValidPassword) {
         return null;
       }
 
       // Проверяем статус пользователя
-      if (user.status === 'suspended') {
+      if (dbUser.status === 'suspended') {
         throw new Error('ACCOUNT_SUSPENDED');
       }
       
-      if (user.status === 'deleted') {
+      if (dbUser.status === 'deleted') {
         throw new Error('ACCOUNT_DELETED');
       }
 
       // Проверяем подтверждение email - требуется для всех пользователей
-      if (!user.emailConfirmed) {
+      if (!dbUser.emailConfirmed) {
         throw new Error('EMAIL_NOT_CONFIRMED');
       }
 
-      // Генерируем токены (в том числе для pending пользователей)
-      const tokens = await this.generateTokens(user, rememberMe);
+      // Генерируем токены с безопасным преобразованием типа
+      const safeUser = toSafeUser(dbUser);
+      const tokens = await this.generateTokens(safeUser as any, rememberMe); // Temporal cast для совместимости
       const sessionType: SessionType = rememberMe ? 'remember_me' : 'normal';
 
       // Обновляем время последней активности
-      await storage.updateUserLastActivity(user.id);
-
-      // Возвращаем пользователя без пароля
-      const { password: _, ...userWithoutPassword } = user;
+      await storage.updateUserLastActivity(dbUser.id);
 
       return {
-        user: userWithoutPassword,
+        user: safeUser,
         tokens,
         sessionType,
       };
@@ -227,36 +280,42 @@ export class AuthService {
       // Генерируем токен подтверждения email
       const confirmationToken = randomBytes(32).toString('hex');
 
-      // Создаем пользователя
-      const newUser = await storage.createUser({
+      // Создаем пользователя с безопасной типизацией
+      const userCreateData = {
         username,
         email,
         password: hashedPassword,
         invitedBy: invitedBy || null,
         invitedToClub: invitedToClub || null,
         confirmationToken, // сохраняем токен подтверждения
-        status: 'pending', // все пользователи начинают как pending
+        status: 'pending' as UserStatus, // все пользователи начинают как pending
         emailConfirmed: false,
-      } as any);
+      };
+      
+      const dbNewUser = await storage.createUser(userCreateData);
+      
+      // Строгая валидация результата создания пользователя
+      if (!dbNewUser || !isDatabaseUser(dbNewUser)) {
+        throw new Error('CRITICAL: Ошибка создания пользователя - некорректные данные из БД');
+      }
 
       // Отправляем email подтверждения
       try {
-        await this.sendConfirmationEmail(newUser, confirmationToken, baseUrl);
+        const safeUserForEmail = toSafeUser(dbNewUser);
+        await this.sendConfirmationEmail(safeUserForEmail as any, confirmationToken, baseUrl); // Temporal cast
         console.log(`Confirmation email sent to ${email}`);
       } catch (emailError) {
         console.error('Failed to send confirmation email:', emailError);
         // Не блокируем регистрацию если email не отправился
       }
 
-      // Генерируем токены
-      const tokens = await this.generateTokens(newUser, rememberMe);
+      // Генерируем токены с безопасным преобразованием типа
+      const safeUser = toSafeUser(dbNewUser);
+      const tokens = await this.generateTokens(safeUser as any, rememberMe); // Temporal cast
       const sessionType: SessionType = rememberMe ? 'remember_me' : 'normal';
 
-      // Возвращаем пользователя без пароля
-      const { password: _, ...userWithoutPassword } = newUser;
-
       return {
-        user: userWithoutPassword,
+        user: safeUser,
         tokens,
         sessionType,
       };

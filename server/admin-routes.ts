@@ -405,8 +405,83 @@ router.get('/users/deleted', jwtAuth, requireAdmin, async (req, res) => {
 
 // ==== BOOK MANAGEMENT ====
 
+// Helper functions for book management
+type BookWithSource = any & { source: 'books' | 'personal_books' | 'club_books' };
+
+function filterBooksByStatus(books: BookWithSource[], status: string): BookWithSource[] {
+  return books.filter(book => {
+    if (book.source === 'personal_books' || book.source === 'club_books') {
+      if (status === 'active') return !('isDeleted' in book) || !book.isDeleted;
+      if (status === 'blocked') return 'isDeleted' in book && book.isDeleted;
+      return false;
+    }
+    return book.source === 'books' && 'status' in book && book.status === status;
+  });
+}
+
+function formatBookForAdmin(book: BookWithSource, usersMap: Map<string, string>) {
+  let uploadedBy: string;
+  let uploadDate: string;
+  let fileSize: number;
+  let filePath: string;
+  let bookStatus: string;
+  let isbn: string | null;
+  let downloadCount: number;
+
+  if (book.source === 'books' && 'uploadedBy' in book) {
+    uploadedBy = book.uploadedBy ? usersMap.get(book.uploadedBy) || 'Unknown' : 'System';
+    uploadDate = book.uploadedAt?.toISOString() || book.createdAt.toISOString();
+    fileSize = book.fileSize || 0;
+    filePath = book.contentPath || '';
+    bookStatus = book.status === 'active' ? 'active' : (book.status === 'blocked' ? 'blocked' : 'pending');
+    isbn = book.isbn || null;
+    downloadCount = book.downloadCount || 0;
+  } else if (book.source === 'personal_books' && 'userId' in book) {
+    uploadedBy = book.userId ? usersMap.get(book.userId) || 'Unknown' : 'System';
+    uploadDate = book.uploadedAt.toISOString();
+    fileSize = book.fileSizeBytes || 0;
+    filePath = book.storagePath || '';
+    bookStatus = book.isDeleted ? 'blocked' : 'active';
+    isbn = null;
+    downloadCount = 0;
+  } else if (book.source === 'club_books' && 'uploadedByUserId' in book) {
+    uploadedBy = book.uploadedByUserId ? usersMap.get(book.uploadedByUserId) || 'Unknown' : 'System';
+    uploadDate = book.uploadedAt.toISOString();
+    fileSize = book.fileSizeBytes || 0;
+    filePath = book.storagePath || '';
+    bookStatus = book.isDeleted ? 'blocked' : 'active';
+    isbn = null;
+    downloadCount = 0;
+  } else {
+    uploadedBy = 'Unknown';
+    uploadDate = new Date().toISOString();
+    fileSize = 0;
+    filePath = '';
+    bookStatus = 'pending';
+    isbn = null;
+    downloadCount = 0;
+  }
+
+  return {
+    id: book.id,
+    title: book.title,
+    author: book.author,
+    isbn: isbn,
+    genre: 'genre' in book ? book.genre : null,
+    cover_url: book.coverUrl || null,
+    file_url: filePath,
+    status: bookStatus,
+    uploaded_by: uploadedBy,
+    upload_date: uploadDate,
+    file_size: fileSize,
+    downloads_count: downloadCount,
+    description: book.description || null,
+    source: book.source,
+    club_id: book.source === 'club_books' && 'clubId' in book ? book.clubId : null,
+  };
+}
+
 // Получить список всех книг
-// eslint-disable-next-line sonarjs/cognitive-complexity
 router.get('/books', jwtAuth, requireAdmin, async (req, res) => {
   try {
     const { page = 1, limit = 20, search, status } = req.query;
@@ -426,7 +501,7 @@ router.get('/books', jwtAuth, requireAdmin, async (req, res) => {
     const allClubBooks = await storage.getAllClubBooks();
 
     // Объединяем и маркируем источники
-    let combinedBooks = [
+    const combinedBooks = [
       ...allBooks.map(book => ({ ...book, source: 'books' })),
       ...allPersonalBooks.map(book => ({ ...book, source: 'personal_books' })),
       ...allClubBooks.map(book => ({ ...book, source: 'club_books' }))
@@ -443,15 +518,7 @@ router.get('/books', jwtAuth, requireAdmin, async (req, res) => {
     }
 
     if (status && typeof status === 'string') {
-      filteredBooks = filteredBooks.filter(book => {
-        // PersonalBooks и ClubBooks не имеют поля status, используем isDeleted
-        if (book.source === 'personal_books' || book.source === 'club_books') {
-          if (status === 'active') return !('isDeleted' in book) || !book.isDeleted;
-          if (status === 'blocked') return 'isDeleted' in book && book.isDeleted;
-          return false;
-        }
-        return book.source === 'books' && 'status' in book && book.status === status;
-      });
+      filteredBooks = filterBooksByStatus(filteredBooks, status);
     }
 
     // Пагинация
@@ -480,82 +547,7 @@ router.get('/books', jwtAuth, requireAdmin, async (req, res) => {
     }
 
     // Преобразуем данные для фронтенда
-    // eslint-disable-next-line sonarjs/cognitive-complexity
-    const formattedBooks = paginatedBooks.map(book => {
-      // Определяем поля в зависимости от источника
-      let uploadedBy: string;
-      let uploadDate: string;
-      let fileSize: number;
-      let filePath: string;
-      let bookStatus: string;
-      let isbn: string | null;
-      let downloadCount: number;
-
-      if (book.source === 'books' && 'uploadedBy' in book) {
-        // Старая таблица books
-        uploadedBy = book.uploadedBy ? usersMap.get(book.uploadedBy) || 'Unknown' : 'System';
-        uploadDate = book.uploadedAt?.toISOString() || book.createdAt.toISOString();
-        fileSize = book.fileSize || 0;
-        filePath = book.contentPath || '';
-        
-        // Определяем статус
-        if (book.status === 'active') {
-          bookStatus = 'active';
-        } else if (book.status === 'blocked') {
-          bookStatus = 'blocked';
-        } else {
-          bookStatus = 'pending';
-        }
-        
-        isbn = book.isbn || null;
-        downloadCount = book.downloadCount || 0;
-      } else if (book.source === 'personal_books' && 'userId' in book) {
-        // Таблица personal_books
-        uploadedBy = book.userId ? usersMap.get(book.userId) || 'Unknown' : 'System';
-        uploadDate = book.uploadedAt.toISOString();
-        fileSize = book.fileSizeBytes || 0;
-        filePath = book.storagePath || '';
-        bookStatus = book.isDeleted ? 'blocked' : 'active';
-        isbn = null;
-        downloadCount = 0;
-      } else if (book.source === 'club_books' && 'uploadedByUserId' in book) {
-        // Таблица club_books
-        uploadedBy = book.uploadedByUserId ? usersMap.get(book.uploadedByUserId) || 'Unknown' : 'System';
-        uploadDate = book.uploadedAt.toISOString();
-        fileSize = book.fileSizeBytes || 0;
-        filePath = book.storagePath || '';
-        bookStatus = book.isDeleted ? 'blocked' : 'active';
-        isbn = null;
-        downloadCount = 0;
-      } else {
-        // Фоллбэк на случай неизвестного источника
-        uploadedBy = 'Unknown';
-        uploadDate = book.createdAt.toISOString();
-        fileSize = 0;
-        filePath = '';
-        bookStatus = 'active';
-        isbn = null;
-        downloadCount = 0;
-      }
-
-      return {
-        id: book.id,
-        title: book.title,
-        author: book.author,
-        isbn: isbn,
-        genre: 'genre' in book ? book.genre : null,
-        cover_url: book.coverUrl || null,
-        file_url: filePath,
-        status: bookStatus,
-        uploaded_by: uploadedBy,
-        upload_date: uploadDate,
-        file_size: fileSize,
-        downloads_count: downloadCount,
-        description: book.description || null,
-        source: book.source,
-        club_id: book.source === 'club_books' && 'clubId' in book ? book.clubId : null,
-      };
-    });
+    const formattedBooks = paginatedBooks.map(book => formatBookForAdmin(book, usersMap));
 
     res.json({
       books: formattedBooks,
@@ -1201,17 +1193,12 @@ router.get('/system/health', jwtAuth, requireAdmin, async (req, res) => {
     // Проверка базы данных
     let dbStatus: 'healthy' | 'warning' | 'error' = 'healthy';
     let dbConnections = 0;
-    let dbMaxConnections = 100;
+    const dbMaxConnections = 100;
     try {
-      // Пытаемся выполнить простой запрос к БД
-      if ('db' in storage) {
-        const { sql } = await import('drizzle-orm');
-        await (storage as any).db.execute(sql`SELECT COUNT(*) as count FROM users`);
-        dbConnections = 1; // Если запрос прошёл, соединение есть
-      } else {
-        // MemStorage - всегда доступна
-        dbConnections = 1;
-      }
+      // Выполняем простой запрос к БД для проверки соединения
+      const { sql } = await import('drizzle-orm');
+      await (storage as any).db.execute(sql`SELECT COUNT(*) as count FROM users`);
+      dbConnections = 1;
     } catch (error) {
       console.error('[Health] Database check failed:', error);
       dbStatus = 'error';

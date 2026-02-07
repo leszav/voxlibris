@@ -12,12 +12,13 @@ import { duplicateDetectionService } from './duplicate-detection-service.js';
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage() });
 
-// In-memory session store for MVP (replace with Redis in production)
+// Upload session metadata (file buffer stored in MinIO temp storage, not in RAM)
 interface UploadSession {
     userId: string;
-    fileBuffer: Buffer;
+    tempStorageKey: string; // MinIO key for the raw file
     originalName: string;
     mimeType: string;
+    fileSize: number;
     parsedMetadata: any;
     createdAt: Date;
 }
@@ -29,26 +30,51 @@ interface ParsedBookCache {
     author: string;
     totalChapters: number;
     cachedAt: Date;
+    lastAccessedAt: Date;
 }
 
 const uploadSessions = new Map<string, UploadSession>();
 const bookCache = new Map<string, ParsedBookCache>();
 
-// Cache TTL: 30 minutes
-const CACHE_TTL_MS = 30 * 60 * 1000;
+// Cache settings
+const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
+const MAX_CACHE_SIZE = 50; // Max number of books cached in memory
 
-// Clean up old sessions and cache periodically (every hour)
-setInterval(() => {
+// LRU eviction: remove the least recently accessed entry
+function evictLRUCache(): void {
+    if (bookCache.size <= MAX_CACHE_SIZE) return;
+    let oldestKey: string | null = null;
+    let oldestTime = Infinity;
+    for (const [key, entry] of bookCache.entries()) {
+        if (entry.lastAccessedAt.getTime() < oldestTime) {
+            oldestTime = entry.lastAccessedAt.getTime();
+            oldestKey = key;
+        }
+    }
+    if (oldestKey) {
+        bookCache.delete(oldestKey);
+        console.log(`🗑️ [Cache LRU] Evicted book ${oldestKey}`);
+    }
+}
+
+// Clean up old sessions (metadata + MinIO temp files) and cache periodically
+setInterval(async () => {
     const now = new Date();
     
-    // Clean up old upload sessions
+    // Clean up old upload sessions + their temp files in MinIO
     for (const [id, session] of Array.from(uploadSessions.entries())) {
         if (now.getTime() - session.createdAt.getTime() > 3600000) { // 1 hour
+            try {
+                await fileStorage.deleteFile(session.tempStorageKey);
+            } catch (e) {
+                console.warn(`[Cleanup] Failed to delete temp file ${session.tempStorageKey}:`, e);
+            }
             uploadSessions.delete(id);
+            console.log(`🗑️ [Cleanup] Removed expired upload session ${id}`);
         }
     }
     
-    // Clean up old book cache
+    // Clean up old book cache entries
     for (const [bookId, cached] of Array.from(bookCache.entries())) {
         if (now.getTime() - cached.cachedAt.getTime() > CACHE_TTL_MS) {
             bookCache.delete(bookId);
@@ -90,11 +116,17 @@ router.post('/upload', jwtAuth, requireActiveUser, upload.single('file'), async 
         );
 
         const sessionId = crypto.randomUUID();
+
+        // Store raw file in MinIO temp storage instead of RAM
+        const tempKey = `temp/uploads/${sessionId}/${req.file.originalname}`;
+        await fileStorage.uploadFile(req.file.buffer, tempKey, req.file.mimetype);
+
         uploadSessions.set(sessionId, {
             userId: req.user.id,
-            fileBuffer: req.file.buffer,
+            tempStorageKey: tempKey,
             originalName: req.file.originalname,
             mimeType: req.file.mimetype,
+            fileSize: req.file.buffer.length,
             parsedMetadata: metadata,
             createdAt: new Date()
         });
@@ -208,10 +240,13 @@ router.post('/upload/:sessionId/confirm', jwtAuth, requireActiveUser, async (req
         }
         const format = fileType.toUpperCase() as BookFormat;
 
+        // Download raw file from MinIO temp storage
+        const fileBuffer = await fileStorage.getFile(session.tempStorageKey);
+
         // Calculate hash and encrypt
-        const fileHash = crypto.createHash('sha256').update(session.fileBuffer).digest('hex');
+        const fileHash = crypto.createHash('sha256').update(fileBuffer).digest('hex');
         const { storagePath, encryptedKey } = await encryptAndUploadPersonalBook(
-            session.fileBuffer,
+            fileBuffer,
             req.user.id,
             sessionId
         );
@@ -227,7 +262,7 @@ router.post('/upload/:sessionId/confirm', jwtAuth, requireActiveUser, async (req
             description: metadata.description,
             format: format,
             fileHash,
-            fileSizeBytes: session.fileBuffer.length,
+            fileSizeBytes: fileBuffer.length,
             language: metadata.language,
             publicationYear: metadata.publicationYear ? Number.parseInt(metadata.publicationYear) : undefined,
             genre: metadata.genre,
@@ -236,6 +271,12 @@ router.post('/upload/:sessionId/confirm', jwtAuth, requireActiveUser, async (req
             coverUrl: coverUrl,
         });
 
+        // Clean up: delete temp file from MinIO and remove session
+        try {
+            await fileStorage.deleteFile(session.tempStorageKey);
+        } catch (e) {
+            console.warn(`[PersonalBooks] Failed to clean temp file ${session.tempStorageKey}:`, e);
+        }
         uploadSessions.delete(sessionId);
         res.json(book);
     } catch (error) {
@@ -380,17 +421,20 @@ router.get('/:id/content', jwtAuth, async (req, res) => {
             const parser = BookParserFactory.createParser(format as 'fb2' | 'epub');
             const parsedBook = await parser.parseBook(decryptedFile, `book.${format}`);
             
-            // Кэшируем результат
+            // Кэшируем результат (with LRU eviction)
             cached = {
                 chapters: parsedBook.chapters || [],
                 title: book.title,
                 author: book.author,
                 totalChapters: parsedBook.chapters?.length || 1,
-                cachedAt: new Date()
+                cachedAt: new Date(),
+                lastAccessedAt: new Date()
             };
             bookCache.set(book.id, cached);
-            console.log(`✅ [Cache] Cached book ${book.id} with ${cached.totalChapters} chapters`);
+            evictLRUCache();
+            console.log(`✅ [Cache] Cached book ${book.id} with ${cached.totalChapters} chapters (cache size: ${bookCache.size}/${MAX_CACHE_SIZE})`);
         } else {
+            cached.lastAccessedAt = new Date();
             console.log(`⚡ [Cache HIT] Returning cached book ${book.id}`);
         }
 

@@ -11,6 +11,7 @@ import { UserPlus, Mail, Loader2, CheckCircle2, Search, X, AlertCircle } from "l
 import { useInviteToClub } from "@/hooks/use-clubs";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery } from "@tanstack/react-query";
+import { getAccessToken } from "@/lib/token-store";
 
 interface InviteMemberModalProps {
   readonly clubId: string;
@@ -45,7 +46,7 @@ export function InviteMemberModal({ clubId, clubTitle }: InviteMemberModalProps)
     queryKey: ["users-search", searchQuery],
     queryFn: async () => {
       if (!searchQuery.trim()) return [];
-      const token = localStorage.getItem('accessToken');
+      const token = getAccessToken();
       const response = await fetch(`/api/users/search?q=${encodeURIComponent(searchQuery)}`, {
         headers: { 'Authorization': `Bearer ${token}` },
       });

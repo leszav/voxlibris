@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useParams } from "wouter";
 import { useClubBookContent, useClubReadingProgress, useUpdateClubProgress, useClubBookmarks } from "../../hooks/use-club-reader";
 import { useAnalytics } from "../../hooks/use-analytics";
@@ -435,6 +435,27 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
               </Button>
             </div>
           )}
+          {currentChapter !== null && currentChapter === bookData.totalChapters && (
+            <div className="mt-6 flex justify-end">
+              <Button
+                variant="default"
+                onClick={() => {
+                  const container = scrollContainerRef.current;
+                  const scrollTop = container?.scrollTop ?? 0;
+                  const scrollHeight = container?.scrollHeight ?? 0;
+                  const clientHeight = container?.clientHeight ?? 0;
+                  const position = JSON.stringify({ scrollTop, scrollHeight, clientHeight });
+                  updateProgress({
+                    currentChapter,
+                    currentPosition: position,
+                    progress: 100,
+                  });
+                }}
+              >
+                Отметить как прочитанное
+              </Button>
+            </div>
+          )}
         </>
       );
     }
@@ -492,7 +513,7 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
           className="fixed inset-0 z-50 flex items-center justify-end pointer-events-none"
         >
           <div
-            className="bg-background border rounded-lg shadow-xl w-full max-w-md max-h-[80vh] overflow-y-auto pointer-events-auto mr-4"
+            className="bg-background border rounded-lg shadow-xl w-full max-w-md max-h-[80vh] pointer-events-auto mr-4"
           >
             <div className="sticky top-0 bg-background border-b p-4 flex items-center justify-between">
               <h2 className="text-lg font-semibold">Настройки чтения</h2>
@@ -517,9 +538,9 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
           className="fixed inset-0 z-50 flex items-center justify-end pointer-events-none"
         >
           <div
-            className="bg-background border rounded-lg shadow-xl w-full max-w-md max-h-[80vh] overflow-y-auto pointer-events-auto mr-4"
+            className="bg-background border rounded-lg shadow-xl w-full max-w-md max-h-[80vh] overflow-y-auto pointer-events-auto mr-4 flex flex-col"
           >
-            <div className="sticky top-0 bg-background border-b p-4 flex items-center justify-between">
+            <div className="sticky top-0 bg-background border-b p-4 flex items-center justify-between flex-none">
               <h2 className="text-lg font-semibold">Оглавление</h2>
               <Button
                 variant="ghost"
@@ -529,7 +550,7 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
                 ✕
               </Button>
             </div>
-            <div className="p-4">
+            <div className="p-4 flex-1">
               <ClubChapterList
                 chapters={chapters}
                 currentChapter={currentChapter || 1}
@@ -551,9 +572,9 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
           className="fixed inset-0 z-50 flex items-center justify-end pointer-events-none"
         >
           <div
-            className="bg-background border rounded-lg shadow-xl w-full max-w-md max-h-[80vh] overflow-y-auto pointer-events-auto mr-4"
+            className="bg-background border rounded-lg shadow-xl w-full max-w-md max-h-[80vh] overflow-y-auto pointer-events-auto mr-4 flex flex-col"
           >
-            <div className="sticky top-0 bg-background border-b p-4 flex items-center justify-between">
+            <div className="sticky top-0 bg-background border-b p-4 flex items-center justify-between flex-none">
               <h2 className="text-lg font-semibold">Закладки</h2>
               <Button
                 variant="ghost"
@@ -563,7 +584,7 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
                 ✕
               </Button>
             </div>
-            <div className="p-4">
+            <div className="p-4 flex-1">
               {bookmarksLoading ? (
                 <LoadingIndicator message="Загрузка закладок..." />
               ) : (

@@ -87,7 +87,7 @@ function validateStoragePath(path: string): { valid: boolean; normalizedPath?: s
   }
 
   // Удалить leading slash
-  let normalizedPath = path.startsWith('/') ? path.slice(1) : path;
+  const normalizedPath = path.startsWith('/') ? path.slice(1) : path;
 
   console.log(`[validateStoragePath] Original path: "${path}", Normalized: "${normalizedPath}"`);
 
@@ -210,7 +210,7 @@ export async function registerRoutes(
         return res.status(401).json({ message: 'Authentication required' });
       }
 
-      let invitation = await findInvitationByToken(req.params.token);
+      const invitation = await findInvitationByToken(req.params.token);
       if (!invitation) {
         console.log(`Invitation not found for token: ${req.params.token}`);
         return res.status(404).json({ message: 'Invitation not found' });
@@ -1353,8 +1353,8 @@ export async function registerRoutes(
       const updatedProgress = await storage.updateReadingProgress(progressData);
       console.log('[Progress] Успешно обновлено:', updatedProgress);
 
-      // Если прогресс достиг 100%, добавляем в историю
-      if (progress === 100) {
+      // Если прогресс достиг 100% (или почти), добавляем в историю
+      if (progress >= 99) {
         try {
           // Проверяем, не добавлена ли уже книга в историю
           const existingHistory = await storage.getReadingHistory(userId);

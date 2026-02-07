@@ -1,5 +1,6 @@
 import { User } from '../../../shared/schema';
-import { AuthError, AuthErrorFactory, AuthErrorHandler } from './auth-errors';
+import { getAccessToken, setAccessToken, isTokenExpired } from './token-store';
+import { apiRequest } from './queryClient';
 
 interface LoginRequest {
   username: string;
@@ -19,6 +20,7 @@ interface RegisterRequest {
 
 interface AuthResponse {
   user: User;
+  accessToken?: string;
 }
 
 interface RefreshResponse {
@@ -30,116 +32,12 @@ class AuthAPI {
   private refreshTimer: NodeJS.Timeout | null = null;
   private activityTimer: NodeJS.Timeout | null = null;
   private lastActivity: number = Date.now();
-  private isRefreshing: boolean = false;
-
-  // Получить токен только из localStorage (единый источник правды)
-  private getAccessToken(): string | null {
-    try {
-      return localStorage.getItem('accessToken');
-    } catch {
-      return null;
-    }
-  }
-
-  // Сохранить токен только в localStorage
-  private setAccessToken(token: string | null): void {
-    try {
-      if (token) {
-        localStorage.setItem('accessToken', token);
-      } else {
-        localStorage.removeItem('accessToken');
-      }
-    } catch {
-      // Игнорируем ошибки localStorage
-    }
-  }
-
-  // Проверить валидность токена
-  private isTokenExpired(token: string): boolean {
-    try {
-      const payload = JSON.parse(atob(token.split('.')[1]));
-      const currentTime = Math.floor(Date.now() / 1000);
-      return payload.exp < currentTime;
-    } catch {
-      return true;
-    }
-  }
-
-  // Создать заголовки с авторизацией
-  private createHeaders(includeAuth: boolean = true): HeadersInit {
-    const headers: HeadersInit = {
-      'Content-Type': 'application/json',
-    };
-
-    if (includeAuth) {
-      const token = this.getAccessToken();
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
-    }
-
-    return headers;
-  }
-
-  // Обновить access token через refresh token
-  private async refreshAccessToken(): Promise<string> {
-    // Защита от одновременных запросов на обновление
-    if (this.isRefreshing) {
-      // Ждем завершения текущего обновления
-      return new Promise((resolve, reject) => {
-        const checkRefresh = () => {
-          const token = this.getAccessToken();
-          if (this.isRefreshing) {
-            setTimeout(checkRefresh, 100);
-          } else if (token) {
-            resolve(token);
-          } else {
-            reject(new Error('Refresh failed'));
-          }
-        };
-        checkRefresh();
-      });
-    }
-
-    this.isRefreshing = true;
-    try {
-      const response = await fetch(`${this.baseURL}/auth/refresh`, {
-        method: 'POST',
-        credentials: 'include', // Для отправки httpOnly refresh cookie
-      });
-
-      if (!response.ok) {
-        const responseText = await response.text();
-        const error = AuthErrorFactory.fromResponse(response, responseText);
-        AuthErrorHandler.logError(error, 'refreshAccessToken');
-        throw error;
-      }
-
-      const data: RefreshResponse = await response.json();
-      this.setAccessToken(data.accessToken);
-      
-      // Перезапускаем таймер автоматического обновления
-      this.startTokenRefreshTimer();
-      
-      return data.accessToken;
-    } catch (error) {
-      if (error instanceof AuthError) {
-        throw error;
-      }
-      
-      const authError = AuthErrorFactory.refreshFailed();
-      AuthErrorHandler.logError(authError, 'refreshAccessToken');
-      throw authError;
-    } finally {
-      this.isRefreshing = false;
-    }
-  }
 
   // Запуск автоматического обновления токенов
   private startTokenRefreshTimer(): void {
     this.clearTokenRefreshTimer();
     
-    const token = this.getAccessToken();
+    const token = getAccessToken();
     if (!token) return;
     
     try {
@@ -156,7 +54,8 @@ class AuthAPI {
           const INACTIVE_THRESHOLD = 30 * 60 * 1000; // 30 минут
           
           if (inactiveTime < INACTIVE_THRESHOLD) {
-            await this.refreshAccessToken();
+            // apiRequest автоматически обновит токен
+            await apiRequest('/api/auth/refresh', { method: 'POST' });
           } else {
             // Пользователь неактивен - не обновляем автоматически
             this.clearTokenRefreshTimer();
@@ -187,7 +86,7 @@ class AuthAPI {
       this.lastActivity = Date.now();
       
       // Возобновляем обновление токенов, если пользователь снова активен
-      if (!this.refreshTimer && this.getAccessToken()) {
+      if (!this.refreshTimer && getAccessToken()) {
         this.startTokenRefreshTimer();
       }
     };
@@ -220,80 +119,19 @@ class AuthAPI {
   private handleAuthError(): void {
     this.clearTokens();
     this.clearTokenRefreshTimer();
-    // Можно добавить редирект на страницу логина или показать уведомление
     globalThis.dispatchEvent(new CustomEvent('auth-error'));
-  }
-
-  // Выполнить запрос с автоматическим обновлением токена
-  private async fetchWithAuth(url: string, options: RequestInit = {}): Promise<Response> {
-    const token = this.getAccessToken();
-    
-    // Проверяем, не истек ли токен перед запросом
-    if (token && this.isTokenExpired(token)) {
-      try {
-        await this.refreshAccessToken();
-      } catch {
-        // Если обновление не удалось, очищаем токен
-        this.setAccessToken(null);
-        throw new Error('Сессия истекла. Необходимо войти в систему заново.');
-      }
-    }
-    
-    // Выполняем запрос с актуальным токеном
-    let response = await fetch(url, {
-      ...options,
-      headers: {
-        ...this.createHeaders(),
-        ...options.headers,
-      },
-      credentials: 'include',
-    });
-
-    // Если получили 401, пробуем обновить токен один раз
-    if (response.status === 401) {
-      try {
-        await this.refreshAccessToken();
-        
-        // Повторяем запрос с новым токеном
-        response = await fetch(url, {
-          ...options,
-          headers: {
-            ...this.createHeaders(),
-            ...options.headers,
-          },
-          credentials: 'include',
-        });
-      } catch {
-        // Если обновление не удалось, очищаем токен и выбрасываем ошибку
-        this.setAccessToken(null);
-        throw new Error('Сессия истекла. Необходимо войти в систему заново.');
-      }
-    }
-
-    return response;
   }
 
   async register(data: RegisterRequest): Promise<AuthResponse> {
     try {
-      const response = await fetch(`${this.baseURL}/auth/register`, {
+      const result = await apiRequest<AuthResponse>(`${this.baseURL}/auth/register`, {
         method: 'POST',
-        headers: this.createHeaders(false),
         body: JSON.stringify(data),
-        credentials: 'include',
       });
-
-      if (!response.ok) {
-        const responseText = await response.text();
-        const error = AuthErrorFactory.fromResponse(response, responseText);
-        AuthErrorHandler.logError(error, 'register');
-        throw error;
-      }
-
-      const result = await response.json();
       
       // Сохраняем access token из ответа
       if (result.accessToken) {
-        this.setAccessToken(result.accessToken);
+        setAccessToken(result.accessToken);
         
         // Запускаем автоматическое обновление токенов
         this.startTokenRefreshTimer();
@@ -304,41 +142,22 @@ class AuthAPI {
 
       return result;
     } catch (error) {
-      if (error instanceof AuthError) {
-        throw error;
-      }
-      
-      if (error instanceof TypeError && error.message.includes('fetch')) {
-        const networkError = AuthErrorFactory.fromNetworkError(error);
-        AuthErrorHandler.logError(networkError, 'register');
-        throw networkError;
-      }
-      
+      // Очищаем состояние при ошибке
+      setAccessToken(null);
       throw error;
     }
   }
 
   async login(data: LoginRequest): Promise<AuthResponse> {
     try {
-      const response = await fetch(`${this.baseURL}/auth/login`, {
+      const result = await apiRequest<AuthResponse>(`${this.baseURL}/auth/login`, {
         method: 'POST',
-        headers: this.createHeaders(false),
         body: JSON.stringify(data),
-        credentials: 'include',
       });
-
-      if (!response.ok) {
-        const responseText = await response.text();
-        const error = AuthErrorFactory.fromResponse(response, responseText);
-        AuthErrorHandler.logError(error, 'login');
-        throw error;
-      }
-
-      const result = await response.json();
       
       // Сохраняем access token из ответа
       if (result.accessToken) {
-        this.setAccessToken(result.accessToken);
+        setAccessToken(result.accessToken);
         
         // Запускаем автоматическое обновление токенов
         this.startTokenRefreshTimer();
@@ -349,97 +168,49 @@ class AuthAPI {
 
       return result;
     } catch (error) {
-      if (error instanceof AuthError) {
-        throw error;
-      }
-      
-      if (error instanceof TypeError && error.message.includes('fetch')) {
-        const networkError = AuthErrorFactory.fromNetworkError(error);
-        AuthErrorHandler.logError(networkError, 'login');
-        throw networkError;
-      }
-      
+      // Очищаем состояние при ошибке
+      setAccessToken(null);
       throw error;
     }
   }
 
   async logout(): Promise<void> {
     try {
-      const response = await this.fetchWithAuth(`${this.baseURL}/auth/logout`, {
+      await apiRequest(`${this.baseURL}/auth/logout`, {
         method: 'POST',
       });
-
-      if (!response.ok) {
-        const responseText = await response.text();
-        const error = AuthErrorFactory.fromResponse(response, responseText);
-        AuthErrorHandler.logError(error, 'logout');
-        
-        // Очищаем токен даже при ошибке logout
-        this.setAccessToken(null);
-        this.clearTokenRefreshTimer();
-        this.stopActivityTracking();
-        throw error;
-      }
     } catch (error) {
-      // Всегда очищаем токен и таймеры при logout
-      this.setAccessToken(null);
-      this.clearTokenRefreshTimer();
-      this.stopActivityTracking();
-      
-      if (error instanceof AuthError) {
-        throw error;
-      }
-      
-      if (error instanceof TypeError && error.message.includes('fetch')) {
-        const networkError = AuthErrorFactory.fromNetworkError(error);
-        AuthErrorHandler.logError(networkError, 'logout');
-        throw networkError;
-      }
-      
-      throw error;
+      // Игнорируем ошибки logout на сервере
+      console.error('Logout error:', error);
+    } finally {
+      // Всегда очищаем локальное состояние
+      this.clearTokens();
     }
   }
 
   async getCurrentUser(): Promise<AuthResponse> {
-    try {
-      const response = await this.fetchWithAuth(`${this.baseURL}/auth/me`, {
-        method: 'GET',
-      });
-
-      if (!response.ok) {
-        const responseText = await response.text();
-        const error = AuthErrorFactory.fromResponse(response, responseText);
-        AuthErrorHandler.logError(error, 'getCurrentUser');
-        throw error;
-      }
-
-      return response.json();
-    } catch (error) {
-      if (error instanceof AuthError) {
-        throw error;
-      }
-      
-      throw error;
-    }
+    return await apiRequest<AuthResponse>(`${this.baseURL}/auth/me`, {
+      method: 'GET',
+    });
   }
 
   // Очистить токены (для выхода)
   clearTokens(): void {
-    this.setAccessToken(null);
+    setAccessToken(null);
     this.clearTokenRefreshTimer();
     this.stopActivityTracking();
   }
 
   // Проверить, аутентифицирован ли пользователь
   isAuthenticated(): boolean {
-    const token = this.getAccessToken();
-    return token !== null && !this.isTokenExpired(token);
+    const token = getAccessToken();
+    return token !== null && !isTokenExpired(token);
   }
 
   // Получить данные пользователя из токена (без запроса к серверу)
   getUserFromToken(): { userId: string; username: string; role: string } | null {
-    const token = this.getAccessToken();
-    if (!token || this.isTokenExpired(token)) {
+    const token = getAccessToken();
+    if (!token || isTokenExpired(token)) {
       return null;
     }
 
@@ -458,10 +229,19 @@ class AuthAPI {
   // Принудительное обновление токена
   async forceRefreshToken(): Promise<boolean> {
     try {
-      await this.refreshAccessToken();
-      return true;
+      const result = await apiRequest<RefreshResponse>('/api/auth/refresh', {
+        method: 'POST',
+      });
+      
+      if (result.accessToken) {
+        setAccessToken(result.accessToken);
+        this.startTokenRefreshTimer();
+        return true;
+      }
+      
+      return false;
     } catch {
-      this.setAccessToken(null);
+      setAccessToken(null);
       return false;
     }
   }

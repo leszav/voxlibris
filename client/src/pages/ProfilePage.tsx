@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
+import { getAccessToken, getUserFromToken } from "@/lib/token-store";
 
 interface UserProfile {
   id: string;
@@ -47,7 +48,7 @@ export default function ProfilePage() {
     id ||
     (() => {
       // Пытаемся получить ID из разных источников
-      const userId = localStorage.getItem("userId");
+      const userId = getUserFromToken(getAccessToken() || '')?.userId || null;
       return userId || "current";
     })();
   const queryClient = useQueryClient();
@@ -66,7 +67,7 @@ export default function ProfilePage() {
 
       const endpoint =
         profileId === "current" ? "/api/users/current/profile" : `/api/users/${profileId}/profile`;
-      const token = localStorage.getItem("accessToken");
+      const token = getAccessToken();
 
       const response = await fetch(endpoint, {
         method: "PUT",
@@ -112,7 +113,7 @@ export default function ProfilePage() {
     queryFn: async () => {
       const endpoint =
         profileId === "current" ? "/api/users/current/profile" : `/api/users/${profileId}/profile`;
-      const token = localStorage.getItem("accessToken");
+      const token = getAccessToken();
 
       const response = await fetch(endpoint, {
         headers: {
@@ -147,7 +148,7 @@ export default function ProfilePage() {
     queryFn: async () => {
       const endpoint =
         profileId === "current" ? "/api/users/current/clubs" : `/api/users/${profileId}/clubs`;
-      const token = localStorage.getItem("accessToken");
+      const token = getAccessToken();
 
       const response = await fetch(endpoint, {
         headers: {
@@ -190,7 +191,7 @@ export default function ProfilePage() {
   const genres = profile.favoriteGenres
     ? profile.favoriteGenres.split(",").filter((g) => g.trim())
     : [];
-  const currentUserId = localStorage.getItem("userId");
+  const currentUserId = getUserFromToken(getAccessToken() || '')?.userId || null;
   const isOwnProfile = !id || currentUserId === id || profileId === "current";
 
   if (import.meta.env.DEV) {

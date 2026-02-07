@@ -14,11 +14,10 @@ import { and, eq } from 'drizzle-orm';
 function normalizeString(str: string): string {
   if (!str) return '';
   
-  let result = str
+  const result = str
     .toLowerCase()
     .trim()
-    // eslint-disable-next-line sonarjs/no-invalid-string-concat -- false positive: regex required for whitespace normalization
-    .replace(/\s+/g, ' ')
+    .replaceAll(/\s+/g, ' ')
     // Нормализация кавычек
     .replaceAll('«', '"')
     .replaceAll('»', '"')

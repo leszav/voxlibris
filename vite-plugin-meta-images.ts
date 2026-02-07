@@ -40,13 +40,11 @@ export function metaImagesPlugin(): Plugin {
 
       log('[meta-images] updating meta image tags to:', imageUrl);
 
-      // eslint-disable-next-line sonarjs/no-invalid-string-concat -- false positive: regex required for meta tag replacement
       html = html.replace(
         /<meta\s+property="og:image"\s+content="[^"]*"\s*\/>/g,
         `<meta property="og:image" content="${imageUrl}" />`
       );
 
-      // eslint-disable-next-line sonarjs/no-invalid-string-concat -- false positive: regex required for meta tag replacement
       html = html.replace(
         /<meta\s+name="twitter:image"\s+content="[^"]*"\s*\/>/g,
         `<meta name="twitter:image" content="${imageUrl}" />`

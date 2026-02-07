@@ -1,9 +1,10 @@
 import * as React from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Loader2, BookOpen, Plus } from "lucide-react";
+import { Loader2, BookOpen } from "lucide-react";
+import { getAccessToken } from "@/lib/token-store";
 
 interface Book {
   id: string;
@@ -14,7 +15,7 @@ interface Book {
 }
 
 interface BookshelfProps {
-  userId: string;
+  readonly userId: string;
 }
 
 const bookshelfStatuses = [
@@ -30,7 +31,7 @@ export function Bookshelf({ userId }: BookshelfProps) {
   const { data: books = [], isLoading } = useQuery<Book[]>({
     queryKey: ["user-books", userId, activeStatus],
     queryFn: async () => {
-      const token = localStorage.getItem('accessToken');
+      const token = getAccessToken();
       const response = await fetch(`/api/users/${userId}/books?status=${activeStatus}`, {
         headers: {
           'Authorization': `Bearer ${token}`,

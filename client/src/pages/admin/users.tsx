@@ -11,7 +11,7 @@ import {
   Shield,
   ShieldCheck,
   Trash2,
-  User,
+  User as UserIcon,
   UserPlus,
 } from "lucide-react";
 import { useState } from "react";
@@ -45,6 +45,7 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { getAccessToken } from "@/lib/token-store";
 
 interface User {
   id: string;
@@ -76,7 +77,7 @@ interface UsersFilters {
 }
 
 async function fetchUsers(filters: UsersFilters): Promise<UsersResponse> {
-  const token = localStorage.getItem("accessToken");
+  const token = getAccessToken();
   if (!token) throw new Error("No auth token");
 
   const params = new URLSearchParams();
@@ -101,7 +102,7 @@ async function fetchUsers(filters: UsersFilters): Promise<UsersResponse> {
 }
 
 async function updateUserRole(username: string, role: string): Promise<void> {
-  const token = localStorage.getItem("accessToken");
+  const token = getAccessToken();
   if (!token) throw new Error("No auth token");
 
   const response = await fetch(`/api/v1/admin/users/${username}/role`, {
@@ -119,7 +120,7 @@ async function updateUserRole(username: string, role: string): Promise<void> {
 }
 
 async function updateUserStatus(username: string, status: string): Promise<void> {
-  const token = localStorage.getItem("accessToken");
+  const token = getAccessToken();
   if (!token) throw new Error("No auth token");
 
   const response = await fetch(`/api/v1/admin/users/${username}/status`, {
@@ -137,7 +138,7 @@ async function updateUserStatus(username: string, status: string): Promise<void>
 }
 
 async function deleteUser(userId: string): Promise<void> {
-  const token = localStorage.getItem("accessToken");
+  const token = getAccessToken();
   if (!token) throw new Error("No auth token");
 
   const response = await fetch(`/api/v1/admin/users/${userId}`, {
@@ -155,7 +156,7 @@ async function deleteUser(userId: string): Promise<void> {
 }
 
 async function restoreUser(userId: string): Promise<void> {
-  const token = localStorage.getItem("accessToken");
+  const token = getAccessToken();
   if (!token) throw new Error("No auth token");
 
   const response = await fetch(`/api/v1/admin/users/${userId}/restore`, {
@@ -173,7 +174,7 @@ async function restoreUser(userId: string): Promise<void> {
 }
 
 async function permanentDeleteUser(userId: string): Promise<void> {
-  const token = localStorage.getItem("accessToken");
+  const token = getAccessToken();
   if (!token) throw new Error("No auth token");
 
   const response = await fetch(`/api/v1/admin/users/${userId}/permanent`, {
@@ -191,7 +192,7 @@ async function permanentDeleteUser(userId: string): Promise<void> {
 }
 
 async function fetchDeletedUsers(): Promise<UsersResponse> {
-  const token = localStorage.getItem("accessToken");
+  const token = getAccessToken();
   if (!token) throw new Error("No auth token");
 
   const response = await fetch("/api/v1/admin/users/deleted", {
@@ -268,7 +269,7 @@ function UserRoleBadge({ role }: Readonly<{ role: User["role"] }>) {
     case "user":
       return (
         <Badge variant="outline">
-          <User className="w-3 h-3 mr-1" />
+          <UserIcon className="w-3 h-3 mr-1" />
           Пользователь
         </Badge>
       );
@@ -422,7 +423,7 @@ function UserActionsMenu({ user }: Readonly<{ user: User }>) {
             onClick={() => updateRoleMutation.mutate({ username: user.username, role: "user" })}
             disabled={user.role === "user" || updateRoleMutation.isPending}
           >
-            <User className="h-4 w-4 mr-2" />
+            <UserIcon className="h-4 w-4 mr-2" />
             Сделать пользователем
           </DropdownMenuItem>
           <DropdownMenuItem
@@ -522,7 +523,7 @@ function UsersTable({ users }: Readonly<{ users: User[] }>) {
                   </div>
                   <div className="text-gray-500">
                     Последний вход:{" "}
-                    {user.last_active && !isNaN(new Date(user.last_active).getTime())
+                    {user.last_active && !Number.isNaN(new Date(user.last_active).getTime())
                       ? new Date(user.last_active).toLocaleDateString("ru")
                       : "Никогда"}
                   </div>
@@ -655,7 +656,7 @@ export default function AdminUsers() {
     }
     return (
       <div className="text-center py-12">
-        <User className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+        <UserIcon className="h-12 w-12 text-gray-400 mx-auto mb-4" />
         <h3 className="text-lg font-semibold text-gray-900">Пользователи не найдены</h3>
         <p className="text-gray-600 mt-2">Попробуйте изменить фильтры поиска</p>
       </div>

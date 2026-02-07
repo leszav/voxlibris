@@ -39,6 +39,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useDeleteClubBook } from "@/hooks/use-books-v2";
 import { useClub, useClubMembers, useRemoveMember } from "@/hooks/use-clubs";
 import { useToast } from "@/hooks/use-toast";
+import { getAccessToken } from "@/lib/token-store";
 
 interface ScheduleItem {
   id: string;
@@ -82,7 +83,60 @@ const parseSchedule = (schedule: string | null): ScheduleItem[] => {
   }
 };
 
-// eslint-disable-next-line sonarjs/cognitive-complexity
+const ClubNotFound = () => (
+  <MainLayout>
+    <div className="container py-12 px-6 md:px-12 text-center">
+      <p className="text-muted-foreground">Клуб не найден</p>
+    </div>
+  </MainLayout>
+);
+
+const ClubLoading = () => (
+  <MainLayout>
+    <div className="container py-12 px-6 md:px-12">
+      <div className="flex items-center justify-center py-12">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        <span className="ml-2 text-muted-foreground">Загружаем клуб...</span>
+      </div>
+    </div>
+  </MainLayout>
+);
+
+const ClubAuthRequired = () => (
+  <MainLayout>
+    <div className="container py-12 px-6 md:px-12 flex justify-center">
+      <Card className="max-w-md w-full">
+        <CardHeader className="text-center">
+          <div className="mx-auto mb-4 h-12 w-12 rounded-full bg-blue-100 flex items-center justify-center">
+            <LogIn className="h-6 w-6 text-blue-600" />
+          </div>
+          <CardTitle>Требуется авторизация</CardTitle>
+        </CardHeader>
+        <CardContent className="text-center space-y-4">
+          <p className="text-muted-foreground">
+            Доступ к клубам доступен только авторизованным пользователям. Войдите в систему
+            или зарегистрируйтесь, чтобы присоединиться к клубам чтения.
+          </p>
+          <p className="text-sm text-muted-foreground">
+            В будущих версиях вы сможете запросить приглашение в клуб прямо с карточки клуба.
+          </p>
+          <div className="flex flex-col sm:flex-row gap-2 justify-center">
+            <Button asChild>
+              <Link href="/auth/login">
+                <LogIn className="h-4 w-4 mr-2" />
+                Войти
+              </Link>
+            </Button>
+            <Button variant="outline" asChild>
+              <Link href="/auth/register">Зарегистрироваться</Link>
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  </MainLayout>
+);
+
 export default function ClubDetails() {
   const [, params] = useRoute("/clubs/:id");
   const clubId = params?.id || "";
@@ -94,75 +148,20 @@ export default function ClubDetails() {
   const removeMemberMutation = useRemoveMember();
   const deleteBookMutation = useDeleteClubBook(clubId);
 
-  if (!clubId) {
-    return (
-      <MainLayout>
-        <div className="container py-12 px-6 md:px-12 text-center">
-          <p className="text-muted-foreground">Клуб не найден</p>
-        </div>
-      </MainLayout>
-    );
-  }
+  if (!clubId) return <ClubNotFound />;
+  if (isLoading) return <ClubLoading />;
 
-  if (isLoading) {
-    return (
-      <MainLayout>
-        <div className="container py-12 px-6 md:px-12">
-          <div className="flex items-center justify-center py-12">
-            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-            <span className="ml-2 text-muted-foreground">Загружаем клуб...</span>
-          </div>
-        </div>
-      </MainLayout>
-    );
-  }
+  // Check for auth-related errors
+  const isAuthError = error && (
+    error.message?.includes("Сессия истекла") ||
+    error.message?.includes("войдите") ||
+    error.message?.includes("401") ||
+    error.message?.includes("Authentication")
+  );
+
+  if (isAuthError) return <ClubAuthRequired />;
 
   if (error) {
-    // Проверяем, является ли ошибка связанной с авторизацией
-    const isAuthError =
-      error.message?.includes("Сессия истекла") ||
-      error.message?.includes("войдите") ||
-      error.message?.includes("401") ||
-      error.message?.includes("Authentication");
-
-    if (isAuthError) {
-      return (
-        <MainLayout>
-          <div className="container py-12 px-6 md:px-12 flex justify-center">
-            <Card className="max-w-md w-full">
-              <CardHeader className="text-center">
-                <div className="mx-auto mb-4 h-12 w-12 rounded-full bg-blue-100 flex items-center justify-center">
-                  <LogIn className="h-6 w-6 text-blue-600" />
-                </div>
-                <CardTitle>Требуется авторизация</CardTitle>
-              </CardHeader>
-              <CardContent className="text-center space-y-4">
-                <p className="text-muted-foreground">
-                  Доступ к клубам доступен только авторизованным пользователям. Войдите в систему
-                  или зарегистрируйтесь, чтобы присоединиться к клубам чтения.
-                </p>
-                <p className="text-sm text-muted-foreground">
-                  В будущих версиях вы сможете запросить приглашение в клуб прямо с карточки клуба.
-                </p>
-                <div className="flex flex-col sm:flex-row gap-2 justify-center">
-                  <Button asChild>
-                    <Link href="/auth/login">
-                      <LogIn className="h-4 w-4 mr-2" />
-                      Войти / Регистрация
-                    </Link>
-                  </Button>
-                  <Button variant="outline" onClick={() => setLocation("/")}>
-                    <ArrowLeft className="h-4 w-4 mr-2" />
-                    На главную
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        </MainLayout>
-      );
-    }
-
     // Проверяем, является ли ошибка ограничением доступа к приватному клубу
     const isPrivateClubError =
       error.message?.includes("закрытый клуб") ||
@@ -336,7 +335,7 @@ export default function ClubDetails() {
         method: "DELETE",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${localStorage.getItem("accessToken") || ""}`,
+          Authorization: `Bearer ${getAccessToken() || ""}`,
         },
       });
 

@@ -21,7 +21,7 @@ export function ClubNavigation({
   onChapterChange, 
   totalChapters,
   isLoading = false 
-}: ClubNavigationProps) {
+}: Readonly<ClubNavigationProps>) {
   
   const handlePreviousChapter = () => {
     if (currentChapter > 1) {
@@ -34,10 +34,6 @@ export function ClubNavigation({
     if (currentChapter < maxChapter) {
       onChapterChange(currentChapter + 1);
     }
-  };
-
-  const handleChapterSelect = (chapterNumber: number) => {
-    onChapterChange(chapterNumber);
   };
 
   if (isLoading) {
@@ -97,19 +93,19 @@ export function ClubChapterList({
   onChapterSelect, 
   isVisible, 
   onClose 
-}: ClubChapterListProps) {
+}: Readonly<ClubChapterListProps>) {
   
   if (!isVisible) {
     return null;
   }
 
   return (
-    <div className="space-y-1 max-h-[calc(100vh-200px)] overflow-y-auto">
+    <div className="space-y-0.5">
       {chapters.map((chapter) => (
         <Button
           key={chapter.chapterNumber}
           variant={currentChapter === chapter.chapterNumber ? "secondary" : "ghost"}
-          className="w-full justify-start text-left h-auto py-3 px-3"
+          className="w-full justify-start text-left h-auto py-2 px-3"
           onClick={() => {
             onChapterSelect(chapter.chapterNumber);
             onClose();

@@ -551,7 +551,7 @@ router.get('/:id/invitations', jwtAuth, async (req, res) => {
  */
 router.get('/invitations/:token', async (req, res) => {
   try {
-    let invitation = await findInvitationByToken(req.params.token);
+    const invitation = await findInvitationByToken(req.params.token);
     if (!invitation) {
       return res.status(404).json({ message: 'Invitation not found' });
     }
@@ -604,7 +604,7 @@ router.post('/invitations/:token/accept', jwtAuth, async (req, res) => {
       return res.status(401).json({ message: 'Authentication required' });
     }
 
-    let invitation = await findInvitationByToken(req.params.token);
+    const invitation = await findInvitationByToken(req.params.token);
     if (!invitation) {
       return res.status(404).json({ message: 'Invitation not found' });
     }

@@ -16,7 +16,7 @@ const PURIFY_CONFIG = {
     "href", "title", "class", "id", "alt", "src", "width", "height",
     "style" // Ограниченный style (только безопасные свойства)
   ],
-  ALLOWED_URI_REGEXP: /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
+  ALLOWED_URI_REGEXP: /^(?:https?|ftp|ftps|mailto|tel|callto|sms|cid|xmpp):|[^a-z]|[a-z+.-]+(?:[^a-z+.:-]|$)/i,
   ALLOW_DATA_ATTR: false,
   ALLOWED_STYLES: {
     "text-align": [/^left$/, /^right$/, /^center$/, /^justify$/],
@@ -97,7 +97,7 @@ export function normalizeBookHTML(htmlContent: string): string {
   // Нормализация пробелов
   doc.querySelectorAll("p, div, span").forEach((el: Element) => {
     if (el.textContent) {
-      el.textContent = el.textContent.replace(/\s+/g, " ").trim();
+      el.textContent = el.textContent.replaceAll(/\s+/g, " ").trim();
     }
   });
 

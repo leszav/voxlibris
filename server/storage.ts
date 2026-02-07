@@ -71,7 +71,6 @@ import {
   clubReadingPlans,
   clubBookmarks
 } from "../shared/schema.js";
-import { randomUUID } from "node:crypto";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { eq, desc, asc, count, and, sql, isNull, isNotNull, inArray, exists, or, ne } from "drizzle-orm";
 import postgres from "postgres";
@@ -246,558 +245,6 @@ export interface IStorage {
   getSettingsByCategory(category: string): Promise<Setting[]>;
   setSetting(setting: InsertSetting & { updatedBy: string }): Promise<Setting>;
   deleteSetting(key: string): Promise<boolean>;
-}
-
-export class MemStorage implements IStorage {
-  private readonly users: Map<string, User>;
-
-  constructor() {
-    this.users = new Map();
-  }
-
-  async updatePersonalBook(id: string, updates: Partial<InsertPersonalBook>): Promise<PersonalBook | undefined> {
-    throw new Error("MemStorage does not support personal books - use PostgreSQL");
-  }
-
-  async getBooksByUser(userId: string): Promise<Book[]> {
-    throw new Error("MemStorage does not support user books - use PostgreSQL");
-  }
-
-  async getUser(id: string): Promise<User | undefined> {
-    return this.users.get(id);
-  }
-
-  async getUserByUsername(username: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find(
-      (user) => user.username === username,
-    );
-  }
-
-  async getUserByEmail(email: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find(
-      (user) => user.email === email,
-    );
-  }
-
-  async createUser(insertUser: InsertUser): Promise<User> {
-    const id = randomUUID();
-    const user: User = {
-      ...insertUser,
-      id,
-      role: "user",
-      status: insertUser.status || "pending",
-      emailConfirmed: false,
-      confirmationToken: null,
-      lastActivityAt: null,
-      suspensionReason: null,
-      suspendedUntil: null,
-      failedLoginAttempts: 0,
-      invitedBy: insertUser.invitedBy || null,
-      invitedToClub: insertUser.invitedToClub || null,
-      createdAt: new Date()
-    };
-    this.users.set(id, user);
-    return user;
-  }
-
-  async updateUserRole(username: string, role: UserRole): Promise<User | undefined> {
-    const user = Array.from(this.users.values()).find(u => u.username === username);
-    if (!user) return undefined;
-
-    user.role = role;
-    this.users.set(user.id, user);
-    return user;
-  }
-
-  async updateUserStatus(username: string, status: UserStatus): Promise<User | undefined> {
-    const user = Array.from(this.users.values()).find(u => u.username === username);
-    if (!user) return undefined;
-
-    user.status = status;
-    this.users.set(user.id, user);
-    return user;
-  }
-
-  async deleteUser(userId: string): Promise<boolean> {
-    const user = this.users.get(userId);
-    if (!user) return false;
-
-    // Мягкое удаление - меняем статус на 'deleted'
-    user.status = 'deleted' as UserStatus;
-    this.users.set(userId, user);
-    return true;
-  }
-
-  async restoreUser(userId: string): Promise<User | undefined> {
-    const user = this.users.get(userId);
-    if (!user?.status || user.status !== 'deleted') return undefined;
-
-    user.status = 'active' as UserStatus;
-    this.users.set(userId, user);
-    return user;
-  }
-
-  async permanentDeleteUser(userId: string): Promise<{ success: boolean; error?: string; clubsWithMembers?: Array<{ id: string; title: string; memberCount: number }> }> {
-    const user = this.users.get(userId);
-    if (!user) return { success: false, error: 'User not found' };
-
-    this.users.delete(userId);
-    return { success: true };
-  }
-
-  async getAllUsers(includeDeleted: boolean = false): Promise<User[]> {
-    const allUsers = Array.from(this.users.values());
-    if (includeDeleted) {
-      return allUsers;
-    }
-    return allUsers.filter(u => u.status !== 'deleted');
-  }
-
-  async getDeletedUsers(): Promise<User[]> {
-    return Array.from(this.users.values()).filter(u => u.status === 'deleted');
-  }
-
-  async getPendingUsers(): Promise<User[]> {
-    return Array.from(this.users.values()).filter(u => u.status === 'pending');
-  }
-
-  // Email confirmation methods
-  async getUserByConfirmationToken(token: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find(u => u.confirmationToken === token);
-  }
-
-  async updateUserEmailConfirmation(userId: string, confirmed: boolean): Promise<User | undefined> {
-    const user = this.users.get(userId);
-    if (!user) return undefined;
-
-    const updatedUser = {
-      ...user,
-      emailConfirmed: confirmed,
-    };
-    this.users.set(userId, updatedUser);
-    return updatedUser;
-  }
-
-  async updateUserConfirmationToken(userId: string, token: string): Promise<User | undefined> {
-    const user = this.users.get(userId);
-    if (!user) return undefined;
-
-    const updatedUser = {
-      ...user,
-      confirmationToken: token,
-    };
-    this.users.set(userId, updatedUser);
-    return updatedUser;
-  }
-
-  async updateUserLastActivity(userId: string): Promise<User | undefined> {
-    const user = this.users.get(userId);
-    if (!user) return undefined;
-
-    const updatedUser = {
-      ...user,
-      lastActivityAt: new Date(),
-    };
-    this.users.set(userId, updatedUser);
-    return updatedUser;
-  }
-
-  // MemStorage stub implementations (for testing fallback only)
-  async getClubs(): Promise<ClubWithDetails[]> {
-    throw new Error("MemStorage does not support clubs - use PostgreSQL");
-  }
-
-  async getAllClubs(): Promise<ClubWithDetails[]> {
-    throw new Error("MemStorage does not support clubs - use PostgreSQL");
-  }
-
-  async getClub(id: string): Promise<ClubWithDetails | undefined> {
-    throw new Error("MemStorage does not support clubs - use PostgreSQL");
-  }
-
-  async getClubsByUser(userId: string): Promise<ClubWithDetails[]> {
-    throw new Error("MemStorage does not support clubs - use PostgreSQL");
-  }
-
-  async getClubsOwnedByUser(userId: string): Promise<Club[]> {
-    throw new Error("MemStorage does not support clubs - use PostgreSQL");
-  }
-
-  async createClub(club: InsertClub & { ownerId: string }): Promise<Club> {
-    throw new Error("MemStorage does not support clubs - use PostgreSQL");
-  }
-
-  async updateClub(id: string, updates: Partial<InsertClub>): Promise<Club | undefined> {
-    throw new Error("MemStorage does not support clubs - use PostgreSQL");
-  }
-
-  async deleteClub(id: string): Promise<boolean> {
-    throw new Error("MemStorage does not support clubs - use PostgreSQL");
-  }
-
-  async joinClub(clubId: string, userId: string, role: ClubMemberRole = 'member'): Promise<ClubMember> {
-    throw new Error("MemStorage does not support clubs - use PostgreSQL");
-  }
-
-  async leaveClub(clubId: string, userId: string): Promise<boolean> {
-    throw new Error("MemStorage does not support clubs - use PostgreSQL");
-  }
-
-  async getClubMembers(clubId: string): Promise<User[]> {
-    throw new Error("MemStorage does not support clubs - use PostgreSQL");
-  }
-
-  async getClubMembersWithRoles(clubId: string): Promise<Array<User & { role: ClubMemberRole; joinedAt: Date }>> {
-    throw new Error("MemStorage does not support clubs - use PostgreSQL");
-  }
-
-  async getUserClubMembership(clubId: string, userId: string): Promise<ClubMember | undefined> {
-    throw new Error("MemStorage does not support clubs - use PostgreSQL");
-  }
-
-  async getActiveClubMembersCount(clubId: string, excludeUserId?: string): Promise<number> {
-    throw new Error("MemStorage does not support clubs - use PostgreSQL");
-  }
-
-  async updateMemberRole(clubId: string, userId: string, role: ClubMemberRole): Promise<ClubMember | undefined> {
-    throw new Error("MemStorage does not support clubs - use PostgreSQL");
-  }
-
-  async removeMember(clubId: string, userId: string): Promise<boolean> {
-    throw new Error("MemStorage does not support clubs - use PostgreSQL");
-  }
-
-  async getBooks(): Promise<Book[]> {
-    throw new Error("MemStorage does not support books - use PostgreSQL");
-  }
-
-  async getBook(id: string): Promise<Book | undefined> {
-    throw new Error("MemStorage does not support books - use PostgreSQL");
-  }
-
-  async searchBooks(query: string): Promise<Book[]> {
-    throw new Error("MemStorage does not support books - use PostgreSQL");
-  }
-
-  async createBook(book: InsertBook): Promise<Book> {
-    throw new Error("MemStorage does not support books - use PostgreSQL");
-  }
-
-  async updateBook(id: string, updates: Partial<InsertBook>): Promise<Book> {
-    throw new Error("MemStorage does not support books - use PostgreSQL");
-  }
-
-  async deleteBook(id: string): Promise<void> {
-    throw new Error("MemStorage does not support books - use PostgreSQL");
-  }
-
-  async getBookContent(bookId: string, chapterNumber?: number): Promise<BookContent[]> {
-    throw new Error("MemStorage does not support book content - use PostgreSQL");
-  }
-
-  async getBookChapter(bookId: string, chapterNumber: number): Promise<BookContent | undefined> {
-    throw new Error("MemStorage does not support book content - use PostgreSQL");
-  }
-
-  async createBookContent(content: InsertBookContent): Promise<BookContent> {
-    throw new Error("MemStorage does not support book content - use PostgreSQL");
-  }
-
-  async updateBookContent(id: string, updates: Partial<InsertBookContent>): Promise<BookContent> {
-    throw new Error("MemStorage does not support book content - use PostgreSQL");
-  }
-
-  async deleteBookContent(id: string): Promise<void> {
-    throw new Error("MemStorage does not support book content - use PostgreSQL");
-  }
-
-  async createReadingSession(session: InsertReadingSession & { readerId: string }): Promise<ReadingSession> {
-    throw new Error("MemStorage does not support reading sessions - use PostgreSQL");
-  }
-
-  async getReadingSession(id: string): Promise<ReadingSessionWithDetails | undefined> {
-    throw new Error("MemStorage does not support reading sessions - use PostgreSQL");
-  }
-
-  async getActiveSessionsInClub(clubId: string): Promise<ReadingSessionWithDetails[]> {
-    throw new Error("MemStorage does not support reading sessions - use PostgreSQL");
-  }
-
-  async getSessionsByReader(readerId: string): Promise<ReadingSessionWithDetails[]> {
-    throw new Error("MemStorage does not support reading sessions - use PostgreSQL");
-  }
-
-  async updateSessionPosition(sessionId: string, currentChapter: number, currentPosition: string): Promise<boolean> {
-    throw new Error("MemStorage does not support reading sessions - use PostgreSQL");
-  }
-
-  async startSession(sessionId: string): Promise<boolean> {
-    throw new Error("MemStorage does not support reading sessions - use PostgreSQL");
-  }
-
-  async endSession(sessionId: string): Promise<boolean> {
-    throw new Error("MemStorage does not support reading sessions - use PostgreSQL");
-  }
-
-  async joinSession(sessionId: string, listenerId: string): Promise<SessionListener> {
-    throw new Error("MemStorage does not support reading sessions - use PostgreSQL");
-  }
-
-  async leaveSession(sessionId: string, listenerId: string): Promise<boolean> {
-    throw new Error("MemStorage does not support reading sessions - use PostgreSQL");
-  }
-
-  async getSessionListeners(sessionId: string): Promise<User[]> {
-    throw new Error("MemStorage does not support reading sessions - use PostgreSQL");
-  }
-
-  async getActiveListenersCount(sessionId: string): Promise<number> {
-    throw new Error("MemStorage does not support reading sessions - use PostgreSQL");
-  }
-
-  async updateReadingProgress(progress: InsertReadingProgress & { userId: string }): Promise<ReadingProgress> {
-    throw new Error("MemStorage does not support reading progress - use PostgreSQL");
-  }
-
-  async getUserReadingProgress(userId: string, bookId: string): Promise<ReadingProgress | undefined> {
-    throw new Error("MemStorage does not support reading progress - use PostgreSQL");
-  }
-
-  async getClubReadingProgress(clubId: string): Promise<ReadingProgress[]> {
-    throw new Error("MemStorage does not support reading progress - use PostgreSQL");
-  }
-
-  async getReadingHistory(userId: string): Promise<ReadingHistory[]> {
-    throw new Error("MemStorage does not support reading history - use PostgreSQL");
-  }
-
-  async addCompletedToHistory(userId: string, bookId: string, bookTitle: string, bookAuthor: string, bookCoverUrl?: string): Promise<void> {
-    throw new Error("MemStorage does not support reading history - use PostgreSQL");
-  }
-
-  async clearReadingHistory(userId: string): Promise<void> {
-    throw new Error("MemStorage does not support reading history - use PostgreSQL");
-  }
-
-  async rateReader(rating: InsertReaderRating & { raterId: string }): Promise<ReaderRating> {
-    throw new Error("MemStorage does not support reader ratings - use PostgreSQL");
-  }
-
-  async getReaderRatings(readerId: string): Promise<ReaderRating[]> {
-    throw new Error("MemStorage does not support reader ratings - use PostgreSQL");
-  }
-
-  async getReaderAverageRating(readerId: string): Promise<number> {
-    throw new Error("MemStorage does not support reader ratings - use PostgreSQL");
-  }
-
-  async createOrUpdateUserProfile(userId: string, profile: InsertUserProfile): Promise<UserProfile> {
-    throw new Error("MemStorage does not support user profiles - use PostgreSQL");
-  }
-
-  async getUserProfile(userId: string): Promise<UserProfile | undefined> {
-    throw new Error("MemStorage does not support user profiles - use PostgreSQL");
-  }
-
-  async deleteUserProfile(userId: string): Promise<boolean> {
-    throw new Error("MemStorage does not support user profiles - use PostgreSQL");
-  }
-
-  async getTopReaders(limit?: number): Promise<UserProfile[]> {
-    throw new Error("MemStorage does not support user profiles - use PostgreSQL");
-  }
-
-
-  // Refresh Token methods (stubs for MemStorage)
-  async createRefreshToken(userId: string, token: string, expiresAt: Date): Promise<RefreshToken> {
-    throw new Error("MemStorage does not support refresh tokens - use PostgreSQL");
-  }
-
-  async getRefreshToken(token: string): Promise<RefreshToken | undefined> {
-    throw new Error("MemStorage does not support refresh tokens - use PostgreSQL");
-  }
-
-  async revokeRefreshToken(token: string): Promise<boolean> {
-    throw new Error("MemStorage does not support refresh tokens - use PostgreSQL");
-  }
-
-  async revokeAllUserRefreshTokens(userId: string): Promise<boolean> {
-    throw new Error("MemStorage does not support refresh tokens - use PostgreSQL");
-  }
-
-  async cleanExpiredRefreshTokens(): Promise<void> {
-    throw new Error("MemStorage does not support refresh tokens - use PostgreSQL");
-  }
-
-  // Admin Actions methods (MemStorage stubs)
-  async logAdminAction(action: {
-    adminId: string;
-    actionType: string;
-    targetType: string;
-    targetId: string;
-    reason?: string;
-    previousValue?: string;
-    newValue?: string;
-    metadata?: object;
-    ipAddress?: string;
-    userAgent?: string;
-  }): Promise<AdminAction> {
-    throw new Error("MemStorage does not support admin actions - use PostgreSQL");
-  }
-
-  async getAdminActions(adminId?: string, limit?: number): Promise<AdminAction[]> {
-    throw new Error("MemStorage does not support admin actions - use PostgreSQL");
-  }
-
-  // Book Status Management (MemStorage stubs)
-  async updateBookStatus(bookId: string, status: 'draft' | 'published' | 'archived', adminId: string): Promise<boolean> {
-    throw new Error("MemStorage does not support book status management - use PostgreSQL");
-  }
-
-  // Moderation Reports methods (MemStorage stubs)
-  async getModerationReports(filters?: { status?: string; type?: string; assignedTo?: string }): Promise<ModerationReport[]> {
-    throw new Error("MemStorage does not support moderation reports - use PostgreSQL");
-  }
-
-  async updateModerationReport(reportId: string, updates: Partial<ModerationReport>): Promise<boolean> {
-    throw new Error("MemStorage does not support moderation reports - use PostgreSQL");
-  }
-
-  async createModerationReport(report: InsertModerationReport): Promise<string> {
-    throw new Error("MemStorage does not support moderation reports - use PostgreSQL");
-  }
-
-  // System Settings methods (MemStorage stubs)
-  async getSystemSettings(category?: string): Promise<SystemSetting[]> {
-    throw new Error("MemStorage does not support system settings - use PostgreSQL");
-  }
-
-  async updateSystemSetting(key: string, value: any, updatedBy: string): Promise<boolean> {
-    throw new Error("MemStorage does not support system settings - use PostgreSQL");
-  }
-
-  async getSystemSetting(key: string): Promise<SystemSetting | null> {
-    throw new Error("MemStorage does not support system settings - use PostgreSQL");
-  }
-
-  // VoxLibris Upload Context methods (MemStorage stubs)
-  // Personal Books methods (MemStorage stubs)
-  async createPersonalBook(book: InsertPersonalBook & { userId: string }): Promise<PersonalBook> {
-    throw new Error("MemStorage does not support personal books - use PostgreSQL");
-  }
-
-  async getPersonalBook(id: string): Promise<PersonalBook | undefined> {
-    throw new Error("MemStorage does not support personal books - use PostgreSQL");
-  }
-
-  async getPersonalBooksByUser(userId: string): Promise<PersonalBook[]> {
-    throw new Error("MemStorage does not support personal books - use PostgreSQL");
-  }
-
-  async deletePersonalBook(id: string): Promise<boolean> {
-    throw new Error("MemStorage does not support personal books - use PostgreSQL");
-  }
-
-  async restorePersonalBook(id: string): Promise<boolean> {
-    throw new Error("MemStorage does not support personal books - use PostgreSQL");
-  }
-
-  async permanentDeletePersonalBook(id: string): Promise<boolean> {
-    throw new Error("MemStorage does not support personal books - use PostgreSQL");
-  }
-
-  // Club Books methods (MemStorage stubs)
-  async createClubBook(book: InsertClubBook & { uploadedByUserId: string }): Promise<ClubBook> {
-    throw new Error("MemStorage does not support club books - use PostgreSQL");
-  }
-
-  async getClubBook(id: string): Promise<ClubBook | undefined> {
-    throw new Error("MemStorage does not support club books - use PostgreSQL");
-  }
-
-  async getClubBooksByClub(clubId: string): Promise<ClubBook[]> {
-    throw new Error("MemStorage does not support club books - use PostgreSQL");
-  }
-
-  async getAllClubBooks(): Promise<ClubBook[]> {
-    throw new Error("MemStorage does not support club books - use PostgreSQL");
-  }
-
-  async deleteClubBook(id: string): Promise<boolean> {
-    throw new Error("MemStorage does not support club books - use PostgreSQL");
-  }
-
-  async restoreClubBook(id: string): Promise<boolean> {
-    throw new Error("MemStorage does not support club books - use PostgreSQL");
-  }
-
-  async permanentDeleteClubBook(id: string): Promise<boolean> {
-    throw new Error("MemStorage does not support club books - use PostgreSQL");
-  }
-
-  async updateClubBook(id: string, updates: Partial<InsertClubBook>): Promise<ClubBook | undefined> {
-    throw new Error("MemStorage does not support club books - use PostgreSQL");
-  }
-
-  // Book Access Logs methods (MemStorage stubs)
-  async logBookAccess(log: InsertBookAccessLog & { userId: string }): Promise<BookAccessLog> {
-    throw new Error("MemStorage does not support book access logs - use PostgreSQL");
-  }
-
-  async getBookAccessLogs(bookId: string): Promise<BookAccessLog[]> {
-    throw new Error("MemStorage does not support book access logs - use PostgreSQL");
-  }
-
-  async getUserAccessLogs(userId: string): Promise<BookAccessLog[]> {
-    throw new Error("MemStorage does not support book access logs - use PostgreSQL");
-  }
-
-  // Enhanced book methods for VoxLibris Upload (MemStorage stubs)
-  async getBookByContentHash(contentHash: string): Promise<Book | undefined> {
-    throw new Error("MemStorage does not support content hash lookup - use PostgreSQL");
-  }
-
-  // Club Invitations methods (MemStorage stubs)
-  async createClubInvitation(invitation: InsertClubInvitation): Promise<ClubInvitation> {
-    throw new Error("MemStorage does not support club invitations - use PostgreSQL");
-  }
-
-  async getClubInvitation(inviteToken: string): Promise<ClubInvitation | undefined> {
-    throw new Error("MemStorage does not support club invitations - use PostgreSQL");
-  }
-
-  async getClubInvitations(clubId: string): Promise<ClubInvitation[]> {
-    throw new Error("MemStorage does not support club invitations - use PostgreSQL");
-  }
-
-  async updateInvitationStatus(inviteToken: string, status: string, acceptedAt?: Date): Promise<boolean> {
-    throw new Error("MemStorage does not support club invitations - use PostgreSQL");
-  }
-
-  async deleteClubInvitation(id: string): Promise<boolean> {
-    throw new Error("MemStorage does not support club invitations - use PostgreSQL");
-  }
-
-  async deleteClubInvitationsByEmail(clubId: string, email: string): Promise<number> {
-    throw new Error("MemStorage does not support club invitations - use PostgreSQL");
-  }
-
-  // Settings methods (MemStorage stubs)
-  async getSetting(key: string): Promise<Setting | undefined> {
-    throw new Error("MemStorage does not support settings - use PostgreSQL");
-  }
-
-  async getSettingsByCategory(category: string): Promise<Setting[]> {
-    throw new Error("MemStorage does not support settings - use PostgreSQL");
-  }
-
-  async setSetting(setting: InsertSetting & { updatedBy: string }): Promise<Setting> {
-    throw new Error("MemStorage does not support settings - use PostgreSQL");
-  }
-
-  async deleteSetting(key: string): Promise<boolean> {
-    throw new Error("MemStorage does not support settings - use PostgreSQL");
-  }
 }
 
 export class PostgreSQLStorage implements IStorage {
@@ -1616,7 +1063,7 @@ export class PostgreSQLStorage implements IStorage {
   }
 
   async getActiveClubMembersCount(clubId: string, excludeUserId?: string): Promise<number> {
-    let conditions = [eq(clubMembers.clubId, clubId), eq(clubMembers.isActive, true)];
+    const conditions = [eq(clubMembers.clubId, clubId), eq(clubMembers.isActive, true)];
     
     if (excludeUserId) {
       conditions.push(ne(clubMembers.userId, excludeUserId));
@@ -1672,14 +1119,20 @@ export class PostgreSQLStorage implements IStorage {
     return result[0];
   }
 
-  // eslint-disable-next-line sonarjs/no-identical-functions
   async searchBooks(query: string): Promise<Book[]> {
+    if (!query || query.trim() === '') {
+      return this.getBooks();
+    }
+    
     const result = await this.db
       .select()
       .from(books)
+      .where(or(
+        sql`LOWER(${books.title}) LIKE LOWER(${'%' + query + '%'})`,
+        sql`LOWER(${books.author}) LIKE LOWER(${'%' + query + '%'})`
+      ))
       .orderBy(asc(books.title));
 
-    // For now return all books - proper search implementation would need sql operator
     return result;
   }
 
@@ -2770,7 +2223,9 @@ export class PostgreSQLStorage implements IStorage {
           .where(eq(personalBooks.id, id))
           .returning();
 
-        if (updated.length === 0) return updated;
+        if (updated.length === 0) {
+          throw new Error('Personal book not found');
+        }
 
         // Удаляем все упоминания, кроме истории чтения
         await tx
@@ -2932,7 +2387,9 @@ export class PostgreSQLStorage implements IStorage {
           .where(eq(clubBooks.id, id))
           .returning();
 
-        if (updated.length === 0) return updated;
+        if (updated.length === 0) {
+          throw new Error('Club book not found');
+        }
 
         // Удаляем все упоминания, кроме истории чтения
         await tx
@@ -3301,7 +2758,5 @@ export class PostgreSQLStorage implements IStorage {
   }
 }
 
-// Use PostgreSQL in production, MemStorage for fallback/testing
-export const storage = process.env.NODE_ENV === 'test'
-  ? new MemStorage()
-  : new PostgreSQLStorage();
+// Always use PostgreSQL - no in-memory fallbacks in production
+export const storage = new PostgreSQLStorage();

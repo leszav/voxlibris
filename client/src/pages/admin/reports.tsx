@@ -1,11 +1,10 @@
 import { AdminLayout } from "@/components/layout/AdminLayout";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Textarea } from "@/components/ui/textarea";
 import { 
   MoreHorizontal, 
   Search, 
@@ -17,12 +16,12 @@ import {
   MessageSquare,
   User,
   Users2,
-  BookOpen,
-  Ban
+  BookOpen
 } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { getAccessToken } from "@/lib/token-store";
 
 interface Report {
   id: string;
@@ -58,7 +57,7 @@ interface ReportsFilters {
 }
 
 async function fetchReports(filters: ReportsFilters): Promise<ReportsResponse> {
-  const token = localStorage.getItem('accessToken');
+  const token = getAccessToken();
   if (!token) throw new Error('No auth token');
 
   const params = new URLSearchParams();
@@ -83,7 +82,7 @@ async function fetchReports(filters: ReportsFilters): Promise<ReportsResponse> {
 }
 
 async function updateReportStatus(reportId: string, status: string, notes?: string): Promise<void> {
-  const token = localStorage.getItem('accessToken');
+  const token = getAccessToken();
   if (!token) throw new Error('No auth token');
 
   const response = await fetch(`/api/v1/admin/reports/${reportId}/status`, {
@@ -100,7 +99,7 @@ async function updateReportStatus(reportId: string, status: string, notes?: stri
   }
 }
 
-function ReportStatusBadge({ status }: { status: Report['status'] }) {
+function ReportStatusBadge({ status }: Readonly<{ status: Report['status'] }>) {
   switch (status) {
     case 'new':
       return (
@@ -135,7 +134,7 @@ function ReportStatusBadge({ status }: { status: Report['status'] }) {
   }
 }
 
-function ReportTypeBadge({ type }: { type: Report['type'] }) {
+function ReportTypeBadge({ type }: Readonly<{ type: Report['type'] }>) {
   switch (type) {
     case 'user':
       return (
@@ -170,7 +169,7 @@ function ReportTypeBadge({ type }: { type: Report['type'] }) {
   }
 }
 
-function ReportActionsMenu({ report }: { report: Report }) {
+function ReportActionsMenu({ report }: Readonly<{ report: Report }>) {
   const queryClient = useQueryClient();
 
   const updateStatusMutation = useMutation({
@@ -228,7 +227,7 @@ function ReportActionsMenu({ report }: { report: Report }) {
   );
 }
 
-function ReportsTable({ reports }: { reports: Report[] }) {
+function ReportsTable({ reports }: Readonly<{ reports: Report[] }>) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full">
@@ -282,6 +281,8 @@ function ReportsTable({ reports }: { reports: Report[] }) {
 }
 
 function ReportsTableSkeleton() {
+  const skeletonKeys = ['report-sk-1', 'report-sk-2', 'report-sk-3', 'report-sk-4', 'report-sk-5'];
+  
   return (
     <div className="overflow-x-auto">
       <table className="w-full">
@@ -295,8 +296,8 @@ function ReportsTableSkeleton() {
           </tr>
         </thead>
         <tbody>
-          {[...Array(5)].map((_, i) => (
-            <tr key={i} className="border-b">
+          {skeletonKeys.map((key) => (
+            <tr key={key} className="border-b">
               <td className="p-4">
                 <div className="space-y-2">
                   <Skeleton className="h-4 w-32" />
@@ -365,7 +366,7 @@ export default function AdminReports() {
             <AlertTriangle className="h-12 w-12 text-red-500 mx-auto mb-4" />
             <h3 className="text-lg font-semibold text-gray-900">Ошибка загрузки</h3>
             <p className="text-gray-600 mt-2">Не удалось загрузить жалобы</p>
-            <Button className="mt-4" onClick={() => window.location.reload()}>
+            <Button className="mt-4" onClick={() => globalThis.location.reload()}>
               Попробовать снова
             </Button>
           </div>
@@ -487,17 +488,23 @@ export default function AdminReports() {
         {/* Reports Table */}
         <Card>
           <CardContent className="p-0">
-            {isLoading ? (
-              <ReportsTableSkeleton />
-            ) : data && data.reports.length > 0 ? (
-              <ReportsTable reports={data.reports} />
-            ) : (
-              <div className="text-center py-12">
-                <AlertTriangle className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                <h3 className="text-lg font-semibold text-gray-900">Жалобы не найдены</h3>
-                <p className="text-gray-600 mt-2">Попробуйте изменить фильтры поиска</p>
-              </div>
-            )}
+            {(() => {
+              if (isLoading) {
+                return <ReportsTableSkeleton />;
+              }
+              
+              if (data && data.reports.length > 0) {
+                return <ReportsTable reports={data.reports} />;
+              }
+              
+              return (
+                <div className="text-center py-12">
+                  <AlertTriangle className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                  <h3 className="text-lg font-semibold text-gray-900">Жалобы не найдены</h3>
+                  <p className="text-gray-600 mt-2">Попробуйте изменить фильтры поиска</p>
+                </div>
+              );
+            })()}
           </CardContent>
         </Card>
 

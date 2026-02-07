@@ -6,6 +6,7 @@ import { ContentRenderer } from "./ContentRenderer";
 import { ReaderControls } from "./ReaderControls";
 import { Button } from "../ui/button";
 import { Maximize2, Minimize2, List, Settings, ArrowLeft } from "lucide-react";
+import { getAccessToken } from "@/lib/token-store";
 
 interface Chapter {
   chapterNumber: number;
@@ -21,6 +22,23 @@ interface BookData {
   isPersonalBook?: boolean;
 }
 
+interface ProcessedBookData {
+  title: string;
+  chapters?: Chapter[];
+  content?: string;
+  totalChapters: number;
+  isPersonalBook: boolean;
+}
+
+interface BookContentResponse {
+  book?: {
+    title: string;
+    chapters?: Chapter[];
+  };
+  title?: string;
+  content?: string;
+}
+
 interface ReaderWorkspaceProps {
   bookId?: string;
   clubId?: string;
@@ -29,18 +47,371 @@ interface ReaderWorkspaceProps {
   };
 }
 
-function initializeReaderChapter(
-  bookId: string | undefined,
-  progress: { currentChapter: number } | null | undefined,
-  currentChapter: number | null,
-  setCurrentChapter: (chapter: number) => void,
-  progressLoading: boolean
-) {
-  if (!progressLoading && progress && currentChapter === null) {
-    setCurrentChapter(progress.currentChapter || 1);
-  } else if (!progressLoading && !progress && currentChapter === null) {
-    setCurrentChapter(1);
+function getBookData(content: BookContentResponse | null | undefined): ProcessedBookData {
+  if (content && 'book' in content && content.book) {
+    return {
+      title: content.book.title,
+      chapters: content.book.chapters,
+      totalChapters: content.book.chapters?.length || 1,
+      isPersonalBook: true
+    };
   }
+  return {
+    title: content?.title || "Загрузка...",
+    content: content?.content || "",
+    totalChapters: 1,
+    isPersonalBook: false
+  };
+}
+
+function getCurrentChapterContent(bookData: ProcessedBookData, currentChapter: number | null) {
+  if (bookData.isPersonalBook && bookData.chapters) {
+    return bookData.chapters.find((ch: Chapter) => ch.chapterNumber === currentChapter)?.content || "";
+  }
+  return bookData.content || "";
+}
+
+function getInitialChapter(
+  progress: { currentChapter: number } | null | undefined,
+  progressLoading: boolean
+): number | null {
+  if (progressLoading) return null;
+  return progress?.currentChapter || 1;
+}
+
+function ReaderMainContent({
+  contentLoading,
+  currentChapterContent,
+  currentChapter,
+  bookData,
+  setCurrentChapter,
+  onMarkAsRead
+}: Readonly<{
+  contentLoading: boolean;
+  currentChapterContent: string;
+  currentChapter: number | null;
+  bookData: ProcessedBookData;
+  setCurrentChapter: (chapter: number) => void;
+  onMarkAsRead: () => void;
+}>) {
+  if (contentLoading) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <p className="text-muted-foreground">Загрузка...</p>
+      </div>
+    );
+  }
+  if (currentChapterContent) {
+    const chapter = currentChapter ?? 1;
+    return (
+      <>
+        <ContentRenderer content={currentChapterContent} />
+        <div className="flex justify-between items-center mt-12 pt-8 border-t">
+          <Button
+            variant="outline"
+            onClick={() => setCurrentChapter(Math.max(1, chapter - 1))}
+            disabled={chapter <= 1}
+          >
+            ← Предыдущая глава
+          </Button>
+          <span className="text-sm text-muted-foreground">
+            Глава {chapter} из {bookData.totalChapters}
+          </span>
+          <Button
+            variant="outline"
+            onClick={() => setCurrentChapter(Math.min(bookData.totalChapters, chapter + 1))}
+            disabled={chapter >= bookData.totalChapters}
+          >
+            Следующая глава →
+          </Button>
+        </div>
+        {chapter === bookData.totalChapters && (
+          <div className="mt-6 flex justify-end">
+            <Button variant="default" onClick={onMarkAsRead}>
+              Отметить как прочитанное
+            </Button>
+          </div>
+        )}
+      </>
+    );
+  }
+  return (
+    <div className="flex items-center justify-center h-full">
+      <p className="text-muted-foreground">Контент не найден</p>
+    </div>
+  );
+}
+
+function computeTotalProgress(
+  currentChapter: number,
+  totalChapters: number,
+  scrollTop: number,
+  scrollHeight: number,
+  clientHeight: number
+) {
+  const scrollProgress = Math.min(
+    100,
+    Math.round((scrollTop / Math.max(1, scrollHeight - clientHeight)) * 100)
+  );
+
+  let totalProgress = Math.round(
+    ((currentChapter - 1) / totalChapters + scrollProgress / 100 / totalChapters) * 100
+  );
+
+  if (currentChapter === totalChapters) {
+    const fitsWithoutScroll = scrollHeight <= clientHeight + 1;
+    if (fitsWithoutScroll || scrollProgress >= 98) {
+      totalProgress = 100;
+    }
+  }
+
+  return totalProgress;
+}
+
+function useApplyReaderSettings() {
+  useEffect(() => {
+    const saved = localStorage.getItem("readerSettings");
+    if (!saved) return;
+
+    try {
+      interface ReaderSettings {
+        fontSize: number;
+        fontFamily: string;
+        lineHeight: number;
+        textAlign: string;
+        contentWidth: number;
+        theme: string;
+      }
+      
+      const settings: ReaderSettings = JSON.parse(saved);
+      const root = document.documentElement;
+      root.style.setProperty("--reader-font-size", `${settings.fontSize}px`);
+      root.style.setProperty("--reader-font-family", settings.fontFamily);
+      root.style.setProperty("--reader-line-height", settings.lineHeight.toString());
+      root.style.setProperty("--reader-text-align", settings.textAlign);
+      root.style.setProperty("--reader-content-width", `${settings.contentWidth}%`);
+      (root.dataset as Record<string, string>).readerTheme = settings.theme;
+      document.body.classList.remove("reader-light", "reader-dark", "reader-sepia");
+      document.body.classList.add(`reader-${settings.theme}`);
+    } catch (e) {
+      if (import.meta.env.DEV) {
+        console.error('Ошибка применения настроек:', e);
+      }
+    }
+  }, []);
+}
+
+function useTrackReaderAnalytics({
+  bookId,
+  currentChapter,
+  contentLoading,
+  progress,
+  analytics
+}: {
+  bookId?: string;
+  currentChapter: number | null;
+  contentLoading: boolean;
+  progress: { currentChapter: number } | null | undefined;
+  analytics: ReturnType<typeof useAnalytics>;
+}) {
+  useEffect(() => {
+    if (!bookId || currentChapter === null || contentLoading) return;
+
+    if (currentChapter === 1 || currentChapter === progress?.currentChapter) {
+      analytics.trackBookOpen(bookId);
+    }
+
+    analytics.trackChapterStart(bookId, currentChapter);
+    analytics.startReadingSession(bookId, currentChapter);
+
+    return () => {
+      analytics.stopReadingSession();
+    };
+  }, [bookId, currentChapter, contentLoading, progress, analytics]);
+}
+
+function useRestoreScrollPosition({
+  progress,
+  contentLoading,
+  progressRestored,
+  currentChapter,
+  scrollContainerRef,
+  setProgressRestored
+}: {
+  progress: { currentChapter: number; currentPosition?: string } | null | undefined;
+  contentLoading: boolean;
+  progressRestored: boolean;
+  currentChapter: number | null;
+  scrollContainerRef: React.RefObject<HTMLDivElement | null>;
+  setProgressRestored: (value: boolean) => void;
+}) {
+  useEffect(() => {
+    if (
+      !progress ||
+      contentLoading ||
+      progressRestored ||
+      currentChapter === null ||
+      currentChapter !== progress.currentChapter
+    ) {
+      return;
+    }
+
+    if (import.meta.env.DEV) {
+      console.log('[Reader] Restoring scroll position from progress:', progress);
+    }
+
+    if (progress.currentPosition && scrollContainerRef.current) {
+      try {
+        const position = JSON.parse(progress.currentPosition);
+        setTimeout(() => {
+          if (scrollContainerRef.current) {
+            scrollContainerRef.current.scrollTop = position.scrollTop || 0;
+            if (import.meta.env.DEV) {
+              console.log('[Reader] Restored scroll position:', position.scrollTop);
+            }
+          }
+        }, 300);
+      } catch (e) {
+        if (import.meta.env.DEV) {
+          console.error('Ошибка восстановления позиции скролла:', e);
+        }
+      }
+    }
+
+    setProgressRestored(true);
+  }, [
+    progress,
+    contentLoading,
+    progressRestored,
+    currentChapter,
+    scrollContainerRef,
+    setProgressRestored
+  ]);
+}
+
+function usePersistProgressOnScroll({
+  scrollContainerRef,
+  scrollTimeoutRef,
+  lastSavedProgressRef,
+  bookData,
+  currentChapter,
+  updateProgress,
+  clubId
+}: Readonly<{
+  scrollContainerRef: React.RefObject<HTMLDivElement | null>;
+  scrollTimeoutRef: { current: NodeJS.Timeout | null };
+  lastSavedProgressRef: { current: { chapter: number; position: string; progress: number } | null };
+  bookData: ProcessedBookData;
+  currentChapter: number | null;
+  updateProgress: ReturnType<typeof useUpdateProgress>["mutate"];
+  clubId?: string;
+}>) {
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container || !bookData || bookData.totalChapters === 0 || currentChapter === null) return;
+
+    const handleScroll = () => {
+      const scrollTop = container.scrollTop;
+      const scrollHeight = container.scrollHeight;
+      const clientHeight = container.clientHeight;
+      const totalProgress = computeTotalProgress(
+        currentChapter,
+        bookData.totalChapters,
+        scrollTop,
+        scrollHeight,
+        clientHeight
+      );
+
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current);
+      }
+
+      scrollTimeoutRef.current = setTimeout(() => {
+        const position = JSON.stringify({ scrollTop, scrollHeight, clientHeight });
+        if (import.meta.env.DEV) {
+          console.log('[Reader] Saving progress:', { currentChapter, totalProgress, position });
+        }
+
+        lastSavedProgressRef.current = {
+          chapter: currentChapter,
+          position,
+          progress: totalProgress
+        };
+
+        updateProgress({
+          currentChapter,
+          currentPosition: position,
+          progress: totalProgress,
+          clubId,
+        });
+      }, 1500);
+    };
+
+    container.addEventListener('scroll', handleScroll, { passive: true });
+
+    return () => {
+      container.removeEventListener('scroll', handleScroll);
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current);
+      }
+    };
+  }, [scrollContainerRef, scrollTimeoutRef, lastSavedProgressRef, bookData, currentChapter, updateProgress, clubId]);
+}
+
+function usePersistProgressOnUnmount({
+  scrollContainerRef,
+  bookData,
+  currentChapter,
+  clubId,
+  bookId
+}: {
+  scrollContainerRef: React.RefObject<HTMLDivElement | null>;
+  bookData: ProcessedBookData;
+  currentChapter: number | null;
+  clubId?: string;
+  bookId?: string;
+}) {
+  useEffect(() => {
+    return () => {
+      const container = scrollContainerRef.current;
+      if (!container || !bookData || bookData.totalChapters === 0 || currentChapter === null) return;
+
+      const scrollTop = container.scrollTop;
+      const scrollHeight = container.scrollHeight;
+      const clientHeight = container.clientHeight;
+      const totalProgress = computeTotalProgress(
+        currentChapter,
+        bookData.totalChapters,
+        scrollTop,
+        scrollHeight,
+        clientHeight
+      );
+      const position = JSON.stringify({ scrollTop, scrollHeight, clientHeight });
+
+      if (import.meta.env.DEV) {
+        console.log('[Reader] Saving progress on unmount:', { currentChapter, totalProgress });
+      }
+
+      const token = getAccessToken();
+      if (token && bookId) {
+        fetch('/api/progress', {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            bookId,
+            currentChapter,
+            currentPosition: position,
+            progress: totalProgress,
+            clubId,
+          }),
+          keepalive: true,
+        });
+      }
+    };
+  }, [scrollContainerRef, bookData, currentChapter, clubId, bookId]);
 }
 
 export function ReaderWorkspace({ bookId: propBookId, clubId, params }: Readonly<ReaderWorkspaceProps>) {
@@ -73,220 +444,55 @@ export function ReaderWorkspace({ bookId: propBookId, clubId, params }: Readonly
   
   // Инициализация currentChapter из прогресса при первой загрузке
   useEffect(() => {
-    initializeReaderChapter(bookId, progress, currentChapter, setCurrentChapter, progressLoading);
-  }, [progress, progressLoading, currentChapter, bookId]);
+    if (currentChapter !== null) return;
+    const initial = getInitialChapter(progress, progressLoading);
+    if (initial !== null) {
+      setCurrentChapter(initial);
+    }
+  }, [progress, progressLoading, currentChapter]);
 
   // Адаптация данных в зависимости от источника (personalBooks или books)
-  const bookData = content && 'book' in content 
-    ? {
-        title: content.book.title,
-        chapters: content.book.chapters,
-        totalChapters: content.book.chapters?.length || 1,
-        isPersonalBook: true
-      }
-    : {
-        title: (content as any)?.title || "Загрузка...",
-        content: (content as any)?.content || "",
-        totalChapters: 1,
-        isPersonalBook: false
-      };
+  const bookData = getBookData(content);
 
   // Получаем текущую главу в зависимости от типа книги
-  const currentChapterContent = bookData.isPersonalBook && bookData.chapters
-    ? bookData.chapters.find(ch => ch.chapterNumber === currentChapter)?.content || ""
-    : bookData.content || "";
+  const currentChapterContent = getCurrentChapterContent(bookData, currentChapter);
 
-  // Применение сохранённых настроек ридера при загрузке
-  useEffect(() => {
-    const saved = localStorage.getItem("readerSettings");
-    if (saved) {
-      try {
-        const settings = JSON.parse(saved);
-        const root = document.documentElement;
-        root.style.setProperty("--reader-font-size", `${settings.fontSize}px`);
-        root.style.setProperty("--reader-font-family", settings.fontFamily);
-        root.style.setProperty("--reader-line-height", settings.lineHeight.toString());
-        root.style.setProperty("--reader-text-align", settings.textAlign);
-        root.style.setProperty("--reader-content-width", `${settings.contentWidth}%`);
-        (root.dataset as any).readerTheme = settings.theme;
-        document.body.classList.remove("reader-light", "reader-dark", "reader-sepia");
-        document.body.classList.add(`reader-${settings.theme}`);
-      } catch (e) {
-        if (import.meta.env.DEV) {
-          console.error('Ошибка применения настроек:', e);
-        }
-      }
-    }
-  }, []);
+  useApplyReaderSettings();
 
-  // Трекинг открытия книги и начала чтения главы
-  useEffect(() => {
-    if (bookId && currentChapter !== null && !contentLoading) {
-      // Отслеживаем открытие книги только один раз
-      if (currentChapter === 1 || currentChapter === progress?.currentChapter) {
-        analytics.trackBookOpen(bookId);
-      }
-      
-      // Отслеживаем начало чтения главы
-      analytics.trackChapterStart(bookId, currentChapter);
-      
-      // Запускаем отслеживание сессии чтения
-      analytics.startReadingSession(bookId, currentChapter);
-      
-      return () => {
-        // Останавливаем отслеживание при размонтировании или смене главы
-        analytics.stopReadingSession();
-      };
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bookId, currentChapter, contentLoading]);
+  useTrackReaderAnalytics({
+    bookId,
+    currentChapter,
+    contentLoading,
+    progress: progress ?? null,
+    analytics
+  });
 
-  // Восстановление позиции из прогресса (только один раз при загрузке)
-  useEffect(() => {
-    // Восстанавливаем позицию только если:
-    // 1. Прогресс загружен
-    // 2. Текущая глава совпадает с главой из прогресса
-    // 3. Контент загружен
-    // 4. Ещё не восстанавливали позицию
-    if (
-      progress && 
-      !contentLoading && 
-      !progressRestored && 
-      currentChapter === progress.currentChapter &&
-      currentChapter !== null
-    ) {
-      if (import.meta.env.DEV) {
-        console.log('[Reader] Restoring scroll position from progress:', progress);
-      }
-      
-      // Восстановление позиции скролла после загрузки контента
-      if (progress.currentPosition && scrollContainerRef.current) {
-        try {
-          const position = JSON.parse(progress.currentPosition);
-          // Даём время на рендеринг контента
-          setTimeout(() => {
-            if (scrollContainerRef.current) {
-              scrollContainerRef.current.scrollTop = position.scrollTop || 0;
-              if (import.meta.env.DEV) {
-                console.log('[Reader] Restored scroll position:', position.scrollTop);
-              }
-            }
-          }, 300);
-        } catch (e) {
-          if (import.meta.env.DEV) {
-            console.error('Ошибка восстановления позиции скролла:', e);
-          }
-        }
-      }
-      setProgressRestored(true);
-    }
-  }, [progress, contentLoading, progressRestored, currentChapter]);
+  useRestoreScrollPosition({
+    progress: progress ?? null,
+    contentLoading,
+    progressRestored,
+    currentChapter,
+    scrollContainerRef,
+    setProgressRestored
+  });
 
-  // Отслеживание скролла и сохранение прогресса
-  useEffect(() => {
-    const container = scrollContainerRef.current;
-    if (!container || !bookData || bookData.totalChapters === 0 || currentChapter === null) return;
+  usePersistProgressOnScroll({
+    scrollContainerRef,
+    scrollTimeoutRef,
+    lastSavedProgressRef,
+    bookData,
+    currentChapter,
+    updateProgress,
+    clubId
+  });
 
-    const handleScroll = () => {
-      const scrollTop = container.scrollTop;
-      const scrollHeight = container.scrollHeight;
-      const clientHeight = container.clientHeight;
-
-      // Вычисление прогресса скролла в текущей главе
-      const scrollProgress = Math.min(
-        100,
-        Math.round((scrollTop / Math.max(1, scrollHeight - clientHeight)) * 100)
-      );
-
-      // Общий прогресс по всей книге
-      const totalProgress = Math.round(
-        ((currentChapter - 1) / bookData.totalChapters + scrollProgress / 100 / bookData.totalChapters) * 100
-      );
-
-      // Debounce - сохраняем только через 1.5 секунды после остановки скролла
-      if (scrollTimeoutRef.current) {
-        clearTimeout(scrollTimeoutRef.current);
-      }
-
-      scrollTimeoutRef.current = setTimeout(() => {
-        const position = JSON.stringify({ scrollTop, scrollHeight, clientHeight });
-        if (import.meta.env.DEV) {
-          console.log('[Reader] Saving progress:', { currentChapter, totalProgress, position });
-        }
-        
-        // Сохраняем последний прогресс в ref
-        lastSavedProgressRef.current = {
-          chapter: currentChapter,
-          position,
-          progress: totalProgress
-        };
-        
-        updateProgress({
-          currentChapter,
-          currentPosition: position,
-          progress: totalProgress,
-          clubId,
-        });
-      }, 1500);
-    };
-
-    container.addEventListener('scroll', handleScroll, { passive: true });
-
-    return () => {
-      container.removeEventListener('scroll', handleScroll);
-      if (scrollTimeoutRef.current) {
-        clearTimeout(scrollTimeoutRef.current);
-      }
-    };
-  }, [currentChapter, bookData, updateProgress, clubId]);
-
-  // Сохранение прогресса при выходе из компонента (размонтировании)
-  useEffect(() => {
-    return () => {
-      // Если есть несохранённый прогресс, сохраняем его немедленно
-      const container = scrollContainerRef.current;
-      if (container && bookData && bookData.totalChapters > 0 && currentChapter !== null) {
-        const scrollTop = container.scrollTop;
-        const scrollHeight = container.scrollHeight;
-        const clientHeight = container.clientHeight;
-        
-        const scrollProgress = Math.min(
-          100,
-          Math.round((scrollTop / Math.max(1, scrollHeight - clientHeight)) * 100)
-        );
-        
-        const totalProgress = Math.round(
-          ((currentChapter - 1) / bookData.totalChapters + scrollProgress / 100 / bookData.totalChapters) * 100
-        );
-        
-        const position = JSON.stringify({ scrollTop, scrollHeight, clientHeight });
-        
-        if (import.meta.env.DEV) {
-          console.log('[Reader] Saving progress on unmount:', { currentChapter, totalProgress });
-        }
-        
-        // Сохраняем синхронно через fetch, так как компонент размонтируется
-        const token = localStorage.getItem('authToken');
-        if (token && bookId) {
-          fetch('/api/progress', {
-            method: 'PUT',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${token}`,
-            },
-            body: JSON.stringify({
-              bookId,
-              currentChapter,
-              currentPosition: position,
-              progress: totalProgress,
-              clubId,
-            }),
-            keepalive: true, // Позволяет завершить запрос даже после закрытия страницы
-          });
-        }
-      }
-    };
-  }, [bookId, currentChapter, bookData, clubId]);
+  usePersistProgressOnUnmount({
+    scrollContainerRef,
+    bookData,
+    currentChapter,
+    clubId,
+    bookId
+  });
 
   // Fullscreen API
   const toggleFullscreen = () => {
@@ -302,44 +508,29 @@ export function ReaderWorkspace({ bookId: propBookId, clubId, params }: Readonly
 
   // Рендер контента без вложенных тернариев
   const renderMainContent = () => {
-    if (contentLoading) {
-      return (
-        <div className="flex items-center justify-center h-full">
-          <p className="text-muted-foreground">Загрузка...</p>
-        </div>
-      );
-    }
-    if (currentChapterContent) {
-      const chapter = currentChapter ?? 1;
-      return (
-        <>
-          <ContentRenderer content={currentChapterContent} />
-          <div className="flex justify-between items-center mt-12 pt-8 border-t">
-            <Button
-              variant="outline"
-              onClick={() => setCurrentChapter(Math.max(1, chapter - 1))}
-              disabled={chapter <= 1}
-            >
-              ← Предыдущая глава
-            </Button>
-            <span className="text-sm text-muted-foreground">
-              Глава {chapter} из {bookData.totalChapters}
-            </span>
-            <Button
-              variant="outline"
-              onClick={() => setCurrentChapter(Math.min(bookData.totalChapters, chapter + 1))}
-              disabled={chapter >= bookData.totalChapters}
-            >
-              Следующая глава →
-            </Button>
-          </div>
-        </>
-      );
-    }
+    const onMarkAsRead = () => {
+      const container = scrollContainerRef.current;
+      const scrollTop = container?.scrollTop ?? 0;
+      const scrollHeight = container?.scrollHeight ?? 0;
+      const clientHeight = container?.clientHeight ?? 0;
+      const position = JSON.stringify({ scrollTop, scrollHeight, clientHeight });
+      updateProgress({
+        currentChapter: currentChapter ?? 1,
+        currentPosition: position,
+        progress: 100,
+        clubId,
+      });
+    };
+
     return (
-      <div className="flex items-center justify-center h-full">
-        <p className="text-muted-foreground">Контент не найден</p>
-      </div>
+      <ReaderMainContent
+        contentLoading={contentLoading}
+        currentChapterContent={currentChapterContent}
+        currentChapter={currentChapter}
+        bookData={bookData}
+        setCurrentChapter={setCurrentChapter}
+        onMarkAsRead={onMarkAsRead}
+      />
     );
   };
 

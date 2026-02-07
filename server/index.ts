@@ -33,10 +33,15 @@ export const app = express();
 // trust proxy: 1 — trust only first hop, предотвращает spoofing от пользователей
 app.set('trust proxy', 1);
 const httpServer = createServer(app);
+
+// CORS: allowed origins (used by Express, Socket.IO, and WebSocket servers)
+const allowedOrigins = process.env.ALLOWED_ORIGINS
+	? process.env.ALLOWED_ORIGINS.split(",")
+	: ["http://localhost:3000"];
+
 const io = new SocketIOServer(httpServer, {
 	cors: {
-		origin:
-			process.env.NODE_ENV === "development" ? "http://localhost:3000" : false,
+		origin: allowedOrigins,
 		methods: ["GET", "POST"],
 		credentials: true,
 	},
@@ -112,10 +117,6 @@ app.use(
 );
 
 // CORS configuration for credentials
-const allowedOrigins = process.env.ALLOWED_ORIGINS
-	? process.env.ALLOWED_ORIGINS.split(",")
-	: ["http://localhost:3000"];
-
 app.use(
 	cors({
 		origin: allowedOrigins,

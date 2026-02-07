@@ -124,13 +124,23 @@ export function setupAuthRoutes(app: Express): void {
       // Присоединение к клубу по приглашению
       await joinClubByInvite(inviteToken, invitedToClub, authResult.user?.id);
 
-      // Set refresh token as httpOnly cookie with appropriate maxAge
-      const maxAge = rememberMe ? 30 * 24 * 60 * 60 * 1000 : 7 * 24 * 60 * 60 * 1000;
+      // Set tokens as httpOnly cookies
+      const refreshMaxAge = rememberMe ? 30 * 24 * 60 * 60 * 1000 : 7 * 24 * 60 * 60 * 1000;
+      const accessMaxAge = rememberMe ? 2 * 60 * 60 * 1000 : 15 * 60 * 1000;
+      const isProduction = process.env.NODE_ENV === 'production';
+
+      res.cookie('accessToken', authResult.tokens.accessToken, {
+        httpOnly: true,
+        secure: isProduction,
+        sameSite: 'strict',
+        maxAge: accessMaxAge,
+      });
+
       res.cookie('refreshToken', authResult.tokens.refreshToken, {
         httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
+        secure: isProduction,
         sameSite: 'strict',
-        maxAge,
+        maxAge: refreshMaxAge,
       });
 
       res.status(201).json({
@@ -176,13 +186,23 @@ export function setupAuthRoutes(app: Express): void {
         });
       }
 
-      // Set refresh token as httpOnly cookie with appropriate maxAge
-      const maxAge = rememberMe ? 30 * 24 * 60 * 60 * 1000 : 7 * 24 * 60 * 60 * 1000;
+      // Set tokens as httpOnly cookies
+      const refreshMaxAge = rememberMe ? 30 * 24 * 60 * 60 * 1000 : 7 * 24 * 60 * 60 * 1000;
+      const accessMaxAge = rememberMe ? 2 * 60 * 60 * 1000 : 15 * 60 * 1000;
+      const isProduction = process.env.NODE_ENV === 'production';
+
+      res.cookie('accessToken', authResult.tokens.accessToken, {
+        httpOnly: true,
+        secure: isProduction,
+        sameSite: 'strict',
+        maxAge: accessMaxAge,
+      });
+
       res.cookie('refreshToken', authResult.tokens.refreshToken, {
         httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
+        secure: isProduction,
         sameSite: 'strict',
-        maxAge,
+        maxAge: refreshMaxAge,
       });
 
       res.json({
@@ -236,16 +256,27 @@ export function setupAuthRoutes(app: Express): void {
         });
       }
 
-      // Set new refresh token as httpOnly cookie with appropriate maxAge
-      const maxAge = result.sessionType === 'remember_me' 
+      // Set new tokens as httpOnly cookies
+      const refreshMaxAge = result.sessionType === 'remember_me' 
         ? 30 * 24 * 60 * 60 * 1000 
         : 7 * 24 * 60 * 60 * 1000;
-        
+      const accessMaxAge = result.sessionType === 'remember_me'
+        ? 2 * 60 * 60 * 1000
+        : 15 * 60 * 1000;
+      const isProduction = process.env.NODE_ENV === 'production';
+
+      res.cookie('accessToken', result.newTokens.accessToken, {
+        httpOnly: true,
+        secure: isProduction,
+        sameSite: 'strict',
+        maxAge: accessMaxAge,
+      });
+
       res.cookie('refreshToken', result.newTokens.refreshToken, {
         httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
+        secure: isProduction,
         sameSite: 'strict',
-        maxAge,
+        maxAge: refreshMaxAge,
       });
 
       res.json({
@@ -266,8 +297,9 @@ export function setupAuthRoutes(app: Express): void {
         await authService.logout(refreshToken);
       }
 
-      // Clear refresh token cookie
+      // Clear all auth cookies
       res.clearCookie('refreshToken');
+      res.clearCookie('accessToken');
       
       res.json({ message: "Успешный выход из системы" });
     } catch (error) {

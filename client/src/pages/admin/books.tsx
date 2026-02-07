@@ -1,5 +1,5 @@
 import { AdminLayout } from "@/components/layout/AdminLayout";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -33,6 +33,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { getAccessToken } from "@/lib/token-store";
 
 interface Book {
   id: string;
@@ -72,7 +73,7 @@ interface BooksFilters {
 }
 
 async function fetchBooks(filters: BooksFilters): Promise<BooksResponse> {
-  const token = localStorage.getItem('accessToken');
+  const token = getAccessToken();
   if (!token) throw new Error('No auth token');
 
   const params = new URLSearchParams();
@@ -97,7 +98,7 @@ async function fetchBooks(filters: BooksFilters): Promise<BooksResponse> {
 }
 
 async function deleteBook(bookId: string, source: string): Promise<void> {
-  const token = localStorage.getItem('accessToken');
+  const token = getAccessToken();
   if (!token) throw new Error('No auth token');
 
   const response = await fetch(`/api/v1/admin/books/${bookId}?source=${source}`, {
@@ -114,7 +115,7 @@ async function deleteBook(bookId: string, source: string): Promise<void> {
 }
 
 async function updateBookStatus(bookId: string, status: string, source: string): Promise<void> {
-  const token = localStorage.getItem('accessToken');
+  const token = getAccessToken();
   if (!token) throw new Error('No auth token');
 
   const response = await fetch(`/api/v1/admin/books/${bookId}/status`, {
@@ -131,7 +132,7 @@ async function updateBookStatus(bookId: string, status: string, source: string):
   }
 }
 
-function BookStatusBadge({ status }: { status: Book['status'] }) {
+function BookStatusBadge({ status }: Readonly<{ status: Book['status'] }>) {
   switch (status) {
     case 'active':
       return (
@@ -159,7 +160,7 @@ function BookStatusBadge({ status }: { status: Book['status'] }) {
   }
 }
 
-function BookActionsMenu({ book }: { book: Book }) {
+function BookActionsMenu({ book }: Readonly<{ book: Book }>) {
   const queryClient = useQueryClient();
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 
@@ -265,10 +266,10 @@ function formatFileSize(bytes: number): string {
   const k = 1024;
   const sizes = ['B', 'KB', 'MB', 'GB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+  return Number.parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 }
 
-function BooksTable({ books }: { books: Book[] }) {
+function BooksTable({ books }: Readonly<{ books: Book[] }>) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full">
@@ -348,6 +349,8 @@ function BooksTable({ books }: { books: Book[] }) {
 }
 
 function BooksTableSkeleton() {
+  const skeletonKeys = ['book-sk-1', 'book-sk-2', 'book-sk-3', 'book-sk-4', 'book-sk-5'];
+  
   return (
     <div className="overflow-x-auto">
       <table className="w-full">
@@ -362,8 +365,8 @@ function BooksTableSkeleton() {
           </tr>
         </thead>
         <tbody>
-          {[...Array(5)].map((_, i) => (
-            <tr key={i} className="border-b">
+          {skeletonKeys.map((key) => (
+            <tr key={key} className="border-b">
               <td className="p-4">
                 <div className="flex items-center gap-3">
                   <Skeleton className="w-12 h-16 rounded" />
@@ -444,7 +447,7 @@ export default function AdminBooks() {
             <h3 className="text-lg font-semibold text-gray-900">Ошибка загрузки</h3>
             <p className="text-gray-600 mt-2">Не удалось загрузить книги</p>
             <p className="text-sm text-gray-500 mt-1">{errorMessage}</p>
-            <Button className="mt-4" onClick={() => window.location.reload()}>
+            <Button className="mt-4" onClick={() => globalThis.location.reload()}>
               Попробовать снова
             </Button>
           </div>
@@ -577,17 +580,23 @@ export default function AdminBooks() {
         {/* Books Table */}
         <Card>
           <CardContent className="p-0">
-            {isLoading ? (
-              <BooksTableSkeleton />
-            ) : data && data.books.length > 0 ? (
-              <BooksTable books={data.books} />
-            ) : (
-              <div className="text-center py-12">
-                <BookOpen className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                <h3 className="text-lg font-semibold text-gray-900">Книги не найдены</h3>
-                <p className="text-gray-600 mt-2">Попробуйте изменить фильтры поиска</p>
-              </div>
-            )}
+            {(() => {
+              if (isLoading) {
+                return <BooksTableSkeleton />;
+              }
+              
+              if (data && data.books.length > 0) {
+                return <BooksTable books={data.books} />;
+              }
+              
+              return (
+                <div className="text-center py-12">
+                  <BookOpen className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                  <h3 className="text-lg font-semibold text-gray-900">Книги не найдены</h3>
+                  <p className="text-gray-600 mt-2">Попробуйте изменить фильтры поиска</p>
+                </div>
+              );
+            })()}
           </CardContent>
         </Card>
 

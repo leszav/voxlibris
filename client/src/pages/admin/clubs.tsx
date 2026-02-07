@@ -1,5 +1,5 @@
 import { AdminLayout } from "@/components/layout/AdminLayout";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,13 +13,10 @@ import {
   Users2,
   Plus,
   Eye,
-  Ban,
   CheckCircle,
   AlertTriangle,
   Calendar,
   User,
-  Clock,
-  BookOpen,
   Archive,
   Settings
 } from "lucide-react";
@@ -34,6 +31,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { getAccessToken } from "@/lib/token-store";
 
 interface Club {
   id: string;
@@ -71,7 +69,7 @@ interface ClubsFilters {
 }
 
 async function fetchClubs(filters: ClubsFilters): Promise<ClubsResponse> {
-  const token = localStorage.getItem('accessToken');
+  const token = getAccessToken();
   if (!token) throw new Error('No auth token');
 
   const params = new URLSearchParams();
@@ -95,7 +93,7 @@ async function fetchClubs(filters: ClubsFilters): Promise<ClubsResponse> {
 }
 
 async function deleteClub(clubId: string): Promise<void> {
-  const token = localStorage.getItem('accessToken');
+  const token = getAccessToken();
   if (!token) throw new Error('No auth token');
 
   const response = await fetch(`/api/v1/admin/clubs/${clubId}`, {
@@ -112,7 +110,7 @@ async function deleteClub(clubId: string): Promise<void> {
 }
 
 async function updateClubStatus(clubId: string, status: string): Promise<void> {
-  const token = localStorage.getItem('accessToken');
+  const token = getAccessToken();
   if (!token) throw new Error('No auth token');
 
   const response = await fetch(`/api/v1/admin/clubs/${clubId}/status`, {
@@ -130,7 +128,7 @@ async function updateClubStatus(clubId: string, status: string): Promise<void> {
 }
 
 async function updateClubMaxMembers(clubId: string, maxMembers: number): Promise<void> {
-  const token = localStorage.getItem('accessToken');
+  const token = getAccessToken();
   if (!token) throw new Error('No auth token');
 
   const response = await fetch(`/api/v1/admin/clubs/${clubId}`, {
@@ -147,7 +145,7 @@ async function updateClubMaxMembers(clubId: string, maxMembers: number): Promise
   }
 }
 
-function ClubStatusBadge({ status }: { status: Club['status'] }) {
+function ClubStatusBadge({ status }: Readonly<{ status: Club['status'] }>) {
   switch (status) {
     case 'recruiting':
       return (
@@ -182,7 +180,7 @@ function ClubStatusBadge({ status }: { status: Club['status'] }) {
   }
 }
 
-function ClubActionsMenu({ club, onEditMaxMembers }: { club: Club; onEditMaxMembers: (club: Club) => void }) {
+function ClubActionsMenu({ club, onEditMaxMembers }: Readonly<{ club: Club; onEditMaxMembers: (club: Club) => void }>) {
   const queryClient = useQueryClient();
 
   const deleteClubMutation = useMutation({
@@ -267,7 +265,7 @@ function ClubActionsMenu({ club, onEditMaxMembers }: { club: Club; onEditMaxMemb
   );
 }
 
-function ClubsTable({ clubs, onEditMaxMembers }: { clubs: Club[]; onEditMaxMembers: (club: Club) => void }) {
+function ClubsTable({ clubs, onEditMaxMembers }: Readonly<{ clubs: Club[]; onEditMaxMembers: (club: Club) => void }>) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full">
@@ -361,6 +359,8 @@ function ClubsTable({ clubs, onEditMaxMembers }: { clubs: Club[]; onEditMaxMembe
 }
 
 function ClubsTableSkeleton() {
+  const skeletonKeys = ['club-sk-1', 'club-sk-2', 'club-sk-3', 'club-sk-4', 'club-sk-5'];
+  
   return (
     <div className="overflow-x-auto">
       <table className="w-full">
@@ -375,8 +375,8 @@ function ClubsTableSkeleton() {
           </tr>
         </thead>
         <tbody>
-          {[...Array(5)].map((_, i) => (
-            <tr key={i} className="border-b">
+          {skeletonKeys.map((key) => (
+            <tr key={key} className="border-b">
               <td className="p-4">
                 <div className="space-y-2">
                   <Skeleton className="h-4 w-32" />
@@ -478,7 +478,7 @@ export default function AdminClubs() {
             <h3 className="text-lg font-semibold text-gray-900">Ошибка загрузки</h3>
             <p className="text-gray-600 mt-2">Не удалось загрузить клубы</p>
             <p className="text-sm text-gray-500 mt-1">{errorMessage}</p>
-            <Button className="mt-4" onClick={() => window.location.reload()}>
+            <Button className="mt-4" onClick={() => globalThis.location.reload()}>
               Попробовать снова
             </Button>
           </div>
@@ -598,17 +598,23 @@ export default function AdminClubs() {
         {/* Clubs Table */}
         <Card>
           <CardContent className="p-0">
-            {isLoading ? (
-              <ClubsTableSkeleton />
-            ) : data && data.clubs.length > 0 ? (
-              <ClubsTable clubs={data.clubs} onEditMaxMembers={handleEditMaxMembers} />
-            ) : (
-              <div className="text-center py-12">
-                <Users2 className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                <h3 className="text-lg font-semibold text-gray-900">Клубы не найдены</h3>
-                <p className="text-gray-600 mt-2">Попробуйте изменить фильтры поиска</p>
-              </div>
-            )}
+            {(() => {
+              if (isLoading) {
+                return <ClubsTableSkeleton />;
+              }
+              
+              if (data && data.clubs.length > 0) {
+                return <ClubsTable clubs={data.clubs} onEditMaxMembers={handleEditMaxMembers} />;
+              }
+              
+              return (
+                <div className="text-center py-12">
+                  <Users2 className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                  <h3 className="text-lg font-semibold text-gray-900">Клубы не найдены</h3>
+                  <p className="text-gray-600 mt-2">Попробуйте изменить фильтры поиска</p>
+                </div>
+              );
+            })()}
           </CardContent>
         </Card>
 
@@ -660,7 +666,7 @@ export default function AdminClubs() {
                   min={2}
                   max={2000}
                   value={newMaxMembers}
-                  onChange={(e) => setNewMaxMembers(parseInt(e.target.value) || 2)}
+                  onChange={(e) => setNewMaxMembers(Number.parseInt(e.target.value) || 2)}
                 />
                 <p className="text-sm text-muted-foreground">
                   Текущее количество участников: {editingClub?.current_participants || 0}

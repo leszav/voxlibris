@@ -24,7 +24,6 @@ export default function Register() {
   const [errorMessage, setErrorMessage] = useState('');
   const [, setLocation] = useLocation();
   const { register } = useAuth();
-  const { toast } = useToast();
   const [inviteToken, setInviteToken] = useState<string | undefined>(undefined);
 
   useEffect(() => {
@@ -32,7 +31,9 @@ export default function Register() {
       const params = new URLSearchParams(globalThis.location?.search ?? '');
       const invite = params.get('invite') || undefined;
       setInviteToken(invite || undefined);
-    } catch {}
+    } catch {
+      // Ignore URL parsing errors
+    }
   }, []);
 
   const passwordRequirements = {
@@ -43,6 +44,26 @@ export default function Register() {
   const isFormValid = username && email && password && confirmPassword && 
     passwordRequirements.length && passwordRequirements.match;
 
+  const parseRegisterError = (error: unknown): string => {
+    if (!(error instanceof Error)) {
+      return "Не удалось создать аккаунт";
+    }
+
+    try {
+      const errorData = JSON.parse(error.message);
+      if (errorData.errors && Array.isArray(errorData.errors)) {
+        const passwordError = errorData.errors.find((err: any) => err.path?.includes('password'));
+        if (passwordError) {
+          return "Ошибка валидации данных. Пароль должен содержать только латинские буквы, цифры и спецсимволы.";
+        }
+        return errorData.message || "Ошибка валидации данных";
+      }
+      return errorData.message || error.message;
+    } catch {
+      return error.message;
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isFormValid) return;
@@ -52,27 +73,7 @@ export default function Register() {
       await register(username, email, password, rememberMe, inviteToken);
       setShowSuccessModal(true);
     } catch (error) {
-      let errorMsg = "Не удалось создать аккаунт";
-      
-      if (error instanceof Error) {
-        try {
-          const errorData = JSON.parse(error.message);
-          if (errorData.errors && Array.isArray(errorData.errors)) {
-            const passwordError = errorData.errors.find((err: any) => err.path && err.path.includes('password'));
-            if (passwordError) {
-              errorMsg = "Ошибка валидации данных. Пароль должен содержать только латинские буквы, цифры и спецсимволы.";
-            } else {
-              errorMsg = errorData.message || "Ошибка валидации данных";
-            }
-          } else {
-            errorMsg = errorData.message || error.message;
-          }
-        } catch {
-          errorMsg = error.message;
-        }
-      }
-      
-      setErrorMessage(errorMsg);
+      setErrorMessage(parseRegisterError(error));
       setShowErrorModal(true);
     } finally {
       setIsLoading(false);
