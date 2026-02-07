@@ -9,8 +9,7 @@ import type {
   ClubInvitation,
   InsertClubInvitation,
   User,
-  ClubWithDetails,
-  ClubBook
+  ClubWithDetails
 } from '../../shared/schema.js';
 
 /**
