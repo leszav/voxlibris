@@ -23,11 +23,12 @@ interface AuthProviderProps {
 const USER_CACHE_KEY = 'voxlibris_user_cache';
 
 export function AuthProvider({ children }: AuthProviderProps) {
-  // Оптимистичная загрузка: пытаемся загрузить пользователя из localStorage
+  // Оптимистичная загрузка: загружаем пользователя из localStorage
+  // Не проверяем токен здесь - это будет сделано в фоне через useEffect
   const [user, setUser] = useState<User | null>(() => {
     try {
       const cached = localStorage.getItem(USER_CACHE_KEY);
-      if (cached && authAPI.isAuthenticated()) {
+      if (cached) {
         return JSON.parse(cached);
       }
     } catch {
@@ -35,7 +36,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
     return null;
   });
-  const [isLoading, setIsLoading] = useState(false);
+ const [isLoading, setIsLoading] = useState(false);
 
   const isAuthenticated = !!user;
 
