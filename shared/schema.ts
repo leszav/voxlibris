@@ -129,13 +129,6 @@ export const clubMembers = pgTable("club_members", {
   isActive: boolean("is_active").notNull().default(true),
 });
 
-// Club tags
-export const clubTags = pgTable("club_tags", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  clubId: varchar("club_id").notNull().references(() => clubs.id),
-  tag: text("tag").notNull(),
-});
-
 // Club invitations - система приглашений участников
 export const invitationStatuses = ["pending", "accepted", "declined", "expired"] as const;
 export type InvitationStatus = typeof invitationStatuses[number];
@@ -150,6 +143,41 @@ export const clubInvitations = pgTable("club_invitations", {
   expiresAt: timestamp("expires_at").notNull(),
   acceptedAt: timestamp("accepted_at"),
   declinedAt: timestamp("declined_at"),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+});
+
+// Tags - справочник тегов/жанров
+export const tags = pgTable("tags", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  slug: varchar("slug").notNull().unique(), // fantasy, sf_heroic, lit_rpg и т.д.
+  nameRu: text("name_ru").notNull(), // фэнтези, героическая фантастика, литРПГ
+  nameEn: text("name_en").notNull(), // fantasy, heroic fantasy, LitRPG
+  description: text("description"), // описание жанра
+  category: varchar("category"), // fantasy, sf, detective, romance и т.д.
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+});
+
+// Club tags - связь клубов с тегами (many-to-many)
+export const clubTags = pgTable("club_tags", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  clubId: varchar("club_id").notNull().references(() => clubs.id, { onDelete: "cascade" }),
+  tagId: varchar("tag_id").notNull().references(() => tags.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+});
+
+// Personal book tags - связь личных книг с тегами (many-to-many)
+export const personalBookTags = pgTable("personal_book_tags", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  bookId: varchar("book_id").notNull().references(() => personalBooks.id, { onDelete: "cascade" }),
+  tagId: varchar("tag_id").notNull().references(() => tags.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+});
+
+// Club book tags - связь книг клубов с тегами (many-to-many)
+export const clubBookTags = pgTable("club_book_tags", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  bookId: varchar("book_id").notNull().references(() => clubBooks.id, { onDelete: "cascade" }),
+  tagId: varchar("tag_id").notNull().references(() => tags.id, { onDelete: "cascade" }),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
 });
 
@@ -231,11 +259,6 @@ export const insertClubMemberSchema = createInsertSchema(clubMembers).pick({
   role: true,
 });
 
-export const insertClubTagSchema = createInsertSchema(clubTags).pick({
-  clubId: true,
-  tag: true,
-});
-
 export const insertClubInvitationSchema = createInsertSchema(clubInvitations).pick({
   clubId: true,
   email: true,
@@ -260,15 +283,25 @@ export type Club = typeof clubs.$inferSelect;
 export type InsertClubMember = z.infer<typeof insertClubMemberSchema>;
 export type ClubMember = typeof clubMembers.$inferSelect;
 
-export type InsertClubTag = z.infer<typeof insertClubTagSchema>;
-export type ClubTag = typeof clubTags.$inferSelect;
-
 export type InsertClubInvitation = z.infer<typeof insertClubInvitationSchema>;
 export type ClubInvitation = typeof clubInvitations.$inferSelect;
 
 export type ClubInvitationWithInviter = ClubInvitation & {
   inviterName: string | null;
 };
+
+// Tag types
+export type Tag = typeof tags.$inferSelect;
+export type InsertTag = typeof tags.$inferInsert;
+
+export type ClubTag = typeof clubTags.$inferSelect;
+export type InsertClubTag = typeof clubTags.$inferInsert;
+
+export type PersonalBookTag = typeof personalBookTags.$inferSelect;
+export type InsertPersonalBookTag = typeof personalBookTags.$inferInsert;
+
+export type ClubBookTag = typeof clubBookTags.$inferSelect;
+export type InsertClubBookTag = typeof clubBookTags.$inferInsert;
 
 export const insertSettingSchema = createInsertSchema(settings).pick({
   key: true,

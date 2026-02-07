@@ -1,6 +1,6 @@
 import { BaseRepository } from './BaseRepository.js';
 import { eq, desc, and, count, sql } from 'drizzle-orm';
-import { clubs, clubMembers, clubInvitations, users, clubBooks } from '../../shared/schema.js';
+import { clubs, clubMembers, clubInvitations, users, clubBooks, tags, clubTags } from '../../shared/schema.js';
 import type {
   Club,
   InsertClub,
@@ -78,12 +78,19 @@ export class ClubRepository extends BaseRepository {
             .from(clubMembers)
             .where(eq(clubMembers.clubId, club.id));
 
+          // Теги клуба
+          const clubTagsResult = await this.db
+            .select({ slug: tags.slug })
+            .from(clubTags)
+            .innerJoin(tags, eq(clubTags.tagId, tags.id))
+            .where(eq(clubTags.clubId, club.id));
+
           return {
             ...club,
             book: bookResult[0] || null,
             owner: ownerResult[0] || null,
             memberCount: Number(memberCountResult[0]?.count || 0),
-            tags: [],
+            tags: clubTagsResult.map(t => t.slug),
           } as ClubWithDetails;
         })
       );
@@ -162,6 +169,13 @@ export class ClubRepository extends BaseRepository {
       
       const memberCount = memberCountResult[0]?.count || 0;
 
+      // Теги клуба
+      const clubTagsResult = await this.db
+        .select({ slug: tags.slug })
+        .from(clubTags)
+        .innerJoin(tags, eq(clubTags.tagId, tags.id))
+        .where(eq(clubTags.clubId, id));
+
       // Возвращаем клуб со всеми данными
       return {
         ...club,
@@ -169,7 +183,7 @@ export class ClubRepository extends BaseRepository {
         books: books,
         owner: owner || null,
         memberCount: Number(memberCount),
-        tags: [], // TODO: добавить таблицу тегов
+        tags: clubTagsResult.map(t => t.slug),
       } as any;
     } catch (error) {
       this.logError('getClub', error);
@@ -240,12 +254,19 @@ export class ClubRepository extends BaseRepository {
             .from(clubMembers)
             .where(eq(clubMembers.clubId, club.id));
 
+          // Теги клуба
+          const clubTagsResult = await this.db
+            .select({ slug: tags.slug })
+            .from(clubTags)
+            .innerJoin(tags, eq(clubTags.tagId, tags.id))
+            .where(eq(clubTags.clubId, club.id));
+
           return {
             ...club,
             book: bookResult[0] || null,
             owner: ownerResult[0] || null,
             memberCount: Number(memberCountResult[0]?.count || 0),
-            tags: [],
+            tags: clubTagsResult.map(t => t.slug),
           } as ClubWithDetails;
         })
       );

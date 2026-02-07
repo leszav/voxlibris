@@ -1,7 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { apiRequest } from "../lib/queryClient";
-import type { Bookmark, Note } from "@shared/schema";
 
 // Получение контента книги
 export function useBookContent(bookId: string, chapter?: number, enabled: boolean = true) {
@@ -11,15 +10,15 @@ export function useBookContent(bookId: string, chapter?: number, enabled: boolea
       // Сначала пробуем загрузить как личную книгу (Personal Books)
       try {
         const userBooksUrl = `/api/v1/user/books/${bookId}/content`;
-        const response = await apiRequest(userBooksUrl);
-        return response as { book: { title: string; chapters: Array<{ title: string; content: string; chapterNumber: number }> } };
+        const response = await apiRequest(userBooksUrl) as any;
+        return response;
       } catch (userBooksError: any) {
         // Если книга не найдена в личных (404), пробуем общую библиотеку
         if (userBooksError?.status === 404 || userBooksError?.message?.includes('не найдена')) {
           const url = chapter 
             ? `/api/v1/books/${bookId}/content?chapter=${chapter}`
             : `/api/v1/books/${bookId}/content`;
-          const response = await apiRequest(url) as { title: string; content: string; chapter?: number };
+          const response = await apiRequest(url) as any;
           return response;
         }
         // Если другая ошибка - пробрасываем дальше
@@ -37,11 +36,7 @@ export function useReadingProgress(bookId: string) {
     queryKey: ["/api/progress", bookId],
     queryFn: async () => {
       try {
-        const response = await apiRequest(`/api/progress/${bookId}`) as { progress: {
-          currentChapter: number;
-          currentPosition: string;
-          progress: number;
-        }};
+        const response = await apiRequest(`/api/progress/${bookId}`) as any;
         // API возвращает { progress: {...} }, извлекаем внутренний объект
         return response.progress;
       } catch (error: any) {
@@ -93,7 +88,7 @@ export function useBookmarks(bookId: string) {
   const query = useQuery({
     queryKey: ["/api/v1/books", bookId, "bookmarks"],
     queryFn: async () => {
-      const response = await apiRequest(`/api/v1/books/${bookId}/bookmarks`) as { bookmarks: Bookmark[] };
+      const response = await apiRequest(`/api/v1/books/${bookId}/bookmarks`) as any;
       return response.bookmarks;
     },
     enabled: !!bookId,
@@ -121,7 +116,7 @@ export function useAddBookmark(bookId: string) {
       const response = await apiRequest(`/api/v1/books/${bookId}/bookmarks`, {
         method: "POST",
         body: JSON.stringify(data),
-      }) as { bookmark: Bookmark };
+      }) as any;
       return response.bookmark;
     },
     onSuccess: () => {
@@ -155,7 +150,7 @@ export function useNotes(bookId: string) {
   const query = useQuery({
     queryKey: ["/api/v1/books", bookId, "notes"],
     queryFn: async () => {
-      const response = await apiRequest(`/api/v1/books/${bookId}/notes`) as { notes: Note[] };
+      const response = await apiRequest(`/api/v1/books/${bookId}/notes`) as any;
       return response.notes;
     },
     enabled: !!bookId,
@@ -185,7 +180,7 @@ export function useAddNote(bookId: string) {
       const response = await apiRequest(`/api/v1/books/${bookId}/notes`, {
         method: "POST",
         body: JSON.stringify(data),
-      }) as { note: Note };
+      }) as any;
       return response.note;
     },
     onSuccess: () => {
@@ -216,7 +211,7 @@ export function useUpdateNote(bookId: string) {
           method: "PUT",
           body: JSON.stringify({ noteText, color }),
         }
-      ) as { note: Note };
+      ) as any;
       return response.note;
     },
     onSuccess: () => {
