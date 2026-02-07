@@ -24,22 +24,71 @@ export class ClubRepository extends BaseRepository {
    */
   async getClubs(): Promise<ClubWithDetails[]> {
     try {
-      return await this.db
+      const clubsData = await this.db
         .select({
           id: clubs.id,
           title: clubs.title,
           description: clubs.description,
+          coverImage: clubs.coverImage,
+          bookId: clubs.bookId,
           type: clubs.type,
           status: clubs.status,
           isPrivate: clubs.isPrivate,
           maxMembers: clubs.maxMembers,
-          // memberCount не существует в схеме - вычисляется динамически
+          isActive: clubs.isActive,
+          isLive: clubs.isLive,
+          isFeatured: clubs.isFeatured,
+          schedule: clubs.schedule,
+          settings: clubs.settings,
+          archivedAt: clubs.archivedAt,
+          archiveReason: clubs.archiveReason,
           ownerId: clubs.ownerId,
           createdAt: clubs.createdAt,
           updatedAt: clubs.updatedAt,
         })
         .from(clubs)
-        .orderBy(desc(clubs.createdAt)) as ClubWithDetails[];
+        .orderBy(desc(clubs.createdAt));
+
+      // Загружаем дополнительные данные для каждого клуба
+      const clubsWithDetails = await Promise.all(
+        clubsData.map(async (club) => {
+          // Первая книга клуба
+          const bookResult = await this.db
+            .select()
+            .from(clubBooks)
+            .where(
+              and(
+                eq(clubBooks.clubId, club.id),
+                eq(clubBooks.isDeleted, false)
+              )
+            )
+            .orderBy(desc(clubBooks.uploadedAt))
+            .limit(1);
+
+          // Владелец
+          const ownerResult = await this.db
+            .select()
+            .from(users)
+            .where(eq(users.id, club.ownerId))
+            .limit(1);
+
+          // Количество участников
+          const memberCountResult = await this.db
+            .select({ count: count() })
+            .from(clubMembers)
+            .where(eq(clubMembers.clubId, club.id));
+
+          return {
+            ...club,
+            book: bookResult[0] || null,
+            owner: ownerResult[0] || null,
+            memberCount: Number(memberCountResult[0]?.count || 0),
+            tags: [],
+          } as ClubWithDetails;
+        })
+      );
+
+      return clubsWithDetails;
     } catch (error) {
       this.logError('getClubs', error);
       return [];
@@ -58,10 +107,19 @@ export class ClubRepository extends BaseRepository {
           id: clubs.id,
           title: clubs.title,
           description: clubs.description,
+          coverImage: clubs.coverImage,
+          bookId: clubs.bookId,
           type: clubs.type,
           status: clubs.status,
           isPrivate: clubs.isPrivate,
           maxMembers: clubs.maxMembers,
+          isActive: clubs.isActive,
+          isLive: clubs.isLive,
+          isFeatured: clubs.isFeatured,
+          schedule: clubs.schedule,
+          settings: clubs.settings,
+          archivedAt: clubs.archivedAt,
+          archiveReason: clubs.archiveReason,
           ownerId: clubs.ownerId,
           createdAt: clubs.createdAt,
           updatedAt: clubs.updatedAt,
@@ -87,12 +145,31 @@ export class ClubRepository extends BaseRepository {
         )
         .orderBy(desc(clubBooks.uploadedAt));
 
-      // Возвращаем клуб с первой книгой (для обратной совместимости)
-      // и добавляем все книги в отдельное поле
+      // Загружаем владельца
+      const ownerResult = await this.db
+        .select()
+        .from(users)
+        .where(eq(users.id, club.ownerId))
+        .limit(1);
+      
+      const owner = this.getFirstResult(ownerResult);
+
+      // Получаем количество участников
+      const memberCountResult = await this.db
+        .select({ count: count() })
+        .from(clubMembers)
+        .where(eq(clubMembers.clubId, id));
+      
+      const memberCount = memberCountResult[0]?.count || 0;
+
+      // Возвращаем клуб со всеми данными
       return {
         ...club,
-        book: books[0] || null, // первая книга для обратной совместимости
-        books: books, // все книги клуба
+        book: books[0] || null,
+        books: books,
+        owner: owner || null,
+        memberCount: Number(memberCount),
+        tags: [], // TODO: добавить таблицу тегов
       } as any;
     } catch (error) {
       this.logError('getClub', error);
@@ -107,15 +184,24 @@ export class ClubRepository extends BaseRepository {
     this.validateRequired(userId, 'userId');
     
     try {
-      return await this.db
+      const clubsData = await this.db
         .select({
           id: clubs.id,
           title: clubs.title,
           description: clubs.description,
+          coverImage: clubs.coverImage,
+          bookId: clubs.bookId,
           type: clubs.type,
           status: clubs.status,
           isPrivate: clubs.isPrivate,
           maxMembers: clubs.maxMembers,
+          isActive: clubs.isActive,
+          isLive: clubs.isLive,
+          isFeatured: clubs.isFeatured,
+          schedule: clubs.schedule,
+          settings: clubs.settings,
+          archivedAt: clubs.archivedAt,
+          archiveReason: clubs.archiveReason,
           ownerId: clubs.ownerId,
           createdAt: clubs.createdAt,
           updatedAt: clubs.updatedAt,
@@ -123,7 +209,48 @@ export class ClubRepository extends BaseRepository {
         .from(clubs)
         .innerJoin(clubMembers, eq(clubs.id, clubMembers.clubId))
         .where(eq(clubMembers.userId, userId))
-        .orderBy(desc(clubs.createdAt)) as ClubWithDetails[];
+        .orderBy(desc(clubs.createdAt));
+
+      // Загружаем дополнительные данные для каждого клуба
+      const clubsWithDetails = await Promise.all(
+        clubsData.map(async (club) => {
+          // Первая книга клуба
+          const bookResult = await this.db
+            .select()
+            .from(clubBooks)
+            .where(
+              and(
+                eq(clubBooks.clubId, club.id),
+                eq(clubBooks.isDeleted, false)
+              )
+            )
+            .orderBy(desc(clubBooks.uploadedAt))
+            .limit(1);
+
+          // Владелец
+          const ownerResult = await this.db
+            .select()
+            .from(users)
+            .where(eq(users.id, club.ownerId))
+            .limit(1);
+
+          // Количество участников
+          const memberCountResult = await this.db
+            .select({ count: count() })
+            .from(clubMembers)
+            .where(eq(clubMembers.clubId, club.id));
+
+          return {
+            ...club,
+            book: bookResult[0] || null,
+            owner: ownerResult[0] || null,
+            memberCount: Number(memberCountResult[0]?.count || 0),
+            tags: [],
+          } as ClubWithDetails;
+        })
+      );
+
+      return clubsWithDetails;
     } catch (error) {
       this.logError('getClubsByUser', error);
       return [];
