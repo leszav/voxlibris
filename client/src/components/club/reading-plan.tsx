@@ -20,7 +20,7 @@ import {
   Edit,
   Trash2
 } from "lucide-react";
-import { clubReaderApi, type ReadingPlanResponse, type ClubReadingPlan, type MemberProgress } from "@/api/club-reader";
+import { clubReaderApi, type ClubReadingPlan } from "@/api/club-reader";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import { ru } from "date-fns/locale";
@@ -35,8 +35,8 @@ interface ReadingPlanFormData {
 }
 
 interface ReadingPlanProps {
-  clubId: string;
-  isOwner?: boolean;
+  readonly clubId: string;
+  readonly isOwner?: boolean;
 }
 
 export function ReadingPlan({ clubId, isOwner = false }: ReadingPlanProps) {
@@ -143,6 +143,18 @@ export function ReadingPlan({ clubId, isOwner = false }: ReadingPlanProps) {
         return 'В процессе';
       default:
         return 'Не начато';
+    }
+  };
+
+  // Получение варианта badge для статуса
+  const getStatusVariant = (status: string): "default" | "secondary" | "outline" => {
+    switch (status) {
+      case 'completed':
+        return 'default';
+      case 'in_progress':
+        return 'secondary';
+      default:
+        return 'outline';
     }
   };
 
@@ -254,7 +266,7 @@ export function ReadingPlan({ clubId, isOwner = false }: ReadingPlanProps) {
                         <div className="flex items-center gap-3">
                           {getStatusIcon(status)}
                           <h3 className="font-semibold text-lg">{plan.title}</h3>
-                          <Badge variant={status === 'completed' ? 'default' : status === 'in_progress' ? 'secondary' : 'outline'}>
+                          <Badge variant={getStatusVariant(status)}>
                             {getStatusText(status)}
                           </Badge>
                         </div>
@@ -350,15 +362,34 @@ export function ReadingPlan({ clubId, isOwner = false }: ReadingPlanProps) {
   );
 }
 
+// Вспомогательная функция для преобразования данных формы
+function prepareFormData(formData: {
+  title: string;
+  description: string;
+  orderIndex: number;
+  startChapter: string;
+  endChapter: string;
+  targetDate: string;
+}): ReadingPlanFormData {
+  return {
+    title: formData.title,
+    description: formData.description || undefined,
+    orderIndex: formData.orderIndex,
+    startChapter: formData.startChapter ? Number.parseInt(formData.startChapter) : undefined,
+    endChapter: formData.endChapter ? Number.parseInt(formData.endChapter) : undefined,
+    targetDate: formData.targetDate || undefined,
+  };
+}
+
 // Форма создания этапа
 function CreatePlanForm({ 
   onSubmit, 
   onCancel, 
   isSubmitting 
 }: { 
-  onSubmit: (data: ReadingPlanFormData) => void;
-  onCancel: () => void;
-  isSubmitting: boolean;
+  readonly onSubmit: (data: ReadingPlanFormData) => void;
+  readonly onCancel: () => void;
+  readonly isSubmitting: boolean;
 }) {
   const [formData, setFormData] = useState({
     title: '',
@@ -371,14 +402,7 @@ function CreatePlanForm({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onSubmit({
-      title: formData.title,
-      description: formData.description || undefined,
-      orderIndex: formData.orderIndex,
-      startChapter: formData.startChapter ? parseInt(formData.startChapter) : undefined,
-      endChapter: formData.endChapter ? parseInt(formData.endChapter) : undefined,
-      targetDate: formData.targetDate || undefined,
-    });
+    onSubmit(prepareFormData(formData));
   };
 
   return (
@@ -413,7 +437,7 @@ function CreatePlanForm({
             type="number"
             min="1"
             value={formData.orderIndex}
-            onChange={(e) => setFormData(prev => ({ ...prev, orderIndex: parseInt(e.target.value) }))}
+            onChange={(e) => setFormData(prev => ({ ...prev, orderIndex: Number.parseInt(e.target.value) }))}
           />
         </div>
         <div>
@@ -469,10 +493,10 @@ function EditPlanForm({
   onCancel, 
   isSubmitting 
 }: { 
-  plan: ClubReadingPlan;
-  onSubmit: (data: ReadingPlanFormData) => void;
-  onCancel: () => void;
-  isSubmitting: boolean;
+  readonly plan: ClubReadingPlan;
+  readonly onSubmit: (data: ReadingPlanFormData) => void;
+  readonly onCancel: () => void;
+  readonly isSubmitting: boolean;
 }) {
   const [formData, setFormData] = useState({
     title: plan.title,
@@ -485,14 +509,7 @@ function EditPlanForm({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onSubmit({
-      title: formData.title,
-      description: formData.description || undefined,
-      orderIndex: formData.orderIndex,
-      startChapter: formData.startChapter ? parseInt(formData.startChapter) : undefined,
-      endChapter: formData.endChapter ? parseInt(formData.endChapter) : undefined,
-      targetDate: formData.targetDate || undefined,
-    });
+    onSubmit(prepareFormData(formData));
   };
 
   return (
@@ -525,7 +542,7 @@ function EditPlanForm({
             type="number"
             min="1"
             value={formData.orderIndex}
-            onChange={(e) => setFormData(prev => ({ ...prev, orderIndex: parseInt(e.target.value) }))}
+            onChange={(e) => setFormData(prev => ({ ...prev, orderIndex: Number.parseInt(e.target.value) }))}
           />
         </div>
         <div>

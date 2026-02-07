@@ -19,11 +19,38 @@ interface AuthProviderProps {
   readonly children: ReactNode;
 }
 
+// Ключ для хранения кэша пользователя
+const USER_CACHE_KEY = 'voxlibris_user_cache';
+
 export function AuthProvider({ children }: AuthProviderProps) {
-  const [user, setUser] = useState<User | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  // Оптимистичная загрузка: пытаемся загрузить пользователя из localStorage
+  const [user, setUser] = useState<User | null>(() => {
+    try {
+      const cached = localStorage.getItem(USER_CACHE_KEY);
+      if (cached && authAPI.isAuthenticated()) {
+        return JSON.parse(cached);
+      }
+    } catch {
+      // Ignore cache errors
+    }
+    return null;
+  });
+  const [isLoading, setIsLoading] = useState(false);
 
   const isAuthenticated = !!user;
+
+  // Кэширование пользователя в localStorage
+  const cacheUser = (userData: User | null) => {
+    try {
+      if (userData) {
+        localStorage.setItem(USER_CACHE_KEY, JSON.stringify(userData));
+      } else {
+        localStorage.removeItem(USER_CACHE_KEY);
+      }
+    } catch {
+      // localStorage может быть недоступен
+    }
+  };
 
   const fetchCurrentUser = async () => {
     try {
@@ -34,6 +61,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         const refreshSuccess = await authAPI.forceRefreshToken();
         if (!refreshSuccess) {
           setUser(null);
+          cacheUser(null);
           return;
         }
       }
@@ -41,6 +69,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       // Получаем актуальные данные пользователя с сервера
       const response = await authAPI.getCurrentUser();
       setUser(response.user);
+      cacheUser(response.user);
     } catch (error) {
       if (import.meta.env.DEV) {
         console.error('Failed to fetch current user:', error);
@@ -48,6 +77,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       // Очищаем состояние при ошибке
       authAPI.clearTokens();
       setUser(null);
+      cacheUser(null);
     }
   };
 
@@ -55,10 +85,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
     try {
       const response = await authAPI.login({ username, password, rememberMe });
       setUser(response.user);
+      cacheUser(response.user);
     } catch (error) {
       // Очищаем состояние при неудачном входе
       authAPI.clearTokens();
       setUser(null);
+      cacheUser(null);
       throw error;
     }
   };
@@ -69,10 +101,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
       if (inviteToken) payload.invite = inviteToken;
       const response = await authAPI.register(payload);
       setUser(response.user);
+      cacheUser(response.user);
     } catch (error) {
       // Очищаем состояние при неудачной регистрации
       authAPI.clearTokens();
       setUser(null);
+      cacheUser(null);
       throw error;
     }
   };
@@ -89,6 +123,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       // Всегда очищаем локальное состояние
       authAPI.clearTokens();
       setUser(null);
+      cacheUser(null);
     }
   };
 
@@ -108,6 +143,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         const refreshSuccess = await authAPI.forceRefreshToken();
         if (!refreshSuccess) {
           setUser(null);
+          cacheUser(null);
           return;
         }
       }
@@ -120,14 +156,21 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
       authAPI.clearTokens();
       setUser(null);
+      cacheUser(null);
     } finally {
       setIsLoading(false);
     }
   };
 
   useEffect(() => {
-    // Инициализация при монтировании
-    refetchUser();
+    // Фоновая валидация токена при монтировании
+    // Не блокируем UI - пользователь из кэша уже загружен
+    fetchCurrentUser().catch(() => {
+      // Если токен невалиден, очищаем состояние
+      authAPI.clearTokens();
+      setUser(null);
+      cacheUser(null);
+    });
 
     // Периодическая проверка состояния токена (каждые 5 минут)
     const interval = setInterval(() => {
@@ -136,6 +179,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
           // Если проверка не удалась, очищаем состояние
           authAPI.clearTokens();
           setUser(null);
+          cacheUser(null);
         });
       }
     }, 5 * 60 * 1000);

@@ -1,12 +1,10 @@
 import classicCover from "@assets/generated_images/classic_novel_book_cover_design.png";
 // Import existing covers as fallbacks
 import modernCover from "@assets/generated_images/modern_fiction_book_cover_design.png";
-import mysteryCover from "@assets/generated_images/mystery_thriller_book_cover_design.png";
 import {
   ArrowLeft,
   Bookmark,
   BookOpen,
-  CheckCircle2,
   Clock,
   Edit,
   Eye,
@@ -91,13 +89,13 @@ const HISTORY = [
 ];
 
 export default function Library() {
-  const { user, isAuthenticated } = useAuth();
+  const { isAuthenticated } = useAuth();
   const [, setLocation] = useLocation();
   const { data: userBooksResponse, isLoading, refetch } = usePersonalBooks();
   const books = userBooksResponse || [];
 
   // Reading history data
-  const { data: historyData, isLoading: historyLoading } = useReadingHistory();
+  const { data: historyData } = useReadingHistory();
   const clearHistory = useClearReadingHistory();
 
   // State for book management dialogs
@@ -181,6 +179,7 @@ export default function Library() {
       setEditingBook(null);
       refetch();
     } catch (error) {
+      console.error("Error updating book:", error);
       toast({
         title: "Ошибка",
         description: "Не удалось обновить книгу",
@@ -203,6 +202,7 @@ export default function Library() {
       setDeletingBook(null);
       refetch();
     } catch (error) {
+      console.error("Error deleting book:", error);
       toast({
         title: "Ошибка",
         description: "Не удалось удалить книгу",
@@ -243,30 +243,35 @@ export default function Library() {
           </TabsList>
 
           <TabsContent value="current" className="space-y-6">
-            {isLoading ? (
-              <div className="space-y-6">
-                {[1, 2].map((i) => (
-                  <div
-                    key={i}
-                    className="flex flex-col sm:flex-row gap-6 bg-card p-6 rounded-xl border"
-                  >
-                    <Skeleton className="w-full sm:w-48 aspect-[2/3] shrink-0 rounded-lg" />
-                    <div className="flex-1 space-y-4">
-                      <div className="space-y-2">
-                        <Skeleton className="h-6 w-2/3" />
-                        <Skeleton className="h-4 w-1/3" />
+            {(() => {
+              if (isLoading) {
+                return (
+                  <div className="space-y-6">
+                    {[1, 2].map((i) => (
+                      <div
+                        key={i}
+                        className="flex flex-col sm:flex-row gap-6 bg-card p-6 rounded-xl border"
+                      >
+                        <Skeleton className="w-full sm:w-48 aspect-[2/3] shrink-0 rounded-lg" />
+                        <div className="flex-1 space-y-4">
+                          <div className="space-y-2">
+                            <Skeleton className="h-6 w-2/3" />
+                            <Skeleton className="h-4 w-1/3" />
+                          </div>
+                          <Skeleton className="h-4 w-1/4" />
+                          <div className="space-y-2">
+                            <Skeleton className="h-4 w-full" />
+                            <Skeleton className="h-2 w-full" />
+                          </div>
+                        </div>
                       </div>
-                      <Skeleton className="h-4 w-1/4" />
-                      <div className="space-y-2">
-                        <Skeleton className="h-4 w-full" />
-                        <Skeleton className="h-2 w-full" />
-                      </div>
-                    </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-            ) : books && Array.isArray(books) && books.length > 0 ? (
-              books.map((book: any) => (
+                );
+              }
+
+              if (books && Array.isArray(books) && books.length > 0) {
+                return books.map((book: any) => (
                 <div
                   key={book.id}
                   className="group flex flex-col sm:flex-row gap-6 bg-card p-6 rounded-xl border hover:border-primary/20 transition-all"
@@ -323,11 +328,11 @@ export default function Library() {
 
                       <div className="mt-4 flex items-center gap-2 text-sm text-accent-foreground/80 font-medium bg-accent/10 w-fit px-2 py-1 rounded">
                         <LibraryIcon className="w-3.5 h-3.5" />
-                        {book.contentType === "epub"
-                          ? "EPUB"
-                          : book.contentType === "fb2"
-                            ? "FB2"
-                            : "Книга"}
+                        {(() => {
+                          if (book.contentType === "epub") return "EPUB";
+                          if (book.contentType === "fb2") return "FB2";
+                          return "Книга";
+                        })()}
                       </div>
 
                       {book.description && (
@@ -373,17 +378,20 @@ export default function Library() {
                     </div>
                   </div>
                 </div>
-              ))
-            ) : (
-              <div className="text-center py-16 bg-secondary/20 rounded-xl border border-dashed">
-                <LibraryIcon className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
-                <h3 className="font-medium">Ваша библиотека пуста</h3>
-                <p className="text-muted-foreground max-w-sm mx-auto mt-2">
-                  Добавьте свою первую книгу, загрузив файл EPUB или FB2 через кнопку "Загрузить
-                  книгу" выше.
-                </p>
-              </div>
-            )}
+              ));
+              }
+
+              return (
+                <div className="text-center py-16 bg-secondary/20 rounded-xl border border-dashed">
+                  <LibraryIcon className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
+                  <h3 className="font-medium">Ваша библиотека пуста</h3>
+                  <p className="text-muted-foreground max-w-sm mx-auto mt-2">
+                    Добавьте свою первую книгу, загрузив файл EPUB или FB2 через кнопку "Загрузить
+                    книгу" выше.
+                  </p>
+                </div>
+              );
+            })()}
           </TabsContent>
 
           <TabsContent value="history">
