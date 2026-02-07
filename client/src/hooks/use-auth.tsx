@@ -61,8 +61,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
         // Попытка восстановить сессию через refresh token в cookie
         const refreshSuccess = await authAPI.forceRefreshToken();
         if (!refreshSuccess) {
-          setUser(null);
-          cacheUser(null);
+          // Не очищаем user - оставляем кэшированного для offline-first UX
+          // Сервер сам пришлёт 401 если сессия истекла
           return;
         }
       }
@@ -71,14 +71,18 @@ export function AuthProvider({ children }: AuthProviderProps) {
       const response = await authAPI.getCurrentUser();
       setUser(response.user);
       cacheUser(response.user);
-    } catch (error) {
+    } catch (error: any) {
       if (import.meta.env.DEV) {
         console.error('Failed to fetch current user:', error);
       }
-      // Очищаем состояние при ошибке
-      authAPI.clearTokens();
-      setUser(null);
-      cacheUser(null);
+      
+      // Очищаем ТОЛЬКО при явном 401/403 от сервера (сессия невалидна)
+      if (error?.response?.status === 401 || error?.response?.status === 403) {
+        authAPI.clearTokens();
+        setUser(null);
+        cacheUser(null);
+      }
+      // При других ошибках (сеть, таймаут) - оставляем кэшированного user
     }
   };
 
@@ -143,21 +147,23 @@ export function AuthProvider({ children }: AuthProviderProps) {
         // Попытка восстановить сессию через refresh token
         const refreshSuccess = await authAPI.forceRefreshToken();
         if (!refreshSuccess) {
-          setUser(null);
-          cacheUser(null);
+          // Не очищаем - оставляем offline-first
           return;
         }
       }
 
       // Получаем актуальные данные пользователя
       await fetchCurrentUser();
-    } catch (error) {
+    } catch (error: any) {
       if (import.meta.env.DEV) {
         console.error('Auth sync failed:', error);
       }
-      authAPI.clearTokens();
-      setUser(null);
-      cacheUser(null);
+      // Очищаем только при 401/403
+      if (error?.response?.status === 401 || error?.response?.status === 403) {
+        authAPI.clearTokens();
+        setUser(null);
+        cacheUser(null);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -166,22 +172,14 @@ export function AuthProvider({ children }: AuthProviderProps) {
   useEffect(() => {
     // Фоновая валидация токена при монтировании
     // Не блокируем UI - пользователь из кэша уже загружен
-    fetchCurrentUser().catch(() => {
-      // Если токен невалиден, очищаем состояние
-      authAPI.clearTokens();
-      setUser(null);
-      cacheUser(null);
-    });
+    // Не очищаем при ошибках - fetchCurrentUser сам решает когда чистить
+    fetchCurrentUser();
 
     // Периодическая проверка состояния токена (каждые 5 минут)
     const interval = setInterval(() => {
       if (authAPI.isAuthenticated()) {
-        fetchCurrentUser().catch(() => {
-          // Если проверка не удалась, очищаем состояние
-          authAPI.clearTokens();
-          setUser(null);
-          cacheUser(null);
-        });
+        // Тихо пытаемся обновить, не очищаем при ошибках
+        fetchCurrentUser();
       }
     }, 5 * 60 * 1000);
 
