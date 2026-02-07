@@ -3,6 +3,7 @@ import type { Transporter } from 'nodemailer';
 import { storage } from '../repositories/index.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 /**
  * Email Service для VoxLibris
@@ -170,8 +171,27 @@ class EmailService {
    */
   private async loadTemplate(templateName: string): Promise<string> {
     try {
-      const templatePath = path.join(process.cwd(), 'email-templates', `${templateName}.html`);
-      return await fs.readFile(templatePath, 'utf-8');
+      const fileName = `${templateName}.html`;
+      const cwd = process.cwd();
+      const serverDir = path.dirname(fileURLToPath(import.meta.url));
+
+      const candidatePaths = [
+        path.join(cwd, 'email-templates', fileName),
+        path.join(cwd, 'dist', 'email-templates', fileName),
+        path.join(cwd, '..', 'email-templates', fileName),
+        path.join(serverDir, '..', '..', 'email-templates', fileName),
+        path.join(serverDir, '..', '..', '..', 'email-templates', fileName),
+      ];
+
+      for (const candidate of candidatePaths) {
+        try {
+          return await fs.readFile(candidate, 'utf-8');
+        } catch {
+          // Try next candidate
+        }
+      }
+
+      throw new Error(`Template not found. Tried paths: ${candidatePaths.join(', ')}`);
     } catch (error) {
       console.error(`[EmailService] Error loading template ${templateName}:`, error);
       throw error;
@@ -257,6 +277,40 @@ class EmailService {
       });
     } catch (error) {
       console.error('[EmailService] Error sending registration confirmation:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Отправка письма для сброса пароля
+   */
+  async sendPasswordReset(params: {
+    email: string;
+    username: string;
+    resetToken: string;
+    expiresInMinutes: number;
+    baseUrl?: string;
+  }): Promise<boolean> {
+    try {
+      const template = await this.loadTemplate('password-reset');
+
+      // Используем переданный baseUrl или fallback к CLIENT_URL
+      const baseUrl = params.baseUrl || process.env.CLIENT_URL || 'http://localhost:3000';
+      const resetUrl = `${baseUrl}/auth/reset-password/${params.resetToken}`;
+
+      const html = this.replaceVariables(template, {
+        username: params.username,
+        resetUrl,
+        expiresIn: String(params.expiresInMinutes),
+      });
+
+      return await this.sendEmail({
+        to: params.email,
+        subject: 'Сброс пароля VoxLibris',
+        html,
+      });
+    } catch (error) {
+      console.error('[EmailService] Error sending password reset email:', error);
       return false;
     }
   }

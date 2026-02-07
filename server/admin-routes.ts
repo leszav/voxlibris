@@ -1,6 +1,7 @@
 import express from 'express';
 import { jwtAuth, requireAdmin } from './jwt-middleware.js';
 import { storage } from './repositories/index.js';
+import { authService } from './auth-service.js';
 import { emailService } from './services/email-service.js';
 import type { UserRole, UserStatus } from '../shared/schema.js';
 import { db } from './db.js';
@@ -207,6 +208,46 @@ router.put('/users/:username/status', jwtAuth, requireAdmin, async (req, res) =>
     res.json({ user: safeUser });
   } catch (error) {
     console.error('Error updating user status:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+// Сбросить пароль пользователя (отправка письма)
+router.post('/users/:id/reset-password', jwtAuth, requireFullAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body || {};
+
+    const user = await storage.getUser(id);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const baseUrl = `${req.protocol}://${req.get('host')}`;
+    const result = await authService.requestPasswordReset(
+      user.email,
+      baseUrl,
+      req.user!.userId,
+      req.ip
+    );
+
+    await logAction(
+      req,
+      'reset_password',
+      'user',
+      user.id,
+      reason || 'Password reset requested by admin',
+      undefined,
+      undefined
+    );
+
+    if (!result.emailSent) {
+      return res.status(500).json({ message: 'Не удалось отправить письмо для сброса пароля' });
+    }
+
+    res.json({ success: true, message: 'Письмо для сброса пароля отправлено' });
+  } catch (error) {
+    console.error('Error requesting password reset:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 });

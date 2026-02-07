@@ -190,20 +190,22 @@ app.use(cookieParser());
 app.use("/api/auth/login", authLimiter);
 app.use("/api/auth/register", authLimiter);
 app.use("/api/auth/forgot-password", authLimiter);
+app.use("/api/auth/reset-password", authLimiter);
 app.use("/api/auth", speedLimiter);
 app.use(generalLimiter);
 
 setupAuthRoutes(app);
 
 // Periodic cleanup of expired refresh tokens (every hour)
-setInterval(
-	async () => {
-		try {
-			await authService.cleanupExpiredTokens();
-		} catch (error) {
-			console.error("Failed to cleanup expired tokens:", error);
-		}
-	},
+	setInterval(
+		async () => {
+			try {
+				await authService.cleanupExpiredTokens();
+				await authService.cleanupExpiredPasswordResetTokens();
+			} catch (error) {
+				console.error("Failed to cleanup expired tokens:", error);
+			}
+		},
 	60 * 60 * 1000,
 ); // 1 hour
 

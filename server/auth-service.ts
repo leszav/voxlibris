@@ -1,6 +1,6 @@
 import jwt from "jsonwebtoken";
 import bcrypt from "bcrypt";
-import { randomBytes } from "node:crypto";
+import { randomBytes, createHash } from "node:crypto";
 import { storage } from "./repositories/index.js";
 import type { User, UserRole, UserStatus } from "../shared/schema.js";
 import { emailService } from "./services/email-service.js";
@@ -88,6 +88,7 @@ export class AuthService {
   private readonly REFRESH_TOKEN_SHORT = '7d';     // Обычная сессия
   private readonly REFRESH_TOKEN_LONG = '30d';     // Remember Me сессия
   private readonly EMAIL_CONFIRMATION_EXPIRY = '24h'; // Срок действия токена подтверждения
+  private readonly PASSWORD_RESET_EXPIRY_MINUTES = 60;
 
   private get JWT_SECRET(): string {
     if (!this._jwtSecret) {
@@ -304,6 +305,22 @@ export class AuthService {
       // После создания обновляем токен подтверждения через отдельный метод
       if (dbNewUser && isDatabaseUser(dbNewUser)) {
         await storage.updateUserConfirmationToken(dbNewUser.id, confirmationToken);
+        
+        // Создаем базовый профиль пользователя
+        try {
+          await storage.createOrUpdateUserProfile(dbNewUser.id, {
+            displayName: username,
+            isReader: false,
+            bio: null,
+            avatarUrl: null,
+            socialLinks: null,
+            preferences: null
+          });
+          console.log(`User profile created for user ${dbNewUser.id}`);
+        } catch (profileError) {
+          console.error('Failed to create user profile:', profileError);
+          // Не блокируем регистрацию если профиль не создался
+        }
       }
       
       // Строгая валидация результата создания пользователя
@@ -373,6 +390,17 @@ export class AuthService {
   }
 
   /**
+   * Очистка истекших токенов сброса пароля
+   */
+  async cleanupExpiredPasswordResetTokens(): Promise<void> {
+    try {
+      await storage.cleanExpiredPasswordResetTokens();
+    } catch (error) {
+      console.error('Cleanup password reset tokens error:', error);
+    }
+  }
+
+  /**
    * Извлекает токен из заголовка Authorization
    */
   extractTokenFromHeader(authHeader: string | undefined): string | null {
@@ -430,6 +458,10 @@ export class AuthService {
     }
   }
 
+  private hashToken(token: string): string {
+    return createHash('sha256').update(token).digest('hex');
+  }
+
   /**
    * Отправляет email подтверждения
    */
@@ -465,6 +497,25 @@ async confirmEmail(token: string): Promise<{ success: boolean; message: string }
     await storage.updateUserEmailConfirmation(user.id, true);
     await storage.updateUserStatus(user.username, 'active');
       
+    // Создаем профиль пользователя, если его нет
+    try {
+      const existingProfile = await storage.getUserProfile(user.id);
+      if (!existingProfile) {
+        await storage.createOrUpdateUserProfile(user.id, {
+          displayName: user.username,
+          isReader: false,
+          bio: null,
+          avatarUrl: null,
+          socialLinks: null,
+          preferences: null
+        });
+        console.log(`User profile created for user ${user.id} during email confirmation`);
+      }
+    } catch (profileError) {
+      console.error('Failed to create user profile during email confirmation:', profileError);
+      // Не блокируем подтверждение email если профиль не создался
+    }
+
     console.log(`Email confirmed for user ${user.username} (${user.email})`);
     return { success: true, message: 'Email успешно подтвержден. Теперь вы можете использовать все функции VoxLibris.' };
   } catch (error) {
@@ -498,6 +549,114 @@ async resendConfirmationEmail(userId: string): Promise<{ success: boolean; messa
   } catch (error) {
     console.error('Resend confirmation email error:', error);
     return { success: false, message: 'Ошибка при отправке повторного письма' };
+  }
+}
+
+/**
+ * Запрос на сброс пароля (публичный или админский)
+ */
+async requestPasswordReset(
+  emailOrUsername: string,
+  baseUrl?: string,
+  requestedByAdminId?: string,
+  requestedFromIp?: string
+): Promise<{ emailSent: boolean }> {
+  try {
+    console.log(`[AuthService] Password reset requested for: ${emailOrUsername}`);
+    
+    // Безопасно пытаемся найти пользователя по email или username
+    let user = await storage.getUserByEmail(emailOrUsername);
+    if (!user) {
+      user = await storage.getUserByUsername(emailOrUsername);
+    }
+
+    // Не раскрываем существование пользователя
+    if (!user || user.status === 'deleted') {
+      console.log(`[AuthService] User not found or deleted: ${emailOrUsername}`);
+      return { emailSent: false };
+    }
+
+    console.log(`[AuthService] User found: ${user.email} (ID: ${user.id})`);
+
+    // Инвалидируем предыдущие активные токены
+    await storage.invalidatePasswordResetTokensForUser(user.id);
+    console.log(`[AuthService] Invalidated previous tokens for user: ${user.id}`);
+
+    const token = randomBytes(32).toString('hex');
+    const tokenHash = this.hashToken(token);
+    const expiresAt = new Date(Date.now() + this.PASSWORD_RESET_EXPIRY_MINUTES * 60 * 1000);
+    console.log(`[AuthService] Generated reset token: ${token.substring(0, 8)}...`);
+
+    const tokenRecord = await storage.createPasswordResetToken({
+      userId: user.id,
+      tokenHash,
+      expiresAt,
+      requestedByAdminId,
+      requestedFromIp,
+    });
+    console.log(`[AuthService] Created token record: ${tokenRecord.id}`);
+
+    console.log(`[AuthService] Attempting to send email to: ${user.email}`);
+    const emailSent = await emailService.sendPasswordReset({
+      email: user.email,
+      username: user.username,
+      resetToken: token,
+      expiresInMinutes: this.PASSWORD_RESET_EXPIRY_MINUTES,
+      baseUrl,
+    });
+
+    console.log(`[AuthService] Email send result: ${emailSent}`);
+
+    if (!emailSent) {
+      console.log(`[AuthService] Email failed, marking token as used: ${tokenRecord.id}`);
+      await storage.markPasswordResetTokenUsed(tokenRecord.id);
+    }
+
+    return { emailSent };
+  } catch (error) {
+    console.error('[AuthService] Password reset request error:', error);
+    return { emailSent: false };
+  }
+}
+
+/**
+ * Сброс пароля по токену
+ */
+async resetPassword(token: string, newPassword: string): Promise<{ success: boolean; message: string }> {
+  try {
+    if (!token) {
+      return { success: false, message: 'Токен обязателен' };
+    }
+
+    const tokenHash = this.hashToken(token);
+    const tokenRecord = await storage.getPasswordResetTokenByHash(tokenHash);
+
+    if (!tokenRecord || tokenRecord.usedAt) {
+      return { success: false, message: 'Недействительный или использованный токен' };
+    }
+
+    if (tokenRecord.expiresAt < new Date()) {
+      return { success: false, message: 'Токен истек' };
+    }
+
+    const user = await storage.getUser(tokenRecord.userId);
+    if (!user) {
+      return { success: false, message: 'Пользователь не найден' };
+    }
+
+    const saltRounds = 12;
+    const hashedPassword = await bcrypt.hash(newPassword, saltRounds);
+
+    await storage.updateUserPassword(user.id, hashedPassword);
+    await storage.markPasswordResetTokenUsed(tokenRecord.id);
+
+    // Отзываем все refresh токены пользователя
+    await storage.revokeAllUserRefreshTokens(user.id);
+
+    return { success: true, message: 'Пароль успешно обновлен' };
+  } catch (error) {
+    console.error('Password reset error:', error);
+    return { success: false, message: 'Ошибка при сбросе пароля' };
   }
 }
 }

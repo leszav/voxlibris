@@ -12,65 +12,52 @@
     body { font-family: "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; line-height: 1.6; color: #3D2B1F; background: #F5F2ED; }
     a { color: #8B5A2B; text-decoration: underline; }
     
-    /* Colors */
-    :root {
-      --primary: #5C4033;
-      --primary-dark: #4A3429;
-      --accent: #D4A574;
-      --accent-dark: #C49565;
-      --bg: #F7F3ED;
-      --card-bg: #FFFFFF;
-      --text: #3D2B1F;
-      --text-muted: #8B7355;
-      --border: #E8DFD5;
-    }
-
     /* Container */
     .wrapper { width: 100%; max-width: 600px; margin: 0 auto; padding: 40px 20px; }
     
     /* Card */
-    .card { background: var(--card-bg); border-radius: 12px; overflow: hidden; box-shadow: 0 2px 8px rgba(92, 64, 51, 0.08); }
+    .card { background: #FFFFFF; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 8px rgba(92, 64, 51, 0.08); }
     
     /* Header */
-    .header { background: var(--primary); padding: 32px 40px; text-align: center; }
+    .header { background: #5C4033; padding: 32px 40px; text-align: center; }
     .header-icon { width: 48px; height: 48px; margin: 0 auto 12px; background: rgba(255,255,255,0.15); border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 24px; }
     .header-title { font-family: "Playfair Display", serif; font-size: 24px; font-weight: 600; color: #FFFFFF; margin: 0; }
     .header-subtitle { font-size: 14px; color: rgba(255,255,255,0.8); margin: 8px 0 0; }
     
     /* Body */
     .body { padding: 40px; }
-    .body h2 { font-family: "Playfair Display", serif; font-size: 20px; font-weight: 600; color: var(--primary); margin: 0 0 16px; }
-    .body p { margin: 0 0 16px; color: var(--text); }
+    .body h2 { font-family: "Playfair Display", serif; font-size: 20px; font-weight: 600; color: #5C4033; margin: 0 0 16px; }
+    .body p { margin: 0 0 16px; color: #3D2B1F; }
     .body p:last-child { margin-bottom: 0; }
     
     /* Welcome box */
-    .welcome { background: var(--bg); border-left: 3px solid var(--accent); padding: 16px 20px; margin: 20px 0; border-radius: 0 8px 8px 0; }
+    .welcome { background: #F7F3ED; border-left: 3px solid #D4A574; padding: 16px 20px; margin: 20px 0; border-radius: 0 8px 8px 0; }
     
     /* Features list */
     .features { margin: 24px 0; padding: 0; list-style: none; }
-    .features li { padding: 8px 0 8px 28px; position: relative; color: var(--text); font-size: 15px; }
-    .features li::before { content: "✓"; position: absolute; left: 0; top: 10px; color: var(--accent); font-weight: bold; }
+    .features li { padding: 8px 0 8px 28px; position: relative; color: #3D2B1F; font-size: 15px; }
+    .features li::before { content: "✓"; position: absolute; left: 0; top: 10px; color: #D4A574; font-weight: bold; }
     
     /* Button */
-    .button { display: inline-block; background: var(--primary); color: #FFFFFF; text-decoration: none; padding: 14px 28px; border-radius: 8px; font-weight: 600; font-size: 15px; }
-    .button:hover { background: var(--primary-dark); }
+    .button { display: inline-block; background: #5C4033; color: #FFFFFF; text-decoration: none; padding: 14px 28px; border-radius: 8px; font-weight: 600; font-size: 15px; }
+    .button:hover { background: #4A3429; }
     .button-wrap { text-align: center; margin: 28px 0; }
     
     /* Info box */
-    .info { background: var(--bg); border-radius: 8px; padding: 16px 20px; margin: 20px 0; font-size: 14px; color: var(--text-muted); }
+    .info { background: #F7F3ED; border-radius: 8px; padding: 16px 20px; margin: 20px 0; font-size: 14px; color: #5C4033; }
     .info a { word-break: break-all; }
     
     /* Note */
-    .note { font-size: 14px; color: var(--text-muted); margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border); }
+    .note { font-size: 14px; color: #5C4033; margin-top: 24px; padding-top: 20px; border-top: 1px solid #E8DFD5; }
     
     /* Footer */
-    .footer { padding: 24px 40px; text-align: center; border-top: 1px solid var(--border); background: var(--bg); }
-    .footer-logo { font-family: "Playfair Display", serif; font-size: 16px; font-weight: 600; color: var(--primary); margin-bottom: 8px; }
-    .footer-text { font-size: 13px; color: var(--text-muted); margin: 0; }
-    .footer-link { color: var(--accent-dark); }
+    .footer { padding: 24px 40px; text-align: center; border-top: 1px solid #E8DFD5; background: #F7F3ED; }
+    .footer-logo { font-family: "Playfair Display", serif; font-size: 16px; font-weight: 600; color: #5C4033; margin-bottom: 8px; }
+    .footer-text { font-size: 13px; color: #5C4033; margin: 0; }
+    .footer-link { color: #C49565; }
     
     /* Utility */
-    .text-muted { color: var(--text-muted); }
+    .text-muted { color: #5C4033; }
     .text-center { text-align: center; }
     
     /* Responsive */
@@ -83,49 +70,49 @@
   </style>
 </head>
 <body>
-  <div class="wrapper">
-    <div class="card">
-      <div class="header">
-        <div class="header-icon">📚</div>
-        <h1 class="header-title">VoxLibris</h1>
-        <p class="header-subtitle">Платформа для книжных клубов</p>
+  <div style="width: 100%; max-width: 600px; margin: 0 auto; padding: 40px 20px;">
+    <div style="background: #FFFFFF; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 8px rgba(92, 64, 51, 0.08);">
+      <div style="background: #5C4033; padding: 32px 40px; text-align: center;">
+        <div style="width: 48px; height: 48px; margin: 0 auto 12px; background: rgba(255,255,255,0.15); border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 24px;">📚</div>
+        <h1 style="font-family: 'Playfair Display', serif; font-size: 24px; font-weight: 600; color: #FFFFFF; margin: 0;">VoxLibris</h1>
+        <p style="font-size: 14px; color: rgba(255,255,255,0.8); margin: 8px 0 0;">Платформа для книжных клубов</p>
       </div>
       
-      <div class="body">
-        <h2>Подтверждение регистрации</h2>
+      <div style="padding: 40px;">
+        <h2 style="font-family: 'Playfair Display', serif; font-size: 20px; font-weight: 600; color: #5C4033; margin: 0 0 16px;">Подтверждение регистрации</h2>
         
-        <p>Привет, {{username}}!</p>
+        <p style="margin: 0 0 16px; color: #3D2B1F;">Привет, {{username}}!</p>
         
-        <div class="welcome">
+        <div style="background: #F7F3ED; border-left: 3px solid #D4A574; padding: 16px 20px; margin: 20px 0; border-radius: 0 8px 8px 0;">
           Спасибо за регистрацию! Подтвердите email для активации аккаунта.
         </div>
         
-        <div class="button-wrap">
-          <a class="button" href="{{confirmUrl}}">Подтвердить email</a>
+        <div style="text-align: center; margin: 28px 0;">
+          <a style="display: inline-block; background: #5C4033; color: #FFFFFF; text-decoration: none; padding: 14px 28px; border-radius: 8px; font-weight: 600; font-size: 15px;" href="{{confirmUrl}}">Подтвердить email</a>
         </div>
         
-        <div class="info">
+        <div style="background: #F7F3ED; border-radius: 8px; padding: 16px 20px; margin: 20px 0; font-size: 14px; color: #5C4033;">
           Если кнопка не работает, скопируйте ссылку:<br>
-          <a href="{{confirmUrl}}">{{confirmUrl}}</a>
+          <a style="word-break: break-all; color: #C49565;" href="{{confirmUrl}}">{{confirmUrl}}</a>
         </div>
         
-        <ul class="features">
-          <li>Создавать и вступать в книжные клубы</li>
-          <li>Читать книги с синхронизацией прогресса</li>
-          <li>Участвовать в обсуждениях</li>
-          <li>Делать заметки и закладки</li>
+        <ul style="margin: 24px 0; padding: 0; list-style: none;">
+          <li style="padding: 8px 0 8px 28px; position: relative; color: #3D2B1F; font-size: 15px;"><span style="position: absolute; left: 0; top: 10px; color: #D4A574; font-weight: bold;">✓</span>Создавать и вступать в книжные клубы</li>
+          <li style="padding: 8px 0 8px 28px; position: relative; color: #3D2B1F; font-size: 15px;"><span style="position: absolute; left: 0; top: 10px; color: #D4A574; font-weight: bold;">✓</span>Читать книги с синхронизацией прогресса</li>
+          <li style="padding: 8px 0 8px 28px; position: relative; color: #3D2B1F; font-size: 15px;"><span style="position: absolute; left: 0; top: 10px; color: #D4A574; font-weight: bold;">✓</span>Участвовать в обсуждениях</li>
+          <li style="padding: 8px 0 8px 28px; position: relative; color: #3D2B1F; font-size: 15px;"><span style="position: absolute; left: 0; top: 10px; color: #D4A574; font-weight: bold;">✓</span>Делать заметки и закладки</li>
         </ul>
         
-        <p class="note">
+        <p style="font-size: 14px; color: #5C4033; margin-top: 24px; padding-top: 20px; border-top: 1px solid #E8DFD5;">
           Если вы не регистрировались на VoxLibris, просто проигнорируйте это письмо.
         </p>
       </div>
       
-      <div class="footer">
-        <div class="footer-logo">VoxLibris</div>
-        <p class="footer-text">
+      <div style="padding: 24px 40px; text-align: center; border-top: 1px solid #E8DFD5; background: #F7F3ED;">
+        <div style="font-family: 'Playfair Display', serif; font-size: 16px; font-weight: 600; color: #5C4033; margin-bottom: 8px;">VoxLibris</div>
+        <p style="font-size: 13px; color: #5C4033; margin: 0;">
           Это автоматическое письмо, отвечать не нужно.<br>
-          <a class="footer-link" href="mailto:support@voxlibris.ru">support@voxlibris.ru</a>
+          <a style="color: #C49565;" href="mailto:support@voxlibris.ru">support@voxlibris.ru</a>
         </p>
       </div>
     </div>

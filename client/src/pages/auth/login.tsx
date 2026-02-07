@@ -17,6 +17,7 @@ export default function Login() {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [showPendingDialog, setShowPendingDialog] = useState(false);
+  const [loginError, setLoginError] = useState<string | null>(null);
   const [, setLocation] = useLocation();
   const { login } = useAuth();
   const { toast } = useToast();
@@ -25,6 +26,7 @@ export default function Login() {
     e.preventDefault();
     if (!username || !password) return;
 
+    setLoginError(null); // Очищаем предыдущую ошибку
     setIsLoading(true);
     try {
       await login(username, password, rememberMe);
@@ -33,19 +35,18 @@ export default function Login() {
       const userDataString = getAccessToken();
       if (userDataString) {
         try {
-          const payload = JSON.parse(atob(userDataString.split('.')[1]));
           const userData = await fetch('/api/auth/me', {
             headers: {
               'Authorization': `Bearer ${userDataString}`,
             },
           }).then(r => r.json());
           
-          if (userData.user && userData.user.status === 'pending') {
+          if (userData.user?.status === 'pending') {
             setShowPendingDialog(true);
             return;
           }
         } catch (e) {
-          // Игнорируем ошибки парсинга
+          console.error('Failed to fetch user data:', e);
         }
       }
       
@@ -57,11 +58,16 @@ export default function Login() {
       });
       setLocation('/');
     } catch (error) {
-      toast({
-        title: "Ошибка входа",
-        description: error instanceof Error ? error.message : "Неверные данные для входа",
-        variant: "destructive",
-      });
+      const errorMessage = error instanceof Error ? error.message : "Неверные данные для входа";
+      setLoginError(errorMessage);
+      // Показываем тост только если это не ошибка аутентификации (она уже показана на форме)
+      if (!errorMessage.includes('Неверный логин') && !errorMessage.includes('Неверный пароль')) {
+        toast({
+          title: "Ошибка входа",
+          description: errorMessage,
+          variant: "destructive",
+        });
+      }
     } finally {
       setIsLoading(false);
     }
@@ -94,6 +100,11 @@ export default function Login() {
             </CardDescription>
           </CardHeader>
           <CardContent>
+            {loginError && (
+              <div className="mb-4 p-3 bg-destructive/10 border border-destructive/20 rounded-lg">
+                <p className="text-sm text-destructive font-medium">{loginError}</p>
+              </div>
+            )}
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="username">Email</Label>
@@ -102,12 +113,15 @@ export default function Login() {
                   type="email"
                   placeholder="your.email@example.com"
                   value={username}
-                  onChange={(e) => setUsername(e.target.value)}
+                  onChange={(e) => {
+                    setUsername(e.target.value);
+                    setLoginError(null);
+                  }}
                   required
                   autoComplete="username"
                 />
               </div>
-              
+
               <div className="space-y-2">
                 <Label htmlFor="password">Пароль</Label>
                 <div className="relative">
@@ -116,7 +130,10 @@ export default function Login() {
                     type={showPassword ? "text" : "password"}
                     placeholder="Введите пароль"
                     value={password}
-                    onChange={(e) => setPassword(e.target.value)}
+                    onChange={(e) => {
+                      setPassword(e.target.value);
+                      setLoginError(null);
+                    }}
                     required
                     autoComplete="current-password"
                     className="pr-10"
@@ -134,6 +151,11 @@ export default function Login() {
                       <Eye className="h-4 w-4 text-muted-foreground" />
                     )}
                   </Button>
+                </div>
+                <div className="text-right">
+                  <Link href="/auth/forgot-password" className="text-xs text-muted-foreground hover:text-primary">
+                    Забыли пароль?
+                  </Link>
                 </div>
               </div>
 

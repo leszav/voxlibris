@@ -27,6 +27,20 @@ const loginSchema = z.object({
   message: "Either username or email must be provided"
 });
 
+// Forgot password schema
+const forgotPasswordSchema = z.object({
+  email: z.string().email().optional(),
+  username: z.string().min(1).optional(),
+}).refine(data => data.email || data.username, {
+  message: "Either username or email must be provided"
+});
+
+// Reset password schema
+const resetPasswordSchema = z.object({
+  token: z.string().min(1),
+  password: passwordSchema,
+});
+
 // Валидация и обработка приглашения при регистрации
 async function validateAndProcessInvite(
   inviteToken: string | undefined,
@@ -226,6 +240,71 @@ export function setupAuthRoutes(app: Express): void {
       res.status(500).json({ 
         message: error instanceof Error ? error.message : "Ошибка сервера" 
       });
+    }
+  });
+
+  // Forgot password endpoint
+  app.post("/api/auth/forgot-password", async (req: Request, res: Response) => {
+    try {
+      const validation = forgotPasswordSchema.safeParse(req.body);
+
+      if (!validation.success) {
+        return res.status(400).json({
+          message: "Ошибка валидации данных",
+          errors: validation.error.issues
+        });
+      }
+
+      const { email, username } = validation.data;
+      const emailOrUsername = email || username;
+
+      const baseUrl = `${req.protocol}://${req.get('host')}`;
+      await authService.requestPasswordReset(
+        emailOrUsername!,
+        baseUrl,
+        undefined,
+        req.ip
+      );
+
+      // Всегда возвращаем успешный ответ, чтобы не раскрывать существование пользователя
+      res.json({
+        message: "Если пользователь существует, мы отправили письмо с инструкциями по сбросу пароля"
+      });
+    } catch (error) {
+      console.error("Forgot password error:", error);
+      res.status(500).json({ message: "Ошибка запроса сброса пароля" });
+    }
+  });
+
+  // Reset password endpoint
+  app.post("/api/auth/reset-password", async (req: Request, res: Response) => {
+    try {
+      const validation = resetPasswordSchema.safeParse(req.body);
+
+      if (!validation.success) {
+        return res.status(400).json({
+          message: "Ошибка валидации данных",
+          errors: validation.error.issues
+        });
+      }
+
+      const { token, password } = validation.data;
+      const result = await authService.resetPassword(token, password);
+
+      if (result.success) {
+        return res.json({
+          success: true,
+          message: result.message
+        });
+      }
+
+      return res.status(400).json({
+        success: false,
+        message: result.message
+      });
+    } catch (error) {
+      console.error("Reset password error:", error);
+      res.status(500).json({ message: "Ошибка сброса пароля" });
     }
   });
 

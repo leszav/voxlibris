@@ -1,12 +1,13 @@
 import { BaseRepository } from './BaseRepository.js';
 import { eq, and, desc } from 'drizzle-orm';
-import { users, refreshTokens } from '../../shared/schema.js';
+import { users, refreshTokens, passwordResetTokens } from '../../shared/schema.js';
 import type {
   User,
   InsertUser,
   UserRole,
   UserStatus,
-  RefreshToken
+  RefreshToken,
+  PasswordResetToken
 } from '../../shared/schema.js';
 
 /**
@@ -145,6 +146,27 @@ export class UserRepository extends BaseRepository {
   }
 
   /**
+   * Обновление пароля пользователя (ожидается хэш)
+   */
+  async updateUserPassword(userId: string, passwordHash: string): Promise<User | undefined> {
+    this.validateRequired(userId, 'userId');
+    this.validateRequired(passwordHash, 'passwordHash');
+
+    try {
+      const result = await this.db
+        .update(users)
+        .set({ password: passwordHash })
+        .where(eq(users.id, userId))
+        .returning();
+
+      return this.getFirstResult(result);
+    } catch (error) {
+      this.logError('updateUserPassword', error);
+      return undefined;
+    }
+  }
+
+  /**
    * Обновление времени последней активности
    */
   async updateUserLastActivity(userId: string): Promise<User | undefined> {
@@ -216,6 +238,114 @@ export class UserRepository extends BaseRepository {
     } catch (error) {
       this.logError('updateUserConfirmationToken', error);
       return undefined;
+    }
+  }
+
+  /**
+   * Password reset tokens
+   */
+  async createPasswordResetToken(params: {
+    userId: string;
+    tokenHash: string;
+    expiresAt: Date;
+    requestedByAdminId?: string;
+    requestedFromIp?: string;
+  }): Promise<PasswordResetToken> {
+    this.validateRequired(params.userId, 'userId');
+    this.validateRequired(params.tokenHash, 'tokenHash');
+    this.validateRequired(params.expiresAt, 'expiresAt');
+
+    try {
+      const result = await this.db
+        .insert(passwordResetTokens)
+        .values({
+          userId: params.userId,
+          tokenHash: params.tokenHash,
+          expiresAt: params.expiresAt,
+          requestedByAdminId: params.requestedByAdminId || null,
+          requestedFromIp: params.requestedFromIp || null,
+        })
+        .returning();
+
+      const newToken = this.getFirstResult(result);
+      if (!newToken) {
+        throw new Error('CRITICAL: PasswordResetToken creation failed');
+      }
+
+      return newToken;
+    } catch (error) {
+      this.logError('createPasswordResetToken', error);
+      throw error;
+    }
+  }
+
+  async getPasswordResetTokenByHash(tokenHash: string): Promise<PasswordResetToken | undefined> {
+    this.validateRequired(tokenHash, 'tokenHash');
+
+    try {
+      const result = await this.db
+        .select()
+        .from(passwordResetTokens)
+        .where(eq(passwordResetTokens.tokenHash, tokenHash))
+        .limit(1);
+
+      return this.getFirstResult(result);
+    } catch (error) {
+      this.logError('getPasswordResetTokenByHash', error);
+      return undefined;
+    }
+  }
+
+  async markPasswordResetTokenUsed(tokenId: string): Promise<boolean> {
+    this.validateRequired(tokenId, 'tokenId');
+
+    try {
+      const result = await this.db
+        .update(passwordResetTokens)
+        .set({ usedAt: new Date() })
+        .where(eq(passwordResetTokens.id, tokenId))
+        .returning();
+
+      return result.length > 0;
+    } catch (error) {
+      this.logError('markPasswordResetTokenUsed', error);
+      return false;
+    }
+  }
+
+  async invalidatePasswordResetTokensForUser(userId: string): Promise<boolean> {
+    this.validateRequired(userId, 'userId');
+
+    try {
+      const { isNull } = await import('drizzle-orm');
+      await this.db
+        .update(passwordResetTokens)
+        .set({ usedAt: new Date() })
+        .where(and(
+          eq(passwordResetTokens.userId, userId),
+          isNull(passwordResetTokens.usedAt)
+        ));
+
+      return true;
+    } catch (error) {
+      this.logError('invalidatePasswordResetTokensForUser', error);
+      return false;
+    }
+  }
+
+  async cleanExpiredPasswordResetTokens(): Promise<void> {
+    try {
+      const { lt, or, isNotNull } = await import('drizzle-orm');
+      const now = new Date();
+
+      await this.db
+        .delete(passwordResetTokens)
+        .where(or(
+          lt(passwordResetTokens.expiresAt, now),
+          isNotNull(passwordResetTokens.usedAt)
+        ));
+    } catch (error) {
+      this.logError('cleanExpiredPasswordResetTokens', error);
     }
   }
 

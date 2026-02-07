@@ -50,6 +50,18 @@ export const refreshTokens = pgTable("refresh_tokens", {
   isRevoked: boolean("is_revoked").notNull().default(false),
 });
 
+// Password reset tokens
+export const passwordResetTokens = pgTable("password_reset_tokens", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  tokenHash: varchar("token_hash", { length: 64 }).notNull().unique(),
+  expiresAt: timestamp("expires_at").notNull(),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+  usedAt: timestamp("used_at"),
+  requestedByAdminId: varchar("requested_by_admin_id").references(() => users.id, { onDelete: "set null" }),
+  requestedFromIp: text("requested_from_ip"),
+});
+
 export const bookProcessingStatuses = ["pending", "processing", "completed", "failed"] as const;
 export type BookProcessingStatus = typeof bookProcessingStatuses[number];
 
@@ -197,6 +209,10 @@ export const settings = pgTable("settings", {
 // RefreshToken type
 export type RefreshToken = typeof refreshTokens.$inferSelect;
 export type InsertRefreshToken = typeof refreshTokens.$inferInsert;
+
+// PasswordResetToken type
+export type PasswordResetToken = typeof passwordResetTokens.$inferSelect;
+export type InsertPasswordResetToken = typeof passwordResetTokens.$inferInsert;
 
 // Schemas for validation
 export const insertUserSchema = createInsertSchema(users).pick({
@@ -605,6 +621,7 @@ export const moderationReports = pgTable("moderation_reports", {
 
 export const adminActionTypes = [
   "block_user", "unblock_user", "change_user_role", "delete_user",
+  "reset_password",
   "archive_club", "delete_club", "block_club", "unblock_club",
   "delete_book", "block_book", "unblock_book",
   "delete_message", "block_message",

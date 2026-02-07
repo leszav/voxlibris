@@ -105,10 +105,20 @@ async function handle403Error(res: Response, text: string): Promise<never> {
 }
 
 // Обработка неуспешных ответов
-async function handleErrorResponse(res: Response): Promise<never> {
+async function handleErrorResponse(res: Response, url?: string): Promise<never> {
   const text = await res.text();
   
   if (res.status === 401) {
+    // Для endpoint логина показываем более точное сообщение
+    if (url?.includes('/api/auth/login')) {
+      try {
+        const errorData = JSON.parse(text);
+        throw new Error(errorData.message || 'Неверный логин или пароль');
+      } catch (e) {
+        if (e instanceof Error) throw e;
+        throw new Error('Неверный логин или пароль');
+      }
+    }
     throw new Error('Требуется авторизация. Пожалуйста, войдите в систему.');
   }
   
@@ -197,7 +207,7 @@ export async function apiRequest<T = unknown>(
   }
 
   if (!res.ok) {
-    await handleErrorResponse(res);
+    await handleErrorResponse(res, url);
   }
 
   const contentType = res.headers.get('content-type');

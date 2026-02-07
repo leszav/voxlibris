@@ -128,6 +128,10 @@ class StorageAdapter implements Partial<IStorage> {
     return this.repos.users.updateUserStatus(username, status);
   }
 
+  async updateUserPassword(userId: string, passwordHash: string) {
+    return this.repos.users.updateUserPassword(userId, passwordHash);
+  }
+
   async updateUserLastActivity(userId: string) {
     return this.repos.users.updateUserLastActivity(userId);
   }
@@ -142,6 +146,32 @@ class StorageAdapter implements Partial<IStorage> {
 
   async updateUserConfirmationToken(userId: string, token: string) {
     return this.repos.users.updateUserConfirmationToken(userId, token);
+  }
+
+  async createPasswordResetToken(params: {
+    userId: string;
+    tokenHash: string;
+    expiresAt: Date;
+    requestedByAdminId?: string;
+    requestedFromIp?: string;
+  }) {
+    return this.repos.users.createPasswordResetToken(params);
+  }
+
+  async getPasswordResetTokenByHash(tokenHash: string) {
+    return this.repos.users.getPasswordResetTokenByHash(tokenHash);
+  }
+
+  async markPasswordResetTokenUsed(tokenId: string) {
+    return this.repos.users.markPasswordResetTokenUsed(tokenId);
+  }
+
+  async invalidatePasswordResetTokensForUser(userId: string) {
+    return this.repos.users.invalidatePasswordResetTokensForUser(userId);
+  }
+
+  async cleanExpiredPasswordResetTokens() {
+    return this.repos.users.cleanExpiredPasswordResetTokens();
   }
 
   async createRefreshToken(userId: string, token: string, expiresAt: Date) {

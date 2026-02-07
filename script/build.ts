@@ -1,5 +1,5 @@
 import { build as viteBuild } from "vite";
-import { rm } from "node:fs/promises";
+import { cp, rm } from "node:fs/promises";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { exec } from "node:child_process";
@@ -18,7 +18,7 @@ async function buildAll() {
   await execAsync("npx tsc --project tsconfig.server.json");
 
   console.log("copying assets...");
-  // Assets are already in dist/public after vite build, no need to copy
+  await cp("email-templates", "dist/email-templates", { recursive: true });
 }
 
 try {

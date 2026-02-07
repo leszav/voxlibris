@@ -17,8 +17,10 @@ import AdminReports from "@/pages/admin/reports";
 import AdminSettings from "@/pages/admin/settings";
 import AdminUsers from "@/pages/admin/users";
 import ConfirmEmail from "@/pages/auth/confirm-email";
+import ForgotPassword from "@/pages/auth/forgot-password";
 import Login from "@/pages/auth/login";
 import Register from "@/pages/auth/register";
+import ResetPassword from "@/pages/auth/reset-password";
 import BecomeReader from "@/pages/become-reader";
 import Catalog from "@/pages/catalog";
 import ClubDetails from "@/pages/club-details";
@@ -56,6 +58,8 @@ function Router() {
       {/* Authentication Routes */}
       <Route path="/auth/login" component={Login} />
       <Route path="/auth/register" component={Register} />
+      <Route path="/auth/forgot-password" component={ForgotPassword} />
+      <Route path="/auth/reset-password/:token" component={ResetPassword} />
       <Route path="/confirm-email/:token" component={ConfirmEmail} />
 
       {/* Invitation Routes */}

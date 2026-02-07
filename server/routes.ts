@@ -1170,7 +1170,20 @@ export async function registerRoutes(
   app.get("/api/users/:id/profile", async (req: Request, res: Response) => {
     try {
       const { id: userId } = req.params;
-      const profile = await storage.getUserProfile(userId);
+
+      // Проверяем, что пользователь существует
+      const user = await storage.getUser(userId);
+      if (!user) {
+        return res.status(404).json({ message: "Пользователь не найден" });
+      }
+
+      let profile = await storage.getUserProfile(userId);
+
+      // Создаем профиль если не существует
+      profile ??= await storage.createOrUpdateUserProfile(userId, {
+        displayName: user.username,
+        isReader: false
+      });
 
       if (!profile) {
         return res.status(404).json({ message: "Профиль не найден" });

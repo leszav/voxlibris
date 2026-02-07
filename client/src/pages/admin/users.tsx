@@ -5,6 +5,7 @@ import {
   CheckCircle,
   Clock,
   Download,
+  KeyRound,
   MoreHorizontal,
   RotateCcw,
   Search,
@@ -46,6 +47,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getAccessToken } from "@/lib/token-store";
+import { useToast } from "@/hooks/use-toast";
 
 interface User {
   id: string;
@@ -191,6 +193,24 @@ async function permanentDeleteUser(userId: string): Promise<void> {
   }
 }
 
+async function resetUserPassword(userId: string): Promise<void> {
+  const token = getAccessToken();
+  if (!token) throw new Error("No auth token");
+
+  const response = await fetch(`/api/v1/admin/users/${userId}/reset-password`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    const data = await response.json();
+    throw new Error(data.message || "Failed to reset user password");
+  }
+}
+
 async function fetchDeletedUsers(): Promise<UsersResponse> {
   const token = getAccessToken();
   if (!token) throw new Error("No auth token");
@@ -280,8 +300,10 @@ function UserRoleBadge({ role }: Readonly<{ role: User["role"] }>) {
 
 function UserActionsMenu({ user }: Readonly<{ user: User }>) {
   const queryClient = useQueryClient();
+  const { toast } = useToast();
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [showPermanentDeleteDialog, setShowPermanentDeleteDialog] = useState(false);
+  const [showResetDialog, setShowResetDialog] = useState(false);
 
   const updateRoleMutation = useMutation({
     mutationFn: ({ username, role }: { username: string; role: string }) =>
@@ -322,6 +344,24 @@ function UserActionsMenu({ user }: Readonly<{ user: User }>) {
       queryClient.invalidateQueries({ queryKey: ["admin-users"] });
       queryClient.invalidateQueries({ queryKey: ["admin-deleted-users"] });
       setShowPermanentDeleteDialog(false);
+    },
+  });
+
+  const resetPasswordMutation = useMutation({
+    mutationFn: (userId: string) => resetUserPassword(userId),
+    onSuccess: () => {
+      setShowResetDialog(false);
+      toast({
+        title: "Письмо отправлено",
+        description: `Инструкция по сбросу пароля отправлена пользователю ${user.username}.`,
+      });
+    },
+    onError: (error: unknown) => {
+      toast({
+        title: "Не удалось отправить письмо",
+        description: error instanceof Error ? error.message : "Ошибка сброса пароля",
+        variant: "destructive",
+      });
     },
   });
 
@@ -449,6 +489,14 @@ function UserActionsMenu({ user }: Readonly<{ user: User }>) {
             )}
           </DropdownMenuItem>
           <DropdownMenuItem
+            onClick={() => setShowResetDialog(true)}
+            disabled={resetPasswordMutation.isPending}
+            className="text-orange-600"
+          >
+            <KeyRound className="h-4 w-4 mr-2" />
+            Сбросить пароль
+          </DropdownMenuItem>
+          <DropdownMenuItem
             onClick={() => setShowDeleteDialog(true)}
             disabled={deleteUserMutation.isPending}
             className="text-red-600"
@@ -477,6 +525,26 @@ function UserActionsMenu({ user }: Readonly<{ user: User }>) {
               className="bg-red-600 hover:bg-red-700"
             >
               {deleteUserMutation.isPending ? "Удаление..." : "Удалить"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={showResetDialog} onOpenChange={setShowResetDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Сброс пароля</AlertDialogTitle>
+            <AlertDialogDescription>
+              Отправить пользователю <strong>{user.username}</strong> письмо со ссылкой для сброса пароля?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={resetPasswordMutation.isPending}>Отмена</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => resetPasswordMutation.mutate(user.id)}
+              disabled={resetPasswordMutation.isPending}
+            >
+              {resetPasswordMutation.isPending ? "Отправляем..." : "Отправить"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
