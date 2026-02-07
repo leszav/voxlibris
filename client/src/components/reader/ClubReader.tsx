@@ -139,7 +139,7 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
       analytics.trackBookOpen(bookId, { clubId });
       hasTrackedBookOpen.current = true;
     }
-  }, [allContent, bookId, clubId, analytics]);
+  }, [allContent, bookId, clubId]);
 
   // Analytics: Track chapter start when chapter changes (prevent duplicates)
   const lastTrackedChapter = useRef<number | null>(null);
@@ -152,7 +152,7 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
     return () => {
       analytics.stopReadingSession();
     };
-  }, [currentChapter, bookId, analytics]);
+  }, [currentChapter, bookId]);
 
   // Analytics: Track book completion when progress reaches 100% (only once)
   const hasTrackedCompletion = useRef(false);
@@ -161,7 +161,7 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
       analytics.trackBookComplete(bookId);
       hasTrackedCompletion.current = true;
     }
-  }, [progress?.userProgress?.progress, bookId, analytics]);
+  }, [progress?.userProgress?.progress, bookId]);
 
   // Получение текущей главы
   const currentChapterContent = useMemo(() => {

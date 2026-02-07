@@ -293,19 +293,8 @@ compliance_check() {
         print_log "WARN" "WARN" "⚠️ Исправлены права доступа xlibris-manager.sh"
     fi
     
-    # 4. Проверка AI Memory системы
-    echo -n "4. AI Memory система: "
-    if [[ -d "data/ai-memory" && -f "scripts/ai-memory-startup.sh" ]]; then
-        echo -e "${GREEN}OK${NC}"
-        print_log "INFO" "INFO" "✅ AI Memory система активна"
-    else
-        echo -e "${RED}FAIL${NC} - AI Memory отсутствует"
-        print_log "ERROR" "ERROR" "❌ AI Memory система недоступна"
-        ((failed_checks++))
-    fi
-    
-    # 5. Проверка LTS validation
-    echo -n "5. LTS validation: "
+    # 4. Проверка LTS validation
+    echo -n "4. LTS validation: "
     if [[ -f "script/validate-lts.sh" ]]; then
         echo -e "${GREEN}OK${NC}"
         print_log "INFO" "INFO" "✅ LTS validation доступен"
@@ -373,33 +362,6 @@ compliance_dashboard() {
     fi
     
     set -e  # Включаем обратно exit on error
-    
-    # Проверка AI Memory статуса
-    echo -e "\n${CYAN}🧠 AI Memory статус:${NC}"
-    
-    if [[ -d "data/ai-memory" ]]; then
-        echo -e "   ${GREEN}✅ AI Memory активна${NC}"
-        print_log "INFO" "SUCCESS" "AI Memory директория найдена"
-        
-        local memory_files_count=$(find data/ai-memory -name "*.json" 2>/dev/null | wc -l)
-        echo -e "   ${CYAN}📁 Файлы памяти: $memory_files_count${NC}"
-        print_log "INFO" "INFO" "AI Memory содержит $memory_files_count файлов"
-        
-        local index_files_count=$(find data/ai-memory/indices -name "*.idx" 2>/dev/null | wc -l)
-        echo -e "   ${CYAN}📑 Индексные файлы: $index_files_count${NC}"
-        print_log "INFO" "INFO" "AI Memory индексов: $index_files_count"
-        
-        if [[ -f "scripts/ai-memory-startup.sh" ]]; then
-            echo -e "   ${GREEN}✅ Скрипт запуска доступен${NC}"
-            print_log "INFO" "SUCCESS" "AI Memory startup script найден"
-        else
-            echo -e "   ${YELLOW}⚠️ Скрипт запуска отсутствует${NC}"
-            print_log "WARN" "WARNING" "AI Memory startup script отсутствует"
-        fi
-    else
-        echo -e "   ${RED}❌ AI Memory не найдена${NC}"
-        print_log "ERROR" "ERROR" "AI Memory директория отсутствует"
-    fi
     
     # Проверка compliance скриптов
     echo -e "\n${CYAN}📋 Статус compliance скриптов:${NC}"
@@ -517,11 +479,10 @@ compliance_dashboard() {
     
     # Подсчет активных систем
     local active_systems=0
-    local total_systems=6
+    local total_systems=5
     
     command -v pnpm >/dev/null 2>&1 && active_systems=$((active_systems + 1))
     command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1 && active_systems=$((active_systems + 1))
-    [[ -d "data/ai-memory" ]] && active_systems=$((active_systems + 1))
     [[ -f "xlibris-manager.sh" ]] && active_systems=$((active_systems + 1))
     [[ -f "pnpm-workspace.yaml" ]] && active_systems=$((active_systems + 1))
     [[ -f "script/validate-lts.sh" ]] && active_systems=$((active_systems + 1))
@@ -543,7 +504,7 @@ compliance_dashboard() {
     
     print_log "INFO" "SUCCESS" "Compliance dashboard завершен успешно"
         # Подсчет активных систем (разделение на critical/warn/info с весами)
-        local total_checks=6
+        local total_checks=5
         local critical_score=0
         local warning_score=0
         local info_score=0
@@ -551,7 +512,6 @@ compliance_dashboard() {
         # Evaluate basic checks as info/warn/critical
         if command -v pnpm >/dev/null 2>&1; then info_score=$((info_score + 1)); else warning_score=$((warning_score + 1)); fi
         if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then info_score=$((info_score + 1)); else warning_score=$((warning_score + 1)); fi
-        if [[ -d "data/ai-memory" ]]; then info_score=$((info_score + 1)); else warning_score=$((warning_score + 1)); fi
         if [[ -f "xlibris-manager.sh" ]]; then info_score=$((info_score + 1)); else critical_score=$((critical_score + 1)); fi
         if [[ -f "pnpm-workspace.yaml" ]]; then info_score=$((info_score + 1)); else warning_score=$((warning_score + 1)); fi
         # LTS assessment weight: critical if CRITICAL_COUNT>0

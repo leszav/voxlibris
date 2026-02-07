@@ -91,6 +91,7 @@ coverage/
 
 # Server specific
 server/public/
+server/storage.ts.backup
 vite.config.ts.*
 
 # Database
@@ -100,13 +101,6 @@ vite.config.ts.*
 
 # Deployment
 deploy/
-
-# AI Memory (development only - NOT FOR PRODUCTION)
-data/ai-memory/
-.ai-memory-config
-.ai-memory-session
-.ollama-config
-.env.ai-memory
 
 # Development Scripts (local modifications)
 scripts/ai-*.sh
@@ -176,9 +170,8 @@ venv_caprover/
 specs/
 plans/
 
-# Runtime data (excluding ai-memory which is already covered)
+# Runtime data
 data/*
-!data/ai-memory/
 
 # Deployment scripts (run from CI/CD or locally)
 deploy/

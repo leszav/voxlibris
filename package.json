@@ -10,7 +10,7 @@
   },
   "scripts": {
     "dev:client": "vite dev --port 3000",
-    "dev:server": "NODE_ENV=development tsx server/index.ts",
+    "dev:server": "NODE_ENV=development tsx --import ./server/env.ts server/index.ts",
     "dev:services": "docker compose up postgres minio -d",
     "kill-ports": "tsx script/force-kill-ports.ts",
     "init-storage": "tsx script/init-storage.ts",
@@ -18,7 +18,7 @@
     "dev:both": "concurrently \"pnpm run dev:server\" \"pnpm run dev:client\" --names \"backend,frontend\" --prefix-colors \"blue,green\"",
     "dev:stop": "docker compose down",
     "build": "tsx script/build.ts",
-    "start": "NODE_ENV=production node dist/server/index.js",
+    "start": "NODE_ENV=production node --import ./dist/server/env.js dist/server/index.js",
     "check": "tsc",
     "test": "node --test --experimental-strip-types server/__tests__/**/*.test.ts",
     "test:watch": "node --test --watch server/__tests__/**/*.test.ts",

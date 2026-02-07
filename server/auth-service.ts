@@ -1,7 +1,7 @@
 import jwt from "jsonwebtoken";
 import bcrypt from "bcrypt";
 import { randomBytes } from "node:crypto";
-import { storage } from "./storage.js";
+import { storage } from "./repositories/index.js";
 import type { User, UserRole, UserStatus } from "../shared/schema.js";
 import { emailService } from "./services/email-service.js";
 
@@ -81,17 +81,26 @@ export interface AuthResult {
 }
 
 export class AuthService {
-  private readonly JWT_SECRET: string;
-  private readonly JWT_REFRESH_SECRET: string;
+  private _jwtSecret?: string;
+  private _jwtRefreshSecret?: string;
   private readonly ACCESS_TOKEN_SHORT = '15m';     // Обычная сессия
   private readonly ACCESS_TOKEN_LONG = '2h';       // Длительная сессия (Remember Me)
   private readonly REFRESH_TOKEN_SHORT = '7d';     // Обычная сессия
   private readonly REFRESH_TOKEN_LONG = '30d';     // Remember Me сессия
   private readonly EMAIL_CONFIRMATION_EXPIRY = '24h'; // Срок действия токена подтверждения
 
-  constructor() {
-    this.JWT_SECRET = this.getRequiredEnvVar('JWT_SECRET');
-    this.JWT_REFRESH_SECRET = this.getRequiredEnvVar('JWT_REFRESH_SECRET');
+  private get JWT_SECRET(): string {
+    if (!this._jwtSecret) {
+      this._jwtSecret = this.getRequiredEnvVar('JWT_SECRET');
+    }
+    return this._jwtSecret;
+  }
+
+  private get JWT_REFRESH_SECRET(): string {
+    if (!this._jwtRefreshSecret) {
+      this._jwtRefreshSecret = this.getRequiredEnvVar('JWT_REFRESH_SECRET');
+    }
+    return this._jwtRefreshSecret;
   }
 
   private getRequiredEnvVar(name: string): string {
@@ -280,19 +289,22 @@ export class AuthService {
       // Генерируем токен подтверждения email
       const confirmationToken = randomBytes(32).toString('hex');
 
-      // Создаем пользователя с безопасной типизацией
-      const userCreateData = {
+      // Создаем пользователя с правильной типизацией InsertUser
+      const userCreateData: any = {
         username,
         email,
         password: hashedPassword,
         invitedBy: invitedBy || null,
         invitedToClub: invitedToClub || null,
-        confirmationToken, // сохраняем токен подтверждения
         status: 'pending' as UserStatus, // все пользователи начинают как pending
-        emailConfirmed: false,
       };
       
       const dbNewUser = await storage.createUser(userCreateData);
+      
+      // После создания обновляем токен подтверждения через отдельный метод
+      if (dbNewUser && isDatabaseUser(dbNewUser)) {
+        await storage.updateUserConfirmationToken(dbNewUser.id, confirmationToken);
+      }
       
       // Строгая валидация результата создания пользователя
       if (!dbNewUser || !isDatabaseUser(dbNewUser)) {
@@ -490,5 +502,17 @@ async resendConfirmationEmail(userId: string): Promise<{ success: boolean; messa
 }
 }
 
-// Экспортируем singleton instance
-export const authService = new AuthService();
+// Ленивая инициализация singleton instance
+let _authServiceInstance: AuthService | undefined;
+
+export function getAuthService(): AuthService {
+  _authServiceInstance ??= new AuthService();
+  return _authServiceInstance;
+}
+
+// Для обратной совместимости
+export const authService = new Proxy({} as AuthService, {
+  get(_target, prop) {
+    return getAuthService()[prop as keyof AuthService];
+  }
+});

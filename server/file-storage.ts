@@ -392,8 +392,20 @@ export class FileStorageService {
   }
 }
 
-// Singleton instance
-export const fileStorage = new FileStorageService();
+// Ленивая инициализация singleton instance
+let _fileStorageInstance: FileStorageService | undefined;
+
+export function getFileStorage(): FileStorageService {
+  _fileStorageInstance ??= new FileStorageService();
+  return _fileStorageInstance;
+}
+
+// Для обратной совместимости
+export const fileStorage = new Proxy({} as FileStorageService, {
+  get(_target, prop) {
+    return getFileStorage()[prop as keyof FileStorageService];
+  }
+});
 
 // Экспорт для использования в других модулях
 export default fileStorage;

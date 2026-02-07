@@ -125,7 +125,7 @@ export function requireActiveUser(req: Request, res: Response, next: NextFunctio
   // Используем асинхронную проверку
   (async () => {
     try {
-      const { storage } = await import('./storage');
+      const { storage } = await import('./repositories/index.js');
       const user = await storage.getUser(req.user!.userId);
       
       if (!user) {

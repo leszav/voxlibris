@@ -54,18 +54,18 @@ router.get("/:id/content", async (req: Request, res: Response) => {
     }
 
     // Получение контента по главам
-    let contentQuery = db
+    const chapterNumber = typeof chapter === 'string'
+      ? Number.parseInt(chapter, 10)
+      : undefined;
+
+    const chapters = await db
       .select()
       .from(bookContent)
-      .where(eq(bookContent.bookId, bookId));
-
-    if (chapter) {
-      contentQuery = contentQuery.where(
-        eq(bookContent.chapterNumber, Number.parseInt(chapter as string, 10))
-      );
-    }
-
-    const chapters = await contentQuery.orderBy(bookContent.chapterNumber);
+      .where(and(
+        eq(bookContent.bookId, bookId),
+        chapterNumber !== undefined ? eq(bookContent.chapterNumber, chapterNumber) : undefined
+      ))
+      .orderBy(bookContent.chapterNumber);
 
     // Санитизация контента перед отправкой
     const sanitizedChapters = chapters.map((ch: typeof bookContent.$inferSelect) => ({

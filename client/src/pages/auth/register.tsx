@@ -5,7 +5,6 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { useAuth } from '@/hooks/use-auth';
-import { useToast } from '@/hooks/use-toast';
 import { RegistrationSuccessModal } from '@/components/ui/registration-success-modal';
 import { RegistrationErrorModal } from '@/components/ui/registration-error-modal';
 import { Mic, Eye, EyeOff, Check, X } from 'lucide-react';

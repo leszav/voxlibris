@@ -1,6 +1,6 @@
 import { build as viteBuild } from "vite";
-import { rm, readFile, cp } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { rm } from "node:fs/promises";
+import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";

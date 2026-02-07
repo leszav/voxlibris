@@ -23,7 +23,7 @@ export function validateEnvironment(): EnvConfig {
     JWT_REFRESH_SECRET: process.env.JWT_REFRESH_SECRET!,
     MASTER_KEY: process.env.MASTER_KEY!,
     ALLOWED_ORIGINS: process.env.ALLOWED_ORIGINS,
-    PORT: parseInt(process.env.PORT || '5000', 10)
+    PORT: Number.parseInt(process.env.PORT || '5000', 10)
   };
 
   // Дополнительная валидация

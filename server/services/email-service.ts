@@ -1,6 +1,6 @@
 import nodemailer from 'nodemailer';
 import type { Transporter } from 'nodemailer';
-import { storage } from '../storage.js';
+import { storage } from '../repositories/index.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import multer from 'multer';
-import { storage } from './storage.js';
+import { storage } from './repositories/index.js';
 import { BookFormat } from '../shared/schema.js';
 import { jwtAuth, requireActiveUser } from './jwt-middleware.js';
 import crypto from 'node:crypto';

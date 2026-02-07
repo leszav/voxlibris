@@ -1,6 +1,6 @@
 import express from 'express';
 import { jwtAuth, requireActiveUser } from './jwt-middleware.js';
-import { storage } from './storage.js';
+import { storage } from './repositories/index.js';
 import type { InsertClub, ClubMemberRole, InsertClubInvitation, Club, UserRole } from '../shared/schema.js';
 import { emailService } from './services/email-service.js';
 import crypto from 'node:crypto';
@@ -815,7 +815,7 @@ router.delete('/:clubId/invitations', jwtAuth, async (req, res) => {
     }
 
     const membership = await storage.getUserClubMembership(club.id, req.user.userId);
-    if (!membership || membership.role !== 'owner') {
+    if (membership?.role !== 'owner') {
       return res.status(403).json({ message: 'Only club owner can clear all invitations' });
     }
 

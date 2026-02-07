@@ -16,7 +16,8 @@ const PURIFY_CONFIG = {
     "href", "title", "class", "id", "alt", "src", "width", "height",
     "style" // Ограниченный style (только безопасные свойства)
   ],
-  ALLOWED_URI_REGEXP: /^(?:https?|ftp|ftps|mailto|tel|callto|sms|cid|xmpp):|[^a-z]|[a-z+.-]+(?:[^a-z+.:-]|$)/i,
+  // Упрощенный regex для безопасности и производительности (complexity < 20)
+  ALLOWED_URI_REGEXP: /^(https?|mailto):|^[^a-z]/i,
   ALLOW_DATA_ATTR: false,
   ALLOWED_STYLES: {
     "text-align": [/^left$/, /^right$/, /^center$/, /^justify$/],

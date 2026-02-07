@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { storage } from './storage.js';
+import { storage } from './repositories/index.js';
 import { insertBookAccessLogSchema } from '../shared/schema.js';
 import { z } from 'zod';
 import { jwtAuth } from './jwt-middleware.js';

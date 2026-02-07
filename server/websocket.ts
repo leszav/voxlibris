@@ -1,5 +1,5 @@
 import { Server as SocketIOServer, Socket } from "socket.io";
-import { storage } from "./storage.js";
+import { storage } from "./repositories/index.js";
 import type { 
   SessionPositionUpdate, 
   ListenerUpdate 

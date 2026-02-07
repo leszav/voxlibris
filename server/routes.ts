@@ -1,7 +1,7 @@
 import type { Express, Request, Response } from "express";
 import type { Server } from "node:http";
 import multer from "multer";
-import { storage } from "./storage.js";
+import { storage } from "./repositories/index.js";
 import { fileStorage } from "./file-storage.js";
 import { emailService } from "./services/email-service.js";
 import personalBooksRouter from "./personal-books-routes.js";

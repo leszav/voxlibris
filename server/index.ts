@@ -1,6 +1,9 @@
-import dotenv from "dotenv";
-
-dotenv.config();
+/**
+ * VoxLibris Server Entry Point
+ * 
+ * IMPORTANT: Environment variables are loaded via --import flag
+ * See package.json scripts for proper startup commands
+ */
 
 import { createServer } from "node:http";
 import cookieParser from "cookie-parser";
@@ -11,8 +14,6 @@ import slowDown from "express-slow-down";
 import helmet from "helmet";
 import { Server as SocketIOServer } from "socket.io";
 import adminRoutes from "./admin-routes.js";
-import { AIMemoryManager } from "./ai-memory/manager.js";
-import { autoSaveMiddleware, initializeMemoryRoutes } from "./ai-memory/routes.js";
 import analyticsRoutes from "./analytics-routes.js";
 import { setupAuthRoutes } from "./auth-routes.js";
 import { authService } from "./auth-service.js";
@@ -242,20 +243,6 @@ app.use((req, res, next) => {
 	next();
 });
 
-// Initialize AI Memory Manager (DEVELOPMENT ONLY)
-let aiMemoryManager: AIMemoryManager | null = null;
-
-if (process.env.NODE_ENV === "development") {
-	aiMemoryManager = new AIMemoryManager({
-		maxContextSize: 50000,
-		retentionDays: 30,
-		priorityThreshold: 2,
-	});
-
-	// Enable auto-save middleware for AI conversations
-	app.use("/api", autoSaveMiddleware);
-}
-
 // Проверка окружения перед запуском
 try {
 	validateEnvironment();
@@ -267,19 +254,6 @@ try {
 
 // Асинхронная инициализация
 try {
-	// Инициализация AI Memory (только для development)
-	if (process.env.NODE_ENV === "development" && aiMemoryManager) {
-		try {
-			await aiMemoryManager.initialize();
-			log("🧠 AI Memory System initialized (DEV MODE)", "ai-memory");
-		} catch (error) {
-			log(`⚠️  AI Memory initialization failed: ${error}`, "ai-memory");
-			console.error("⚠️  AI Memory disabled - continuing without AI features");
-		}
-	} else if (process.env.NODE_ENV !== "development") {
-		log("ℹ️  AI Memory disabled in production mode", "ai-memory");
-	}
-
 	// Регистрация основных роутов
 	await registerRoutes(httpServer, app);
 
@@ -297,19 +271,6 @@ try {
 
 	// Setup Reader routes (JWT protected)
 	app.use("/api/v1/books", jwtAuth, readerRoutes);
-
-	// Setup AI Memory routes (DEVELOPMENT ONLY)
-	if (process.env.NODE_ENV === "development" && aiMemoryManager) {
-		app.use("/api/ai-memory", initializeMemoryRoutes(aiMemoryManager));
-
-		// Добавляем периодическую проверку состояния AI Memory
-		setInterval(async () => {
-			const health = aiMemoryManager.getHealthStatus();
-			if (!health.isHealthy) {
-				log("⚠️  AI Memory System is unhealthy", "ai-memory");
-			}
-		}, 30000); // Каждые 30 секунд
-	}
 
 	// Error handling middleware
 	app.use((err: any, _req: any, res: any, _next: any) => {
@@ -370,46 +331,14 @@ try {
               <strong>Для открытия интерфейса приложения перейдите на:</strong><br>
               <a href="http://localhost:3000" class="link">http://localhost:3000</a>
             </div>
-            ${
-							process.env.NODE_ENV === "development" && aiMemoryManager
-								? `
-            <div class="info">
-              <strong>🧠 AI Memory System (DEV ONLY):</strong><br>
-              <span id="ai-status">🔄 Checking status...</span><br>
-              <a href="/api/ai-memory/health" class="link" target="_blank">Health Check</a> |
-              <a href="/api/ai-memory/status" class="link" target="_blank">Detailed Status</a>
-            </div>
-            `
-								: ""
-						}
             <h3>API Endpoints:</h3>
             <ul>
               <li><code>/api/auth/*</code> - Аутентификация</li>
               <li><code>/api/clubs/*</code> - Клубы чтения</li>
               <li><code>/api/books/*</code> - Книги и контент</li>
-              ${process.env.NODE_ENV === "development" ? `<li><code>/api/ai-memory/*</code> - AI Memory система (DEV ONLY)</li>` : ""}
               <li><code>/socket.io</code> - WebSocket подключение</li>
             </ul>
             <p><small>Порт: ${port} | Env: ${process.env.NODE_ENV || "development"}</small></p>
-            <script>
-              fetch('/api/ai-memory/health')
-                .then(res => res.json())
-                .then(data => {
-                  const statusEl = document.getElementById('ai-status');
-                  if (data.status === 'healthy') {
-                    statusEl.innerHTML = '✅ Online - ' + data.memoryCount + ' memories stored';
-                    statusEl.style.color = '#10b981';
-                  } else {
-                    statusEl.innerHTML = '❌ Unhealthy - ' + (data.message || 'System degraded');
-                    statusEl.style.color = '#ef4444';
-                  }
-                })
-                .catch(() => {
-                  const statusEl = document.getElementById('ai-status');
-                  statusEl.innerHTML = '❌ Offline - Unable to connect';
-                  statusEl.style.color = '#ef4444';
-                });
-            </script>
           </div>
         </body>
         </html>

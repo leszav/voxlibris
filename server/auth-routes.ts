@@ -2,7 +2,7 @@ import type { Express, Request, Response } from "express";
 import { z } from "zod";
 import cookieParser from "cookie-parser";
 import { authService } from "./auth-service.js";
-import { storage } from "./storage.js";
+import { storage } from "./repositories/index.js";
 import { jwtAuth } from "./jwt-middleware.js";
 import { insertUserSchema } from "../shared/schema.js";
 
@@ -215,20 +215,12 @@ export function setupAuthRoutes(app: Express): void {
       console.error("Login error:", error);
       
       // Обработка специфичных ошибок
-      if (error instanceof Error) {
-        if (error.message === 'ACCOUNT_SUSPENDED') {
-          return res.status(403).json({ 
-            message: "Аккаунт заблокирован администратором",
-            code: "ACCOUNT_SUSPENDED"
-          });
-        }
-        
-        if (error.message === 'ACCOUNT_DELETED') {
-          return res.status(403).json({ 
-            message: "Аккаунт удален",
-            code: "ACCOUNT_DELETED"
-          });
-        }
+      if (error instanceof Error && (error.message === 'ACCOUNT_SUSPENDED' || error.message === 'ACCOUNT_DELETED')) {
+        const isSuspended = error.message === 'ACCOUNT_SUSPENDED';
+        return res.status(403).json({ 
+          message: isSuspended ? "Аккаунт заблокирован администратором" : "Аккаунт удален",
+          code: error.message
+        });
       }
       
       res.status(500).json({ 

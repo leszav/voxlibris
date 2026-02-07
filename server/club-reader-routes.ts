@@ -14,7 +14,7 @@ import {
   type ClubReadingPlanProgress
 } from '../shared/schema.js';
 import { db } from './db.js';
-import { eq, and, desc, asc, sql, lt, isNotNull } from 'drizzle-orm';
+import { eq, and, desc, asc, lt, isNotNull, inArray } from 'drizzle-orm';
 
 const router = express.Router();
 
@@ -627,21 +627,31 @@ router.get('/:clubId/members-progress', jwtAuth, async (req, res) => {
       .from(readingProgress)
       .where(eq(readingProgress.bookId, clubBook.id));
 
-    const userIds = clubMembersList.map((m: { userId: string }) => m.userId);
-    const usersData = await db
-      .select()
-      .from(users)
-      .where(sql`${users.id} IN ${userIds}`);
+    const userIds = clubMembersList.map((m) => m.userId);
+    const usersData = userIds.length === 0
+      ? []
+      : await db
+          .select({
+            id: users.id,
+            username: users.username,
+          })
+          .from(users)
+          .where(inArray(users.id, userIds));
 
-    const profilesData = await db
-      .select()
-      .from(userProfiles)
-      .where(sql`${userProfiles.userId} IN ${userIds}`);
+    const profilesData = userIds.length === 0
+      ? []
+      : await db
+          .select({
+            userId: userProfiles.userId,
+            displayName: userProfiles.displayName,
+          })
+          .from(userProfiles)
+          .where(inArray(userProfiles.userId, userIds));
 
-    const result = clubMembersList.map((member: { userId: string; role: string }) => {
-      const user = usersData.find((u: { id: string }) => u.id === member.userId);
-      const profile = profilesData.find((p: { userId: string }) => p.userId === member.userId);
-      const progress = progressData.find((p: { userId: string }) => p.userId === member.userId);
+    const result = clubMembersList.map((member) => {
+      const user = usersData.find((u) => u.id === member.userId);
+      const profile = profilesData.find((p) => p.userId === member.userId);
+      const progress = progressData.find((p) => p.userId === member.userId);
 
       return {
         userId: member.userId,

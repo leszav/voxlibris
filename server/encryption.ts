@@ -3,16 +3,23 @@ import crypto from "node:crypto";
 const ALGORITHM = "aes-256-gcm";
 const IV_LENGTH = 16;
 const AUTH_TAG_LENGTH = 16;
-const MASTER_KEY = (() => {
-  const key = process.env.CONTENT_ENCRYPTION_KEY || process.env.MASTER_KEY;
-  if (!key) {
-    throw new Error('CRITICAL: CONTENT_ENCRYPTION_KEY (or MASTER_KEY) environment variable is required. Generate with: openssl rand -hex 32');
+
+// Ленивая инициализация Master Key
+let _masterKey: string | undefined;
+
+function getMasterKey(): string {
+  if (!_masterKey) {
+    const key = process.env.CONTENT_ENCRYPTION_KEY || process.env.MASTER_KEY;
+    if (!key) {
+      throw new Error('CRITICAL: CONTENT_ENCRYPTION_KEY (or MASTER_KEY) environment variable is required. Generate with: openssl rand -hex 32');
+    }
+    if (key.length !== 64) {
+      throw new Error('CRITICAL: CONTENT_ENCRYPTION_KEY must be exactly 64 hex characters (32 bytes)');
+    }
+    _masterKey = key;
   }
-  if (key.length !== 64) {
-    throw new Error('CRITICAL: CONTENT_ENCRYPTION_KEY must be exactly 64 hex characters (32 bytes)');
-  }
-  return key;
-})();
+  return _masterKey;
+}
 
 // Генерация ключа контента для книги
 export function generateContentKey(): string {
@@ -70,7 +77,7 @@ export function encryptContentKey(contentKey: string): string {
   const iv = crypto.randomBytes(IV_LENGTH);
   const cipher = crypto.createCipheriv(
     ALGORITHM,
-    Buffer.from(MASTER_KEY, "hex"),
+    Buffer.from(getMasterKey(), "hex"),
     iv
   );
 
@@ -94,7 +101,7 @@ export function decryptContentKey(encryptedKey: string): string {
 
   const decipher = crypto.createDecipheriv(
     ALGORITHM,
-    Buffer.from(MASTER_KEY, "hex"),
+    Buffer.from(getMasterKey(), "hex"),
     Buffer.from(ivHex, "hex")
   );
 
@@ -109,13 +116,19 @@ export function decryptContentKey(encryptedKey: string): string {
 // Генерация краткоживущего токена доступа к контенту (JWT-based)
 import jwt from "jsonwebtoken";
 
-const JWT_SECRET = (() => {
-  const secret = process.env.JWT_SECRET;
-  if (!secret) {
-    throw new Error('CRITICAL: JWT_SECRET environment variable is required for production');
+// Ленивая инициализация JWT Secret
+let _jwtSecret: string | undefined;
+
+function getJwtSecret(): string {
+  if (!_jwtSecret) {
+    const secret = process.env.JWT_SECRET;
+    if (!secret) {
+      throw new Error('CRITICAL: JWT_SECRET environment variable is required for production');
+    }
+    _jwtSecret = secret;
   }
-  return secret;
-})();
+  return _jwtSecret;
+}
 
 export interface ContentAccessToken {
   userId: string;
@@ -137,9 +150,9 @@ export function generateShortLivedToken(
     exp: Math.floor(Date.now() / 1000) + expiresInMinutes * 60,
   };
 
-  return jwt.sign(payload, JWT_SECRET);
+  return jwt.sign(payload, getJwtSecret());
 }
 
 export function verifyContentToken(token: string): ContentAccessToken {
-  return jwt.verify(token, JWT_SECRET) as ContentAccessToken;
+  return jwt.verify(token, getJwtSecret()) as ContentAccessToken;
 }

@@ -1,11 +1,11 @@
 import express from 'express';
 import { jwtAuth, requireAdmin } from './jwt-middleware.js';
-import { storage } from './storage.js';
+import { storage } from './repositories/index.js';
 import { emailService } from './services/email-service.js';
 import type { UserRole, UserStatus } from '../shared/schema.js';
+import { db } from './db.js';
 import postgres from 'postgres';
-import { eq, count } from 'drizzle-orm';
-import { clubs } from '../shared/schema.js';
+import { books, personalBooks, clubBooks } from '../shared/schema.js';
 const PostgresError = postgres.PostgresError;
 
 const router = express.Router();
@@ -113,11 +113,8 @@ router.get('/users', jwtAuth, requireAdmin, async (req, res) => {
       const clubsByUser = await storage.getClubsByUser(user.id);
       const clubsJoined = clubsByUser.length;
 
-      const createdClubsResult = await (storage as any).db
-        .select({ count: count(clubs.id) })
-        .from(clubs)
-        .where(eq(clubs.ownerId, user.id));
-      const clubsCreated = createdClubsResult[0]?.count || 0;
+      const createdClubs = await storage.getClubsOwnedByUser(user.id);
+      const clubsCreated = createdClubs.length;
 
       return {
         ...rest,
@@ -375,11 +372,8 @@ router.get('/users/deleted', jwtAuth, requireAdmin, async (req, res) => {
       const clubsByUser = await storage.getClubsByUser(user.id);
       const clubsJoined = clubsByUser.length;
 
-      const createdClubsResult = await (storage as any).db
-        .select({ count: count(clubs.id) })
-        .from(clubs)
-        .where(eq(clubs.ownerId, user.id));
-      const clubsCreated = createdClubsResult[0]?.count || 0;
+      const createdClubs = await storage.getClubsOwnedByUser(user.id);
+      const clubsCreated = createdClubs.length;
 
       return {
         ...rest,
@@ -406,7 +400,10 @@ router.get('/users/deleted', jwtAuth, requireAdmin, async (req, res) => {
 // ==== BOOK MANAGEMENT ====
 
 // Helper functions for book management
-type BookWithSource = any & { source: 'books' | 'personal_books' | 'club_books' };
+type BookWithSource = 
+  | ({ source: 'books' } & typeof books.$inferSelect)
+  | ({ source: 'personal_books' } & typeof personalBooks.$inferSelect)
+  | ({ source: 'club_books' } & typeof clubBooks.$inferSelect);
 
 function filterBooksByStatus(books: BookWithSource[], status: string): BookWithSource[] {
   return books.filter(book => {
@@ -419,134 +416,174 @@ function filterBooksByStatus(books: BookWithSource[], status: string): BookWithS
   });
 }
 
-function formatBookForAdmin(book: BookWithSource, usersMap: Map<string, string>) {
-  let uploadedBy: string;
-  let uploadDate: string;
-  let fileSize: number;
-  let filePath: string;
+// Специализированные форматеры для каждого типа книг (Single Responsibility)
+function formatSystemBookForAdmin(book: { source: 'books' } & typeof books.$inferSelect, usersMap: Map<string, string>) {
+  // Explicit status mapping for clarity
   let bookStatus: string;
-  let isbn: string | null;
-  let downloadCount: number;
-
-  if (book.source === 'books' && 'uploadedBy' in book) {
-    uploadedBy = book.uploadedBy ? usersMap.get(book.uploadedBy) || 'Unknown' : 'System';
-    uploadDate = book.uploadedAt?.toISOString() || book.createdAt.toISOString();
-    fileSize = book.fileSize || 0;
-    filePath = book.contentPath || '';
-    bookStatus = book.status === 'active' ? 'active' : (book.status === 'blocked' ? 'blocked' : 'pending');
-    isbn = book.isbn || null;
-    downloadCount = book.downloadCount || 0;
-  } else if (book.source === 'personal_books' && 'userId' in book) {
-    uploadedBy = book.userId ? usersMap.get(book.userId) || 'Unknown' : 'System';
-    uploadDate = book.uploadedAt.toISOString();
-    fileSize = book.fileSizeBytes || 0;
-    filePath = book.storagePath || '';
-    bookStatus = book.isDeleted ? 'blocked' : 'active';
-    isbn = null;
-    downloadCount = 0;
-  } else if (book.source === 'club_books' && 'uploadedByUserId' in book) {
-    uploadedBy = book.uploadedByUserId ? usersMap.get(book.uploadedByUserId) || 'Unknown' : 'System';
-    uploadDate = book.uploadedAt.toISOString();
-    fileSize = book.fileSizeBytes || 0;
-    filePath = book.storagePath || '';
-    bookStatus = book.isDeleted ? 'blocked' : 'active';
-    isbn = null;
-    downloadCount = 0;
+  if (book.status === 'active') {
+    bookStatus = 'active';
+  } else if (book.status === 'blocked') {
+    bookStatus = 'blocked';
   } else {
-    uploadedBy = 'Unknown';
-    uploadDate = new Date().toISOString();
-    fileSize = 0;
-    filePath = '';
     bookStatus = 'pending';
-    isbn = null;
-    downloadCount = 0;
+  }
+  
+  return {
+    uploadedBy: book.uploadedBy ? usersMap.get(book.uploadedBy) || 'Unknown' : 'System',
+    uploadDate: book.uploadedAt?.toISOString() || book.createdAt.toISOString(),
+    fileSize: book.fileSize || 0,
+    filePath: book.contentPath || '',
+    bookStatus,
+    isbn: book.isbn || null,
+    downloadCount: book.downloadCount || 0
+  };
+}
+
+function formatPersonalBookForAdmin(book: { source: 'personal_books' } & typeof personalBooks.$inferSelect, usersMap: Map<string, string>) {
+  return {
+    uploadedBy: book.userId ? usersMap.get(book.userId) || 'Unknown' : 'System',
+    uploadDate: book.uploadedAt.toISOString(),
+    fileSize: book.fileSizeBytes || 0,
+    filePath: book.storagePath || '',
+    bookStatus: book.isDeleted ? 'blocked' : 'active',
+    isbn: null,
+    downloadCount: 0
+  };
+}
+
+function formatClubBookForAdmin(book: { source: 'club_books' } & typeof clubBooks.$inferSelect, usersMap: Map<string, string>) {
+  return {
+    uploadedBy: book.uploadedByUserId ? usersMap.get(book.uploadedByUserId) || 'Unknown' : 'System',
+    uploadDate: book.uploadedAt.toISOString(),
+    fileSize: book.fileSizeBytes || 0,
+    filePath: book.storagePath || '',
+    bookStatus: book.isDeleted ? 'blocked' : 'active',
+    isbn: null,
+    downloadCount: 0
+  };
+}
+
+// Главная функция-диспетчер (низкая когнитивная сложность)
+function formatBookForAdmin(book: BookWithSource, usersMap: Map<string, string>) {
+  let bookData;
+  
+  switch (book.source) {
+    case 'books':
+      bookData = formatSystemBookForAdmin(book as any, usersMap);
+      break;
+    case 'personal_books':
+      bookData = formatPersonalBookForAdmin(book as any, usersMap);
+      break;
+    case 'club_books':
+      bookData = formatClubBookForAdmin(book as any, usersMap);
+      break;
+    default:
+      bookData = {
+        uploadedBy: 'Unknown',
+        uploadDate: new Date().toISOString(),
+        fileSize: 0,
+        filePath: '',
+        bookStatus: 'pending',
+        isbn: null,
+        downloadCount: 0
+      };
   }
 
   return {
     id: book.id,
     title: book.title,
     author: book.author,
-    isbn: isbn,
+    isbn: bookData.isbn,
     genre: 'genre' in book ? book.genre : null,
     cover_url: book.coverUrl || null,
-    file_url: filePath,
-    status: bookStatus,
-    uploaded_by: uploadedBy,
-    upload_date: uploadDate,
-    file_size: fileSize,
-    downloads_count: downloadCount,
+    file_url: bookData.filePath,
+    status: bookData.bookStatus,
+    uploaded_by: bookData.uploadedBy,
+    upload_date: bookData.uploadDate,
+    file_size: bookData.fileSize,
+    downloads_count: bookData.downloadCount,
     description: book.description || null,
     source: book.source,
     club_id: book.source === 'club_books' && 'clubId' in book ? book.clubId : null,
   };
 }
 
-// Получить список всех книг
+// Helper functions to reduce cognitive complexity
+async function fetchAllBooksFromSources(): Promise<BookWithSource[]> {
+  const allBooks = await storage.getBooks();
+  const allUsers = await storage.getAllUsers();
+  const allPersonalBooks = [];
+  
+  for (const user of allUsers) {
+    const userPersonalBooks = await storage.getPersonalBooksByUser(user.id);
+    allPersonalBooks.push(...userPersonalBooks);
+  }
+
+  const allClubBooks = await storage.getAllClubBooks();
+
+  return [
+    ...allBooks.map(book => ({ ...book, source: 'books' as const })),
+    ...allPersonalBooks.map(book => ({ ...book, source: 'personal_books' as const })),
+    ...allClubBooks.map(book => ({ ...book, source: 'club_books' as const }))
+  ];
+}
+
+function applyBooksFiltering(books: BookWithSource[], search?: string, status?: string): BookWithSource[] {
+  let filtered = books;
+
+  if (search && typeof search === 'string') {
+    const searchStr = search.toLowerCase();
+    filtered = filtered.filter(book =>
+      book.title.toLowerCase().includes(searchStr) ||
+      book.author.toLowerCase().includes(searchStr)
+    );
+  }
+
+  if (status && typeof status === 'string') {
+    filtered = filterBooksByStatus(filtered, status);
+  }
+
+  return filtered;
+}
+
+async function buildUsersMap(books: BookWithSource[]): Promise<Map<string, string>> {
+  const usersMap = new Map();
+  
+  for (const book of books) {
+    let userId: string | undefined;
+    
+    if (book.source === 'books' && 'uploadedBy' in book) {
+      userId = book.uploadedBy || undefined;
+    } else if (book.source === 'personal_books' && 'userId' in book) {
+      userId = book.userId;
+    } else if (book.source === 'club_books' && 'uploadedByUserId' in book) {
+      userId = book.uploadedByUserId;
+    }
+    
+    if (userId && !usersMap.has(userId)) {
+      const user = await storage.getUser(userId);
+      if (user) {
+        usersMap.set(userId, user.username);
+      }
+    }
+  }
+  
+  return usersMap;
+}
+
+// Получить список всех книг (refactored for low cognitive complexity)
 router.get('/books', jwtAuth, requireAdmin, async (req, res) => {
   try {
     const { page = 1, limit = 20, search, status } = req.query;
 
-    // Получаем книги из всех таблиц
-    const allBooks = await storage.getBooks();
-    // Получаем все персональные книги (нужно будет агрегировать по всем пользователям)
-    const allUsers = await storage.getAllUsers();
-    const allPersonalBooks = [];
+    const combinedBooks = await fetchAllBooksFromSources();
+    const filteredBooks = applyBooksFiltering(combinedBooks, search as string, status as string);
     
-    for (const user of allUsers) {
-      const userPersonalBooks = await storage.getPersonalBooksByUser(user.id);
-      allPersonalBooks.push(...userPersonalBooks);
-    }
-
-    // Получаем все книги клубов
-    const allClubBooks = await storage.getAllClubBooks();
-
-    // Объединяем и маркируем источники
-    const combinedBooks = [
-      ...allBooks.map(book => ({ ...book, source: 'books' })),
-      ...allPersonalBooks.map(book => ({ ...book, source: 'personal_books' })),
-      ...allClubBooks.map(book => ({ ...book, source: 'club_books' }))
-    ];
-
-    let filteredBooks = combinedBooks;
-
-    if (search && typeof search === 'string') {
-      const searchStr = search.toLowerCase();
-      filteredBooks = filteredBooks.filter(book =>
-        book.title.toLowerCase().includes(searchStr) ||
-        book.author.toLowerCase().includes(searchStr)
-      );
-    }
-
-    if (status && typeof status === 'string') {
-      filteredBooks = filterBooksByStatus(filteredBooks, status);
-    }
-
     // Пагинация
     const offset = (Number(page) - 1) * Number(limit);
     const paginatedBooks = filteredBooks.slice(offset, offset + Number(limit));
 
-    // Получаем имена пользователей для uploaded_by
-    const usersMap = new Map();
-    for (const book of paginatedBooks) {
-      let userId: string | undefined;
-      
-      if (book.source === 'books' && 'uploadedBy' in book) {
-        userId = book.uploadedBy || undefined;
-      } else if (book.source === 'personal_books' && 'userId' in book) {
-        userId = book.userId;
-      } else if (book.source === 'club_books' && 'uploadedByUserId' in book) {
-        userId = book.uploadedByUserId;
-      }
-      
-      if (userId && !usersMap.has(userId)) {
-        const user = await storage.getUser(userId);
-        if (user) {
-          usersMap.set(userId, user.username);
-        }
-      }
-    }
-
-    // Преобразуем данные для фронтенда
+    const usersMap = await buildUsersMap(paginatedBooks);
     const formattedBooks = paginatedBooks.map(book => formatBookForAdmin(book, usersMap));
 
     res.json({
@@ -1197,7 +1234,7 @@ router.get('/system/health', jwtAuth, requireAdmin, async (req, res) => {
     try {
       // Выполняем простой запрос к БД для проверки соединения
       const { sql } = await import('drizzle-orm');
-      await (storage as any).db.execute(sql`SELECT COUNT(*) as count FROM users`);
+      await db.execute(sql`SELECT COUNT(*) as count FROM users`);
       dbConnections = 1;
     } catch (error) {
       console.error('[Health] Database check failed:', error);

@@ -10,14 +10,6 @@ import type {
   NoteUpdate,
 } from "../shared/schema.js";
 
-const JWT_SECRET = (() => {
-  const secret = process.env.JWT_SECRET;
-  if (!secret) {
-    throw new Error('CRITICAL: JWT_SECRET required for WebSocket authentication');
-  }
-  return secret;
-})();
-
 interface AuthenticatedSocket extends Socket {
   userId: string;
   username: string;

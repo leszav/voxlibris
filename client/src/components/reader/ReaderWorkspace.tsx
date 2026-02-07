@@ -214,20 +214,35 @@ function useTrackReaderAnalytics({
   progress: { currentChapter: number } | null | undefined;
   analytics: ReturnType<typeof useAnalytics>;
 }) {
+  const trackedChapterRef = useRef<number | null>(null);
+  const sessionActiveRef = useRef(false);
+
   useEffect(() => {
     if (!bookId || currentChapter === null || contentLoading) return;
+
+    // Отслеживаем только смену главы, чтобы избежать повторных вызовов
+    if (trackedChapterRef.current === currentChapter) return;
+    
+    trackedChapterRef.current = currentChapter;
 
     if (currentChapter === 1 || currentChapter === progress?.currentChapter) {
       analytics.trackBookOpen(bookId);
     }
 
     analytics.trackChapterStart(bookId, currentChapter);
-    analytics.startReadingSession(bookId, currentChapter);
+    
+    if (!sessionActiveRef.current) {
+      analytics.startReadingSession(bookId, currentChapter);
+      sessionActiveRef.current = true;
+    }
 
     return () => {
-      analytics.stopReadingSession();
+      if (sessionActiveRef.current) {
+        analytics.stopReadingSession();
+        sessionActiveRef.current = false;
+      }
     };
-  }, [bookId, currentChapter, contentLoading, progress, analytics]);
+  }, [bookId, currentChapter, contentLoading, progress?.currentChapter]);
 }
 
 function useRestoreScrollPosition({
