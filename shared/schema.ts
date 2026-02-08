@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, boolean, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, boolean, timestamp, foreignKey } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -21,23 +21,32 @@ export type ClubMemberRole = typeof clubMemberRoles[number];
 export const bookStatuses = ["active", "blocked", "deleted"] as const;
 export type BookStatus = typeof bookStatuses[number];
 
-export const users: any = pgTable("users", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  username: text("username").notNull().unique(),
-  email: text("email").notNull().unique(),
-  password: text("password").notNull(),
-  role: text("role").notNull().default("user").$type<UserRole>(),
-  status: text("status").notNull().default("pending").$type<UserStatus>(),
-  emailConfirmed: boolean("email_confirmed").notNull().default(false),
-  confirmationToken: varchar("confirmation_token", { length: 64 }),
-  invitedBy: varchar("invited_by").references((): any => users.id, { onDelete: "set null" }), // Кто пригласил пользователя
-  invitedToClub: varchar("invited_to_club"), // В какой клуб приглашен
-  lastActivityAt: timestamp("last_activity_at"),
-  suspensionReason: text("suspension_reason"),
-  suspendedUntil: timestamp("suspended_until"),
-  failedLoginAttempts: integer("failed_login_attempts").default(0),
-  createdAt: timestamp("created_at").notNull().default(sql`now()`),
-});
+export const users = pgTable(
+  "users",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    username: text("username").notNull().unique(),
+    email: text("email").notNull().unique(),
+    password: text("password").notNull(),
+    role: text("role").notNull().default("user").$type<UserRole>(),
+    status: text("status").notNull().default("pending").$type<UserStatus>(),
+    emailConfirmed: boolean("email_confirmed").notNull().default(false),
+    confirmationToken: varchar("confirmation_token", { length: 64 }),
+    invitedBy: varchar("invited_by"), // Кто пригласил пользователя
+    invitedToClub: varchar("invited_to_club"), // В какой клуб приглашен
+    lastActivityAt: timestamp("last_activity_at"),
+    suspensionReason: text("suspension_reason"),
+    suspendedUntil: timestamp("suspended_until"),
+    failedLoginAttempts: integer("failed_login_attempts").default(0),
+    createdAt: timestamp("created_at").notNull().default(sql`now()`),
+  },
+  (table) => ({
+    invitedByFk: foreignKey({
+      columns: [table.invitedBy],
+      foreignColumns: [table.id],
+    }).onDelete("set null"),
+  })
+);
 
 
 // Refresh tokens for JWT authentication
@@ -620,17 +629,17 @@ export const moderationReports = pgTable("moderation_reports", {
 });
 
 export const adminActionTypes = [
-  "block_user", "unblock_user", "change_user_role", "delete_user",
+  "block_user", "unblock_user", "change_user_role", "change_user_status", "delete_user", "restore_user", "permanent_delete_user",
   "reset_password",
-  "archive_club", "delete_club", "block_club", "unblock_club",
-  "delete_book", "block_book", "unblock_book",
+  "archive_club", "delete_club", "block_club", "unblock_club", "update_club",
+  "delete_book", "block_book", "unblock_book", "update_book_status",
   "delete_message", "block_message",
-  "resolve_report", "dismiss_report", "assign_report",
-  "update_settings", "backup_data", "restore_data"
+  "resolve_report", "dismiss_report", "assign_report", "update_report_status",
+  "update_settings", "update_smtp_settings", "test_smtp", "backup_data", "restore_data"
 ] as const;
 export type AdminActionType = typeof adminActionTypes[number];
 
-export const adminActionTargetTypes = ["user", "club", "book", "message", "report", "system"] as const;
+export const adminActionTargetTypes = ["user", "club", "book", "message", "report", "system", "settings"] as const;
 export type AdminActionTargetType = typeof adminActionTargetTypes[number];
 
 export const adminActions = pgTable("admin_actions", {
@@ -779,7 +788,7 @@ export type Note = typeof notes.$inferSelect;
 // WebSocket message types
 export interface WebSocketMessage {
   type: 'session_start' | 'session_end' | 'position_update' | 'listener_join' | 'listener_leave' | 'rating_update' | 'progress_update' | 'bookmark_add' | 'note_add' | 'club_progress';
-  payload: any;
+  payload: unknown;
   sessionId?: string;
   userId?: string;
 }
@@ -1166,8 +1175,14 @@ export interface CommentReplyWithUser extends CommentReply {
   user: User;
 }
 
+export interface ChatUser {
+  id: string;
+  username: string;
+  displayName?: string | null;
+}
+
 export interface ChatMessageWithUser extends ChatMessage {
-  user: User;
+  user: ChatUser;
   likesCount?: number;
 }
 
@@ -1214,3 +1229,629 @@ export const analyticsEvents = pgTable("analytics_events", {
 
 export type AnalyticsEvent = typeof analyticsEvents.$inferSelect;
 export type InsertAnalyticsEvent = typeof analyticsEvents.$inferInsert;
+
+// ============================================
+// VOXLIBRIS STUDIO - Аудио чтение и WebRTC
+// ============================================
+
+// Типы сессий
+export const sessionTypes = ["general", "reader_club"] as const;
+export type SessionType = typeof sessionTypes[number];
+
+// Статус чтения в клубе (поддерживает множественных чтецов)
+export const clubReadingStatus = pgTable("club_reading_status", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  clubId: varchar("club_id").notNull().references(() => clubs.id, { onDelete: "cascade" }),
+  userId: varchar("user_id").notNull().references(() => users.id), // Кто читает
+  bookId: varchar("book_id").notNull().references(() => books.id),
+  sessionId: varchar("session_id").references(() => readingSessions.id),
+  
+  // Статус
+  isActive: boolean("is_active").notNull().default(false),
+  startedAt: timestamp("started_at"),
+  
+  // Текущая позиция
+  currentChapter: integer("current_chapter").notNull().default(1),
+  currentPosition: text("current_position"), // JSON: {scrollTop, paragraph, offset}
+  
+  // Для клуба Чтеца - может ли подключаться
+  isOpenForListeners: boolean("is_open_for_listeners").notNull().default(true),
+  
+  // Количество слушателей
+  listenerCount: integer("listener_count").notNull().default(0),
+  
+  // Тип сессии (для фильтрации)
+  sessionType: varchar("session_type", { length: 20 }).notNull().default("general").$type<SessionType>(),
+  
+  updatedAt: timestamp("updated_at").notNull().default(sql`now()`),
+});
+
+// Реакции слушателей (с поддержкой положительных и отрицательных)
+export const reactionTypes = ["positive", "negative"] as const;
+export type ReactionType = typeof reactionTypes[number];
+
+export const sessionReactions = pgTable("session_reactions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  sessionId: varchar("session_id").notNull().references(() => readingSessions.id, { onDelete: "cascade" }),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  emoji: varchar("emoji", { length: 50 }).notNull(), // "👍", "❤️", "🔥", "👎", "💩", etc
+  type: varchar("type", { length: 20 }).notNull().default("positive").$type<ReactionType>(), // positive, negative
+  position: text("position"), // Позиция в аудио (timestamp в секундах)
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+});
+
+// Вопросы к чтецу (в контексте чата)
+export const sessionQuestions = pgTable("session_questions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  sessionId: varchar("session_id").notNull().references(() => readingSessions.id, { onDelete: "cascade" }),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  question: text("question").notNull(),
+  isAnswered: boolean("is_answered").notNull().default(false),
+  answer: text("answer"),
+  answeredAt: timestamp("answered_at"),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+});
+
+// Аналитика сессий чтения
+export const sessionAnalytics = pgTable("session_analytics", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  sessionId: varchar("session_id").notNull().references(() => readingSessions.id, { onDelete: "cascade" }),
+  
+  // Статистика слушателей
+  peakListenerCount: integer("peak_listener_count").default(0),
+  averageListenerCount: integer("average_listener_count").default(0),
+  totalListeners: integer("total_listeners").default(0), // Уникальные слушатели
+  
+  // Время прослушивания
+  totalListenTime: integer("total_listen_time").default(0), // В секундах
+  averageSessionDuration: integer("average_session_duration").default(0), // В секундах
+  
+  // Реакции и вопросы
+  reactionCount: integer("reaction_count").default(0),
+  positiveReactionCount: integer("positive_reaction_count").default(0),
+  negativeReactionCount: integer("negative_reaction_count").default(0),
+  questionCount: integer("question_count").default(0),
+  
+  // Качество
+  audioQualityScore: integer("audio_quality_score"), // 0-100
+  networkQualityScore: integer("network_quality_score"), // 0-100
+  
+  // География (JSON)
+  listenerRegions: text("listener_regions"), // JSON: {RU: 10, US: 5, ...}
+  listenerCities: text("listener_cities"), // JSON: {Moscow: 8, "New York": 3, ...}
+  
+  // Устройства (JSON)
+  deviceTypes: text("device_types"), // JSON: {desktop: 12, mobile: 8, tablet: 2}
+  
+  // Удержание (JSON)
+  retention: text("retention"), // JSON: {"1min": 20, "5min": 15, "10min": 10}
+  
+  // Дополнительные метаданные
+  metadata: text("metadata"), // JSON для любых дополнительных данных
+  
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+  updatedAt: timestamp("updated_at").notNull().default(sql`now()`),
+});
+
+// ============================================
+// МОНИТИЗАЦИЯ
+// ============================================
+
+// Типы монетизации
+export const monetizationTypes = ["one_time", "subscription", "donation"] as const;
+export type MonetizationType = typeof monetizationTypes[number];
+
+// Статусы платежей
+export const paymentStatuses = ["pending", "completed", "failed", "refunded", "cancelled"] as const;
+export type PaymentStatus = typeof paymentStatuses[number];
+
+// Настройки монетизации для клуба
+export const clubMonetization = pgTable("club_monetization", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  clubId: varchar("club_id").notNull().references(() => clubs.id, { onDelete: "cascade" }),
+  
+  // Тип монетизации
+  type: varchar("type", { length: 20 }).notNull().$type<MonetizationType>(),
+  
+  // Для разовой оплаты (one_time)
+  oneTimeAmount: integer("one_time_amount"), // В копейках/центах
+  oneTimeCurrency: varchar("one_time_currency", { length: 3 }).default("USD"),
+  
+  // Для подписки (subscription)
+  subscriptionAmount: integer("subscription_amount"), // В копейках/центах за месяц
+  subscriptionCurrency: varchar("subscription_currency", { length: 3 }).default("USD"),
+  subscriptionInterval: varchar("subscription_interval", { length: 20 }).default("monthly"), // monthly, yearly
+  
+  // Для пожертвований (donation)
+  donationMinAmount: integer("donation_min_amount"), // Минимальная сумма
+  donationMaxAmount: integer("donation_max_amount"), // Максимальная сумма
+  donationSuggestedAmounts: text("donation_suggested_amounts"), // JSON: [100, 500, 1000] в копейках
+  donationCurrency: varchar("donation_currency", { length: 3 }).default("USD"),
+  
+  // Процент платформы
+  platformFeePercent: integer("platform_fee_percent").notNull().default(10), // 10%
+  
+  // Способ выплат
+  payoutMethod: varchar("payout_method", { length: 50 }), // stripe, bank, crypto, etc
+  payoutDetails: text("payout_details"), // JSON: {accountNumber, routingNumber, ...}
+  
+  // Статус
+  isActive: boolean("is_active").notNull().default(false),
+  
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+  updatedAt: timestamp("updated_at").notNull().default(sql`now()`),
+});
+
+// Доходы чтеца
+export const earningStatuses = ["pending", "processing", "paid", "failed"] as const;
+export type EarningStatus = typeof earningStatuses[number];
+
+export const readerEarnings = pgTable("reader_earnings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  sessionId: varchar("session_id").notNull().references(() => readingSessions.id, { onDelete: "cascade" }),
+  readerId: varchar("reader_id").notNull().references(() => users.id),
+  clubId: varchar("club_id").notNull().references(() => clubs.id),
+  
+  // Тип монетизации сессии
+  monetizationType: varchar("monetization_type", { length: 20 }).notNull().$type<MonetizationType>(),
+  
+  // Доход (до вычета процента платформы)
+  grossAmount: integer("gross_amount").notNull(), // В копейках/центах
+  currency: varchar("currency", { length: 3 }).default("USD"),
+  
+  // Процент платформы
+  platformFeePercent: integer("platform_fee_percent").notNull(),
+  platformFeeAmount: integer("platform_fee_amount").notNull(), // В копейках/центах
+  
+  // Чистый доход
+  netAmount: integer("net_amount").notNull(), // В копейках/центах
+  
+  // Статистика
+  listenerCount: integer("listener_count").default(0),
+  paymentCount: integer("payment_count").default(0), // Количество платежей
+  
+  // Статус
+  status: varchar("status", { length: 20 }).notNull().default("pending").$type<EarningStatus>(),
+  
+  // Выплата
+  payoutId: varchar("payout_id"), // ID выплаты от платежной системы
+  payoutStatus: varchar("payout_status", { length: 20 }), // pending, completed, failed
+  payoutAt: timestamp("payout_at"),
+  
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+  updatedAt: timestamp("updated_at").notNull().default(sql`now()`),
+});
+
+// Платежи слушателей
+export const listenerPayments = pgTable("listener_payments", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  sessionId: varchar("session_id").references(() => readingSessions.id, { onDelete: "cascade" }),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  clubId: varchar("club_id").notNull().references(() => clubs.id),
+  
+  // Тип монетизации
+  monetizationType: varchar("monetization_type", { length: 20 }).notNull().$type<MonetizationType>(),
+  
+  // Сумма
+  amount: integer("amount").notNull(), // В копейках/центах
+  currency: varchar("currency", { length: 3 }).default("USD"),
+  
+  // Платежная система
+  paymentProvider: varchar("payment_provider", { length: 50 }), // stripe, paypal, etc
+  paymentIntentId: varchar("payment_intent_id"), // ID от платежной системы
+  paymentMethodId: varchar("payment_method_id"), // ID метода оплаты
+  
+  // Статус
+  status: varchar("status", { length: 20 }).notNull().default("pending").$type<PaymentStatus>(),
+  
+  // Возврат
+  refundId: varchar("refund_id"),
+  refundAmount: integer("refund_amount"),
+  refundReason: text("refund_reason"),
+  refundedAt: timestamp("refunded_at"),
+  
+  // Дополнительно
+  metadata: text("metadata"), // JSON: {receiptUrl, fraudScore, ...}
+  
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+  updatedAt: timestamp("updated_at").notNull().default(sql`now()`),
+});
+
+// Подписки на клубы
+export const subscriptionStatuses = ["active", "past_due", "canceled", "unpaid", "trialing"] as const;
+export type SubscriptionStatus = typeof subscriptionStatuses[number];
+
+export const clubSubscriptions = pgTable("club_subscriptions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  clubId: varchar("club_id").notNull().references(() => clubs.id, { onDelete: "cascade" }),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  
+  // Детали подписки
+  amount: integer("amount").notNull(), // В копейках/центах
+  currency: varchar("currency", { length: 3 }).default("USD"),
+  interval: varchar("interval", { length: 20 }).notNull().default("monthly"), // monthly, yearly
+  
+  // Статус
+  status: varchar("status", { length: 20 }).notNull().default("active").$type<SubscriptionStatus>(),
+  
+  // Даты
+  currentPeriodStart: timestamp("current_period_start").notNull(),
+  currentPeriodEnd: timestamp("current_period_end").notNull(),
+  cancelAtPeriodEnd: boolean("cancel_at_period_end").notNull().default(false),
+  canceledAt: timestamp("canceled_at"),
+  
+  // Платежная система
+  paymentProvider: varchar("payment_provider", { length: 50 }),
+  subscriptionId: varchar("subscription_id"), // ID от платежной системы
+  
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+  updatedAt: timestamp("updated_at").notNull().default(sql`now()`),
+});
+
+// ============================================
+// РАСПИСАНИЕ СЕССИЙ
+// ============================================
+
+// Статусы расписания
+export const scheduleStatuses = ["scheduled", "in_progress", "completed", "cancelled"] as const;
+export type ScheduleStatus = typeof scheduleStatuses[number];
+
+// Расписание сессий чтения
+export const readingSchedule = pgTable("reading_schedule", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  clubId: varchar("club_id").notNull().references(() => clubs.id, { onDelete: "cascade" }),
+  bookId: varchar("book_id").notNull().references(() => books.id, { onDelete: "cascade" }),
+  title: varchar("title", { length: 255 }).notNull(), // "Чтение главы 1-3"
+  description: text("description"),
+  
+  // Время проведения
+  scheduledStart: timestamp("scheduled_start").notNull(),
+  scheduledEnd: timestamp("scheduled_end"),
+  estimatedDuration: integer("estimated_duration"), // В минутах
+  
+  // Текущая позиция в книге
+  startChapter: integer("start_chapter").notNull().default(1),
+  startPosition: text("start_position"), // JSON: {scrollTop, paragraph, offset}
+  endChapter: integer("end_chapter"),
+  endPosition: text("end_position"), // JSON
+  
+  // Статус расписания
+  status: varchar("status", { length: 20 }).notNull().default("scheduled").$type<ScheduleStatus>(),
+  
+  // Привязка к сессии чтения
+  sessionId: varchar("session_id").references(() => readingSessions.id),
+  
+  // Повторение
+  isRecurring: boolean("is_recurring").notNull().default(false),
+  recurringPattern: text("recurring_pattern"), // JSON: {frequency: 'weekly', days: [1,3,5], endDate: '2025-03-01'}
+  
+  // Уведомления
+  reminderMinutes: integer("reminder_minutes").default(15), // За сколько минут напомнить
+  remindersSent: boolean("reminders_sent").notNull().default(false),
+  
+  // Статистика
+  actualStart: timestamp("actual_start"),
+  actualEnd: timestamp("actual_end"),
+  attendeesCount: integer("attendees_count").default(0),
+  
+  createdBy: varchar("created_by").notNull().references(() => users.id),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+  updatedAt: timestamp("updated_at").notNull().default(sql`now()`),
+});
+
+// ============================================
+// ЗАПИСИ СЕССИЙ (для клубов Чтеца)
+// ============================================
+
+// Статусы записи
+export const recordingStatuses = ["processing", "ready", "failed", "deleted"] as const;
+export type RecordingStatus = typeof recordingStatuses[number];
+
+// Записи сессий (для клубов Чтеца)
+export const sessionRecordings = pgTable("session_recordings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  sessionId: varchar("session_id").notNull().references(() => readingSessions.id, { onDelete: "cascade" }),
+  clubId: varchar("club_id").notNull().references(() => clubs.id),
+  
+  // Файл записи
+  recordingUrl: text("recording_url"), // URL к записи на S3/локальном хранилище
+  storageKey: text("storage_key"), // Ключ в хранилище
+  duration: integer("duration"), // Длительность в секундах
+  fileSize: integer("file_size"), // Размер в байтах
+  format: varchar("format", { length: 20 }).default("webm"), // webm, mp3, etc
+  
+  // Статус обработки
+  status: varchar("status", { length: 20 }).notNull().default("processing").$type<RecordingStatus>(),
+  
+  // Тип записи
+  isLocal: boolean("is_local").default(false), // Локальная запись при сбое связи
+  isBackup: boolean("is_backup").default(false), // Резервная копия
+  
+  // Качество
+  bitrate: integer("bitrate"), // В kbps
+  sampleRate: integer("sample_rate"), // В Hz
+  channels: integer("channels"), // 1 = mono, 2 = stereo
+  
+  // Доступность
+  isAvailable: boolean("is_available").notNull().default(true),
+  availableUntil: timestamp("available_until"), // Дата, когда запись перестанет быть доступной
+  
+  // Дополнительно
+  metadata: text("metadata"), // JSON для любых дополнительных данных
+  
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+  updatedAt: timestamp("updated_at").notNull().default(sql`now()`),
+});
+
+// ============================================
+// ОЦЕНКА КАЧЕСТВА ЧТЕНИЯ
+// ============================================
+
+// Оценки качества чтения (от других чтецов)
+export const readerQualityRatings = pgTable("reader_quality_ratings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  ratedUserId: varchar("rated_user_id").notNull().references(() => users.id), // Чей рейтинг
+  raterUserId: varchar("rater_user_id").notNull().references(() => users.id), // Кто оценил
+  clubId: varchar("club_id").references(() => clubs.id), // В каком клубе (может быть null для общего рейтинга)
+  
+  // Критерии оценки
+  voiceQuality: integer("voice_quality"), // 1-5, качество голоса
+  readingPace: integer("reading_pace"), // 1-5, темп чтения
+  articulation: integer("articulation"), // 1-5, артикуляция
+  emotion: integer("emotion"), // 1-5, эмоциональная подача
+  
+  // Общая оценка
+  overallRating: integer("overall_rating").notNull(), // 1-5
+  
+  // Комментарий
+  feedback: text("feedback"),
+  
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+});
+
+// ============================================
+// SCHEMAS ДЛЯ ВАЛИДАЦИИ
+// ============================================
+
+// Club Reading Status
+export const insertClubReadingStatusSchema = createInsertSchema(clubReadingStatus).pick({
+  clubId: true,
+  userId: true,
+  bookId: true,
+  sessionId: true,
+  currentChapter: true,
+  currentPosition: true,
+  isOpenForListeners: true,
+  sessionType: true,
+});
+
+// Session Reactions
+export const insertSessionReactionSchema = createInsertSchema(sessionReactions).pick({
+  sessionId: true,
+  userId: true,
+  emoji: true,
+  type: true,
+  position: true,
+});
+
+// Session Questions
+export const insertSessionQuestionSchema = createInsertSchema(sessionQuestions).pick({
+  sessionId: true,
+  userId: true,
+  question: true,
+});
+
+export const updateSessionQuestionSchema = createInsertSchema(sessionQuestions).pick({
+  answer: true,
+  isAnswered: true,
+  answeredAt: true,
+});
+
+// Session Analytics
+export const insertSessionAnalyticsSchema = createInsertSchema(sessionAnalytics).pick({
+  sessionId: true,
+  peakListenerCount: true,
+  averageListenerCount: true,
+  totalListeners: true,
+  totalListenTime: true,
+  averageSessionDuration: true,
+  reactionCount: true,
+  positiveReactionCount: true,
+  negativeReactionCount: true,
+  questionCount: true,
+  audioQualityScore: true,
+  networkQualityScore: true,
+  listenerRegions: true,
+  listenerCities: true,
+  deviceTypes: true,
+  retention: true,
+  metadata: true,
+});
+
+// Club Monetization
+export const insertClubMonetizationSchema = createInsertSchema(clubMonetization).pick({
+  clubId: true,
+  type: true,
+  oneTimeAmount: true,
+  oneTimeCurrency: true,
+  subscriptionAmount: true,
+  subscriptionCurrency: true,
+  subscriptionInterval: true,
+  donationMinAmount: true,
+  donationMaxAmount: true,
+  donationSuggestedAmounts: true,
+  donationCurrency: true,
+  platformFeePercent: true,
+  payoutMethod: true,
+  payoutDetails: true,
+  isActive: true,
+});
+
+// Reader Earnings
+export const insertReaderEarningSchema = createInsertSchema(readerEarnings).pick({
+  sessionId: true,
+  readerId: true,
+  clubId: true,
+  monetizationType: true,
+  grossAmount: true,
+  currency: true,
+  platformFeePercent: true,
+  platformFeeAmount: true,
+  netAmount: true,
+  listenerCount: true,
+  paymentCount: true,
+  status: true,
+});
+
+// Listener Payments
+export const insertListenerPaymentSchema = createInsertSchema(listenerPayments).pick({
+  sessionId: true,
+  userId: true,
+  clubId: true,
+  monetizationType: true,
+  amount: true,
+  currency: true,
+  paymentProvider: true,
+  paymentIntentId: true,
+  paymentMethodId: true,
+  status: true,
+  metadata: true,
+});
+
+// Club Subscriptions
+export const insertClubSubscriptionSchema = createInsertSchema(clubSubscriptions).pick({
+  clubId: true,
+  userId: true,
+  amount: true,
+  currency: true,
+  interval: true,
+  status: true,
+  currentPeriodStart: true,
+  currentPeriodEnd: true,
+  cancelAtPeriodEnd: true,
+  paymentProvider: true,
+  subscriptionId: true,
+});
+
+// Reading Schedule
+export const insertReadingScheduleSchema = createInsertSchema(readingSchedule).pick({
+  clubId: true,
+  bookId: true,
+  title: true,
+  description: true,
+  scheduledStart: true,
+  scheduledEnd: true,
+  estimatedDuration: true,
+  startChapter: true,
+  startPosition: true,
+  endChapter: true,
+  endPosition: true,
+  isRecurring: true,
+  recurringPattern: true,
+  reminderMinutes: true,
+  createdBy: true,
+});
+
+// Session Recordings
+export const insertSessionRecordingSchema = createInsertSchema(sessionRecordings).pick({
+  sessionId: true,
+  clubId: true,
+  recordingUrl: true,
+  storageKey: true,
+  duration: true,
+  fileSize: true,
+  format: true,
+  isLocal: true,
+  isBackup: true,
+  bitrate: true,
+  sampleRate: true,
+  channels: true,
+  isAvailable: true,
+  availableUntil: true,
+  metadata: true,
+});
+
+// Reader Quality Ratings
+export const insertReaderQualityRatingSchema = createInsertSchema(readerQualityRatings).pick({
+  ratedUserId: true,
+  raterUserId: true,
+  clubId: true,
+  voiceQuality: true,
+  readingPace: true,
+  articulation: true,
+  emotion: true,
+  overallRating: true,
+  feedback: true,
+});
+
+// ============================================
+// TYPES
+// ============================================
+
+// VoxLibris Studio Types
+export type ClubReadingStatus = typeof clubReadingStatus.$inferSelect;
+export type InsertClubReadingStatus = z.infer<typeof insertClubReadingStatusSchema>;
+
+export type SessionReaction = typeof sessionReactions.$inferSelect;
+export type InsertSessionReaction = z.infer<typeof insertSessionReactionSchema>;
+
+export type SessionQuestion = typeof sessionQuestions.$inferSelect;
+export type InsertSessionQuestion = z.infer<typeof insertSessionQuestionSchema>;
+export type UpdateSessionQuestion = z.infer<typeof updateSessionQuestionSchema>;
+
+export type SessionAnalytics = typeof sessionAnalytics.$inferSelect;
+export type InsertSessionAnalytics = z.infer<typeof insertSessionAnalyticsSchema>;
+
+export type ClubMonetization = typeof clubMonetization.$inferSelect;
+export type InsertClubMonetization = z.infer<typeof insertClubMonetizationSchema>;
+
+export type ReaderEarning = typeof readerEarnings.$inferSelect;
+export type InsertReaderEarning = z.infer<typeof insertReaderEarningSchema>;
+
+export type ListenerPayment = typeof listenerPayments.$inferSelect;
+export type InsertListenerPayment = z.infer<typeof insertListenerPaymentSchema>;
+
+export type ClubSubscription = typeof clubSubscriptions.$inferSelect;
+export type InsertClubSubscription = z.infer<typeof insertClubSubscriptionSchema>;
+
+export type ReadingSchedule = typeof readingSchedule.$inferSelect;
+export type InsertReadingSchedule = z.infer<typeof insertReadingScheduleSchema>;
+
+export type SessionRecording = typeof sessionRecordings.$inferSelect;
+export type InsertSessionRecording = z.infer<typeof insertSessionRecordingSchema>;
+
+export type ReaderQualityRating = typeof readerQualityRatings.$inferSelect;
+export type InsertReaderQualityRating = z.infer<typeof insertReaderQualityRatingSchema>;
+
+// Extended Types
+export interface ClubReadingStatusWithDetails extends ClubReadingStatus {
+  user: User;
+  book: Book;
+  club: Club;
+}
+
+export interface SessionReactionWithDetails extends SessionReaction {
+  user: User;
+}
+
+export interface SessionQuestionWithDetails extends SessionQuestion {
+  user: User;
+}
+
+export interface SessionAnalyticsWithDetails extends SessionAnalytics {
+  session: ReadingSession;
+  club: Club;
+  reader: User;
+}
+
+export interface ReaderEarningWithDetails extends ReaderEarning {
+  session: ReadingSession;
+  club: Club;
+  reader: User;
+}
+
+export interface ReaderQualityRatingWithDetails extends ReaderQualityRating {
+  ratedUser: User;
+  raterUser: User;
+  club?: Club;
+}

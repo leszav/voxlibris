@@ -6,14 +6,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useClubs } from "@/hooks/use-clubs";
 import { useLocation } from "wouter";
 import { Loader2, Plus, Users, BookOpen, Lock } from "lucide-react";
-import { useAuth } from "@/hooks/use-auth";
-import { useToast } from "@/hooks/use-toast";
 
 export default function MyClubs() {
   const [, setLocation] = useLocation();
   const { data: clubs, isLoading, error } = useClubs();
-  const { user } = useAuth();
-  const { toast } = useToast();
 
   const handleCreateClub = () => {
     // Проверка статуса происходит на бэкенде через requireActiveUser middleware
@@ -47,13 +43,13 @@ export default function MyClubs() {
 
   const clubsList = Array.isArray(clubs) ? clubs : [];
   
-  const myOwnedClubs = clubsList.filter(club => {
+  const myOwnedClubs = clubsList.filter(_club => {
     // Проверяем, является ли текущий пользователь владельцем
     // Это будет работать когда добавим информацию о роли в ClubWithDetails
     return true; // Пока показываем все
   });
 
-  const myMemberClubs = clubsList.filter(club => {
+  const myMemberClubs = clubsList.filter(_club => {
     // Клубы где пользователь участник, но не владелец
     return true; // Пока показываем все
   });

@@ -21,10 +21,10 @@ const envPath = join(rootDir, ".env");
 // Load .env file only if it exists (development mode)
 // In production, env vars should be provided by the deployment environment
 if (existsSync(envPath)) {
-  console.log("[ENV] Loading environment from .env file");
+  console.warn("[ENV] Loading environment from .env file");
   dotenv.config({ path: envPath });
 } else {
-  console.log("[ENV] No .env file found, using system environment variables");
+  console.warn("[ENV] No .env file found, using system environment variables");
 }
 
 // Verify critical environment variables are present
@@ -45,4 +45,4 @@ if (missingVars.length > 0) {
   process.exit(1);
 }
 
-console.log("[ENV] Environment variables loaded successfully");
+console.warn("[ENV] Environment variables loaded successfully");

@@ -5,7 +5,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
 import { ComingSoonOverlay } from "@/components/ui/coming-soon-overlay";
-import { Mic, Users, DollarSign, Sparkles, ArrowRight, Play } from "lucide-react";
+import { Mic, Users, DollarSign, ArrowRight, Play } from "lucide-react";
 import studioBg from "@assets/generated_images/professional_home_recording_studio_setup.png";
 import { Link } from "wouter";
 

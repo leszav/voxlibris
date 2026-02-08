@@ -14,14 +14,6 @@ interface Chapter {
   content?: string;
 }
 
-interface BookData {
-  id?: string;
-  title: string;
-  chapters?: Chapter[];
-  content?: string;
-  isPersonalBook?: boolean;
-}
-
 interface ProcessedBookData {
   title: string;
   chapters?: Chapter[];
@@ -271,19 +263,12 @@ function useRestoreScrollPosition({
       return;
     }
 
-    if (import.meta.env.DEV) {
-      console.log('[Reader] Restoring scroll position from progress:', progress);
-    }
-
     if (progress.currentPosition && scrollContainerRef.current) {
       try {
         const position = JSON.parse(progress.currentPosition);
         setTimeout(() => {
           if (scrollContainerRef.current) {
             scrollContainerRef.current.scrollTop = position.scrollTop || 0;
-            if (import.meta.env.DEV) {
-              console.log('[Reader] Restored scroll position:', position.scrollTop);
-            }
           }
         }, 300);
       } catch (e) {
@@ -343,9 +328,6 @@ function usePersistProgressOnScroll({
 
       scrollTimeoutRef.current = setTimeout(() => {
         const position = JSON.stringify({ scrollTop, scrollHeight, clientHeight });
-        if (import.meta.env.DEV) {
-          console.log('[Reader] Saving progress:', { currentChapter, totalProgress, position });
-        }
 
         lastSavedProgressRef.current = {
           chapter: currentChapter,
@@ -402,10 +384,6 @@ function usePersistProgressOnUnmount({
         clientHeight
       );
       const position = JSON.stringify({ scrollTop, scrollHeight, clientHeight });
-
-      if (import.meta.env.DEV) {
-        console.log('[Reader] Saving progress on unmount:', { currentChapter, totalProgress });
-      }
 
       const token = getAccessToken();
       if (token && bookId) {

@@ -5,6 +5,8 @@ import {
   moderationReports,
   books,
   type AdminAction,
+  type AdminActionType,
+  type AdminActionTargetType,
   type ModerationReport,
   type InsertModerationReport,
   type ModerationReportType,
@@ -27,8 +29,8 @@ export class ModerationRepository extends BaseRepository {
    */
   async logAdminAction(action: {
     adminId: string;
-    actionType: string;
-    targetType: string;
+    actionType: AdminActionType;
+    targetType: AdminActionTargetType;
     targetId: string;
     reason?: string;
     previousValue?: string;
@@ -42,8 +44,8 @@ export class ModerationRepository extends BaseRepository {
         .insert(adminActions)
         .values({
           adminId: action.adminId,
-          actionType: action.actionType as any,
-          targetType: action.targetType as any,
+          actionType: action.actionType,
+          targetType: action.targetType,
           targetId: action.targetId,
           reason: action.reason,
           previousValue: action.previousValue,
@@ -66,7 +68,7 @@ export class ModerationRepository extends BaseRepository {
    */
   async getAdminActions(adminId?: string, limit: number = 100): Promise<AdminAction[]> {
     try {
-      let query = this.db
+      const query = this.db
         .select()
         .from(adminActions)
         .orderBy(desc(adminActions.createdAt));
@@ -109,7 +111,7 @@ export class ModerationRepository extends BaseRepository {
       // Обновляем статус
       const result = await this.db
         .update(books)
-        .set({ status: status as any })
+        .set({ status: status as typeof books.$inferInsert.status })
         .where(eq(books.id, bookId))
         .returning();
 
@@ -145,7 +147,7 @@ export class ModerationRepository extends BaseRepository {
       let query = this.db.select().from(moderationReports);
 
       if (filters?.status) {
-        const statusValue = filters.status as any;
+        const statusValue = filters.status as ModerationReport['status'];
         query = query.where(eq(moderationReports.status, statusValue)) as typeof query;
       }
       if (filters?.type) {
@@ -168,7 +170,9 @@ export class ModerationRepository extends BaseRepository {
    */
   async updateModerationReport(reportId: string, updates: Partial<ModerationReport>): Promise<boolean> {
     try {
-      const updateData: any = { updatedAt: new Date() };
+      const updateData: Partial<ModerationReport> & { updatedAt: Date; resolvedAt?: Date } = {
+        updatedAt: new Date(),
+      };
 
       if (updates.status !== undefined) updateData.status = updates.status;
       if (updates.priority !== undefined) updateData.priority = updates.priority;

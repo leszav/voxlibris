@@ -1,4 +1,4 @@
-import type { ClubMemberRole } from "@shared/schema";
+import type { ClubMemberRole, ClubWithDetails, User } from "@shared/schema";
 import {
   ArrowLeft,
   BookOpen,
@@ -37,7 +37,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { VoxLibrisUpload } from "@/components/ui/voxlibris-upload";
 import { useAuth } from "@/hooks/use-auth";
 import { useDeleteClubBook } from "@/hooks/use-books-v2";
-import { useClub, useClubMembers, useRemoveMember } from "@/hooks/use-clubs";
+import { useClub, useClubMembers, useRemoveMember, type ClubMemberWithUser } from "@/hooks/use-clubs";
 import { useToast } from "@/hooks/use-toast";
 import { getAccessToken } from "@/lib/token-store";
 
@@ -55,6 +55,8 @@ interface ClubSettings {
   rulesHtml?: string;
   shortDescription?: string;
 }
+
+type ClubWithOptionalBook = ClubWithDetails & { book?: ClubWithDetails["book"] | null };
 
 // Вспомогательная функция для получения варианта badge по роли
 const getMemberRoleBadgeVariant = (role: ClubMemberRole): "default" | "secondary" | "outline" => {
@@ -137,20 +139,25 @@ const ClubAuthRequired = () => (
   </MainLayout>
 );
 
+type RemoveMemberMutation = ReturnType<typeof useRemoveMember>;
+type DeleteBookMutation = ReturnType<typeof useDeleteClubBook>;
+type ToastFn = ReturnType<typeof useToast>['toast'];
+
 // Helper functions to reduce cognitive complexity
-function useClubErrorHandling(error: any, setLocation: (path: string) => void) {
+function useClubErrorHandling(error: unknown, setLocation: (path: string) => void) {
   if (!error) return null;
-  
-  const isAuthError = error.message?.includes("Сессия истекла") ||
-    error.message?.includes("войдите") ||
-    error.message?.includes("401") ||
-    error.message?.includes("Authentication");
+
+  const errorMessage = error instanceof Error ? error.message : String(error);
+  const isAuthError = errorMessage.includes("Сессия истекла") ||
+    errorMessage.includes("войдите") ||
+    errorMessage.includes("401") ||
+    errorMessage.includes("Authentication");
   
   if (isAuthError) return <ClubAuthRequired />;
   
-  const isPrivateClubError = error.message?.includes("закрытый клуб") ||
-    error.message?.includes("PRIVATE_CLUB_ACCESS_DENIED") ||
-    error.message?.includes("приглашение");
+  const isPrivateClubError = errorMessage.includes("закрытый клуб") ||
+    errorMessage.includes("PRIVATE_CLUB_ACCESS_DENIED") ||
+    errorMessage.includes("приглашение");
   
   if (isPrivateClubError) {
     return (
@@ -185,13 +192,13 @@ function useClubErrorHandling(error: any, setLocation: (path: string) => void) {
     <MainLayout>
       <div className="container py-12 px-6 md:px-12 text-center">
         <p className="text-red-600 mb-2">Ошибка загрузки клуба</p>
-        <p className="text-sm text-muted-foreground">{error.message}</p>
+        <p className="text-sm text-muted-foreground">{errorMessage}</p>
       </div>
     </MainLayout>
   );
 }
 
-function useClubPermissions(members: any[], user: any) {
+function useClubPermissions(members: ClubMemberWithUser[], user: User | null) {
   const currentUserMember = members.find((m) => m.id === user?.id);
   const isOwner = currentUserMember?.role === "owner";
   const isModerator = currentUserMember?.role === "moderator";
@@ -207,16 +214,35 @@ function useClubPermissions(members: any[], user: any) {
   return { isOwner, isModerator, isMember, canRemove, currentUserMember };
 }
 
-function useClubActions({ clubId, club, user, isOwner, toast, setLocation, removeMemberMutation, deleteBookMutation }: any) {
+function useClubActions({
+  clubId,
+  club,
+  user,
+  isOwner,
+  toast,
+  setLocation,
+  removeMemberMutation,
+  deleteBookMutation,
+}: {
+  clubId: string;
+  club: ClubWithDetails;
+  user: User | null;
+  isOwner: boolean;
+  toast: ToastFn;
+  setLocation: (path: string) => void;
+  removeMemberMutation: RemoveMemberMutation;
+  deleteBookMutation: DeleteBookMutation;
+}) {
   const handleRemoveMember = async (memberId: string, memberName: string) => {
     if (!confirm(`Удалить участника «${memberName}» из клуба?`)) return;
     try {
       await removeMemberMutation.mutateAsync({ clubId, userId: memberId });
       toast({ title: "Участник удалён", description: `${memberName} больше не состоит в клубе.` });
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : "Не удалось удалить участника";
       toast({
         title: "Ошибка удаления",
-        description: error.message || "Не удалось удалить участника",
+        description: errorMessage,
         variant: "destructive",
       });
     }
@@ -233,10 +259,11 @@ function useClubActions({ clubId, club, user, isOwner, toast, setLocation, remov
         description: "Книга успешно удалена из клуба",
       });
       globalThis.location.reload();
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : "Не удалось удалить книгу";
       toast({
         title: "Ошибка удаления",
-        description: error.message || "Не удалось удалить книгу",
+        description: errorMessage,
         variant: "destructive",
       });
     }
@@ -260,10 +287,11 @@ function useClubActions({ clubId, club, user, isOwner, toast, setLocation, remov
         description: "До новых встреч!",
       });
       setLocation("/clubs");
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : "Не удалось выйти из клуба";
       toast({
         title: "Ошибка",
-        description: error.message || "Не удалось выйти из клуба",
+        description: errorMessage,
         variant: "destructive",
       });
     }
@@ -299,10 +327,11 @@ function useClubActions({ clubId, club, user, isOwner, toast, setLocation, remov
         title: "Чат очищен",
         description: `Удалено сообщений: ${data.deletedCount ?? 0}`,
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : "Не удалось очистить чат";
       toast({
         title: "Ошибка очистки чата",
-        description: error.message || "Не удалось очистить чат",
+        description: errorMessage,
         variant: "destructive",
       });
     }
@@ -313,11 +342,11 @@ function useClubActions({ clubId, club, user, isOwner, toast, setLocation, remov
 
 // Component: Club Header
 interface ClubHeaderProps {
-  readonly club: any;
-  readonly members: any[];
+  readonly club: ClubWithOptionalBook;
+  readonly members: ClubMemberWithUser[];
   readonly isOwner: boolean;
   readonly isMember: boolean;
-  readonly removeMemberMutation: any;
+  readonly removeMemberMutation: RemoveMemberMutation;
   readonly handleLeaveClub: () => void;
   readonly setLocation: (path: string) => void;
 }
@@ -419,12 +448,12 @@ function ClubHeader({ club, members, isOwner, isMember, removeMemberMutation, ha
 
 // Component: Current Book Card
 interface CurrentBookCardProps {
-  readonly club: any;
+  readonly club: ClubWithOptionalBook;
   readonly clubId: string;
   readonly isOwner: boolean;
   readonly isMember: boolean;
   readonly handleDeleteBook: () => void;
-  readonly deleteBookMutation: any;
+  readonly deleteBookMutation: DeleteBookMutation;
   readonly setLocation: (path: string) => void;
 }
 
@@ -545,7 +574,7 @@ function CurrentBookCard({ club, clubId, isOwner, isMember, handleDeleteBook, de
 interface MembersListCardProps {
   readonly clubId: string;
   readonly clubTitle: string;
-  readonly members: any[];
+  readonly members: ClubMemberWithUser[];
   readonly membersLoading: boolean;
   readonly isOwner: boolean;
   readonly isModerator: boolean;
@@ -818,7 +847,7 @@ export default function ClubDetails() {
 
   // Диагностический лог только для режима разработки
   if (import.meta.env.DEV) {
-    console.log("[ClubDetails] Загружены настройки клуба:", {
+    console.warn("[ClubDetails] Загружены настройки клуба:", {
       rawSettings: club.settings,
       parsedSettings: settings,
       welcomeHtml: settings.welcomeHtml?.substring(0, 50),
@@ -900,4 +929,3 @@ export default function ClubDetails() {
     </MainLayout>
   );
 }
-

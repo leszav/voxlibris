@@ -30,14 +30,6 @@ interface UserProfile {
   updatedAt: string;
 }
 
-interface Book {
-  id: string;
-  title: string;
-  author: string;
-  cover?: string;
-  format: string;
-}
-
 export default function ProfilePage() {
   const { id } = useParams();
   const { toast } = useToast();
@@ -54,17 +46,7 @@ export default function ProfilePage() {
   const queryClient = useQueryClient();
 
   const updateProfileMutation = useMutation({
-    mutationFn: async (data: any) => {
-      if (import.meta.env.DEV) {
-        console.log("[ProfilePage] Отправляем данные профиля:", {
-          hasAvatar: !!data.avatar,
-          avatarLength: data.avatar?.length,
-          hasCoverImage: !!data.coverImage,
-          coverImageLength: data.coverImage?.length,
-          ...data,
-        });
-      }
-
+    mutationFn: async (data: Partial<UserProfile>) => {
       const endpoint =
         profileId === "current" ? "/api/users/current/profile" : `/api/users/${profileId}/profile`;
       const token = getAccessToken();
@@ -79,18 +61,10 @@ export default function ProfilePage() {
       });
 
       if (!response.ok) {
-        const error = await response.json();
-        if (import.meta.env.DEV) {
-          console.error("[ProfilePage] Ошибка сохранения:", error);
-        }
         throw new Error("Failed to update profile");
       }
 
-      const result = await response.json();
-      if (import.meta.env.DEV) {
-        console.log("[ProfilePage] Профиль обновлен:", result);
-      }
-      return result;
+      return response.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["user-profile", profileId] });
@@ -123,23 +97,8 @@ export default function ProfilePage() {
       });
       if (!response.ok) throw new Error("Failed to load profile");
       const data = await response.json();
-      if (import.meta.env.DEV) {
-        console.log("[ProfilePage] Загружен профиль:", {
-          hasAvatar: !!data.profile?.avatar,
-          hasCoverImage: !!data.profile?.coverImage,
-          coverImageLength: data.profile?.coverImage?.length,
-          profile: data.profile,
-        });
-      }
+      // debug logs removed
       return data.profile;
-    },
-  });
-
-  const { data: currentBooks = [] } = useQuery<Book[]>({
-    queryKey: ["user-current-books", profileId],
-    queryFn: async () => {
-      // Временная заглушка - будет реализовано позже
-      return [];
     },
   });
 
@@ -193,14 +152,6 @@ export default function ProfilePage() {
     : [];
   const currentUserId = getUserFromToken(getAccessToken() || '')?.userId || null;
   const isOwnProfile = !id || currentUserId === id || profileId === "current";
-
-  if (import.meta.env.DEV) {
-    console.log("[ProfilePage Render] Профиль:", {
-      hasCoverImage: !!profile.coverImage,
-      coverImagePreview: profile.coverImage?.substring(0, 50),
-      hasAvatar: !!profile.avatar,
-    });
-  }
 
   return (
     <MainLayout>

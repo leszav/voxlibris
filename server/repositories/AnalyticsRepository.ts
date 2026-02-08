@@ -17,14 +17,10 @@ export class AnalyticsRepository extends BaseRepository {
    */
   async logBookAccess(log: InsertBookAccessLog & { userId: string }): Promise<BookAccessLog> {
     try {
+      const insertData = log as typeof bookAccessLogs.$inferInsert;
       const result = await this.db
         .insert(bookAccessLogs)
-        .values({
-          ...log,
-          userId: log.userId,
-          bookType: log.bookType as any,
-          action: log.action as any,
-        })
+        .values(insertData)
         .returning();
 
       return result[0];

@@ -86,9 +86,10 @@ export class UserRepository extends BaseRepository {
     this.validateRequired(insertUser.password, 'password');
     
     try {
+      const insertData = insertUser as typeof users.$inferInsert;
       const result = await this.db
         .insert(users)
-        .values(insertUser)
+        .values(insertData)
         .returning();
       
       const newUser = this.getFirstResult(result);
@@ -557,11 +558,12 @@ export class UserRepository extends BaseRepository {
       });
 
       return { success: true };
-    } catch (error: any) {
+    } catch (error: unknown) {
       const { clubs, clubMembers } = await import('../../shared/schema.js');
       const { count, ne } = await import('drizzle-orm');
+      const errorMessage = error instanceof Error ? error.message : String(error);
       
-      if (error.message === 'CLUBS_WITH_MEMBERS') {
+      if (errorMessage === 'CLUBS_WITH_MEMBERS') {
         // Получаем информацию о клубах с участниками
         const ownedClubs = await this.db
           .select({
@@ -598,7 +600,7 @@ export class UserRepository extends BaseRepository {
       }
       
       this.logError('permanentDeleteUser', error);
-      return { success: false, error: error.message };
+      return { success: false, error: errorMessage };
     }
   }
 

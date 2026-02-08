@@ -10,8 +10,10 @@ import {
   clubMembers,
   chatMessages,
   type ChatMessage,
+  type ChatUser,
   type ChatMessageWithUser,
 } from "../shared/schema.js";
+import { logger } from "./lib/logger.js";
 
 interface AuthenticatedSocket extends Socket {
   userId: string;
@@ -28,7 +30,7 @@ interface ChatMessagePayload {
   channel?: string;
   text: string;
   mentions?: string[]; // user ids
-  attachments?: any[]; // arbitrary attachment descriptors
+  attachments?: Array<Record<string, unknown>>; // arbitrary attachment descriptors
 }
 
 interface LoadHistoryPayload {
@@ -43,8 +45,10 @@ const MAX_MESSAGES_PER_CLUB = 1000;
 
 async function authenticateSocket(socket: Socket, next: (err?: Error) => void) {
   try {
+    const auth = socket.handshake.auth as Record<string, unknown> | undefined;
+    const authToken = typeof auth?.token === "string" ? auth.token : undefined;
     const token =
-      (socket.handshake.auth && (socket.handshake.auth as any).token) ||
+      authToken ||
       socket.handshake.headers.authorization?.replace("Bearer ", "") ||
       socket.handshake.headers.cookie?.match(/accessToken=([^;]+)/)?.[1];
 
@@ -86,10 +90,11 @@ async function authenticateSocket(socket: Socket, next: (err?: Error) => void) {
     (socket as AuthenticatedSocket).userId = decoded.userId;
     (socket as AuthenticatedSocket).username = decoded.username;
 
-    console.log(`[WS Chat] User ${decoded.username} (${decoded.userId}) authenticated successfully`);
+    logger.info(`[WS Chat] User ${decoded.username} (${decoded.userId}) authenticated successfully`);
     next();
   } catch (error) {
-    console.error("[WS Chat] Authentication error:", error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error({ error: errorMessage }, "[WS Chat] Authentication error");
     
     if (error instanceof jwt.TokenExpiredError) {
       return next(new Error("Token expired - please re-authenticate"));
@@ -118,7 +123,8 @@ async function verifyClubAccess(userId: string, clubId: string): Promise<boolean
 
     return !!membership;
   } catch (error) {
-    console.error("[WS Chat] verifyClubAccess error:", error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error({ error: errorMessage }, "[WS Chat] verifyClubAccess error");
     return false;
   }
 }
@@ -173,7 +179,7 @@ export function initializeChatWebSocket(httpServer: HttpServer) {
 
   io.on("connection", (socket: Socket) => {
     const authSocket = socket as AuthenticatedSocket;
-    console.log(`[WS Chat] User ${authSocket.username} (${authSocket.userId}) connected`);
+    logger.info(`[WS Chat] User ${authSocket.username} (${authSocket.userId}) connected`);
 
     socket.on("join_room", async (payload: JoinRoomPayload) => {
       try {
@@ -193,7 +199,7 @@ export function initializeChatWebSocket(httpServer: HttpServer) {
         await socket.join(room);
         addParticipant(room, authSocket.userId, authSocket.username);
 
-        console.log(`[WS Chat] ${authSocket.username} joined room ${room}`);
+        logger.info(`[WS Chat] ${authSocket.username} joined room ${room}`);
 
         io.to(room).emit("participants", {
           room,
@@ -204,7 +210,8 @@ export function initializeChatWebSocket(httpServer: HttpServer) {
 
         socket.emit("joined_room", { room, clubId, channel: channel || DEFAULT_CHANNEL });
       } catch (error) {
-        console.error("[WS Chat] join_room error:", error);
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        logger.error({ error: errorMessage }, "[WS Chat] join_room error");
         socket.emit("error", { message: "Failed to join room" });
       }
     });
@@ -257,7 +264,8 @@ export function initializeChatWebSocket(httpServer: HttpServer) {
             await db.delete(chatMessages).where(inArray(chatMessages.id, oldIds));
           }
         } catch (cleanupError) {
-          console.error("[WS Chat] history cleanup error:", cleanupError);
+          const errorMessage = cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
+          logger.error({ error: errorMessage }, "[WS Chat] history cleanup error");
         }
 
         // Получаем displayName из профиля пользователя
@@ -273,7 +281,7 @@ export function initializeChatWebSocket(httpServer: HttpServer) {
             id: authSocket.userId,
             username: authSocket.username,
             displayName: userProfile[0]?.displayName || null,
-          } as any,
+          } as ChatUser,
         };
 
         io.to(room).emit("chat_message", {
@@ -291,7 +299,8 @@ export function initializeChatWebSocket(httpServer: HttpServer) {
           message: messageWithUser,
         });
       } catch (error) {
-        console.error("[WS Chat] chat_message error:", error);
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        logger.error({ error: errorMessage }, "[WS Chat] chat_message error");
         socket.emit("error", { message: "Failed to send message" });
       }
     });
@@ -354,12 +363,14 @@ export function initializeChatWebSocket(httpServer: HttpServer) {
           username: string;
           displayName: string | null;
         }) => ({
-          ...(row as any as ChatMessage),
+          ...((
+            ({ username: _username, displayName: _displayName, ...rest }) => rest
+          )(row) as ChatMessage),
           user: { 
             id: row.userId,
             username: row.username,
             displayName: row.displayName,
-          } as any,
+          } as ChatUser,
         }));
 
         socket.emit("history", {
@@ -371,7 +382,8 @@ export function initializeChatWebSocket(httpServer: HttpServer) {
           messages,
         });
       } catch (error) {
-        console.error("[WS Chat] load_history error:", error);
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        logger.error({ error: errorMessage }, "[WS Chat] load_history error");
         socket.emit("error", { message: "Failed to load history" });
       }
     });
@@ -455,7 +467,8 @@ export function initializeChatWebSocket(httpServer: HttpServer) {
             messageId,
           });
         } catch (error) {
-          console.error("[WS Chat] delete_message error:", error);
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          logger.error({ error: errorMessage }, "[WS Chat] delete_message error");
           socket.emit("error", { message: "Failed to delete message" });
         }
       },
@@ -475,11 +488,11 @@ export function initializeChatWebSocket(httpServer: HttpServer) {
         participants: getParticipants(room),
       });
 
-      console.log(`[WS Chat] ${authSocket.username} left room ${room}`);
+      logger.info(`[WS Chat] ${authSocket.username} left room ${room}`);
     });
 
     socket.on("disconnect", () => {
-      console.log(`[WS Chat] User ${authSocket.username} (${authSocket.userId}) disconnected`);
+      logger.info(`[WS Chat] User ${authSocket.username} (${authSocket.userId}) disconnected`);
       // Очистка участника из всех комнат
       for (const [room, participants] of roomParticipants.entries()) {
         if (participants.has(authSocket.userId)) {
@@ -493,6 +506,6 @@ export function initializeChatWebSocket(httpServer: HttpServer) {
     });
   });
 
-  console.log("[WS Chat] WebSocket server initialized at /ws/chat");
+  logger.info("[WS Chat] WebSocket server initialized at /ws/chat");
   return io;
 }

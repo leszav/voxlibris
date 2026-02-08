@@ -14,7 +14,7 @@ interface ChatState {
   loadingHistory: boolean;
   error: Error | null;
   messages: ChatMessageWithUser[];
-  participants: Array<{ userId: string; username: string }>;
+  participants: ChatMessageWithUser["user"][];
 }
 
 export function useChat(options: UseChatOptions) {
@@ -160,14 +160,21 @@ export function useChat(options: UseChatOptions) {
       // nothing special for now, onConnect уже запросил историю
     };
 
-    const handleParticipants = (payload: any) => {
-      if (payload?.clubId !== clubId) return;
-      setState((prev) => ({ ...prev, participants: payload.participants || [] }));
+    type ChatParticipantsPayload = { clubId?: string; participants?: ChatMessageWithUser["user"][] };
+    type ChatHistoryPayload = { clubId?: string; messages?: ChatMessageWithUser[] };
+    type ChatMessagePayload = { clubId?: string; message?: ChatMessageWithUser };
+    type ChatMessageDeletedPayload = { clubId?: string; messageId?: string };
+
+    const handleParticipants = (payload: unknown) => {
+      const data = payload as ChatParticipantsPayload;
+      if (data?.clubId !== clubId) return;
+      setState((prev) => ({ ...prev, participants: data.participants || [] }));
     };
 
-    const handleHistory = (payload: any) => {
-      if (payload?.clubId !== clubId) return;
-      const messages = Array.isArray(payload.messages) ? payload.messages : [];
+    const handleHistory = (payload: unknown) => {
+      const data = payload as ChatHistoryPayload;
+      if (data?.clubId !== clubId) return;
+      const messages = Array.isArray(data.messages) ? data.messages : [];
       setState((prev) => ({
         ...prev,
         loadingHistory: false,
@@ -175,21 +182,23 @@ export function useChat(options: UseChatOptions) {
       }));
     };
 
-    const handleChatMessage = (payload: any) => {
-      if (payload?.clubId !== clubId) return;
-      const message: ChatMessageWithUser | undefined = payload.message;
+    const handleChatMessage = (payload: unknown) => {
+      const data = payload as ChatMessagePayload;
+      if (data?.clubId !== clubId) return;
+      const message: ChatMessageWithUser | undefined = data.message;
       if (!message) return;
       setState((prev) => ({ ...prev, messages: [...prev.messages, message] }));
     };
 
-    const handleMessageDeleted = (payload: any) => {
-      if (payload?.clubId !== clubId) return;
-      const messageId: string | undefined = payload.messageId;
+    const handleMessageDeleted = (payload: unknown) => {
+      const data = payload as ChatMessageDeletedPayload;
+      if (data?.clubId !== clubId) return;
+      const messageId: string | undefined = data.messageId;
       if (!messageId) return;
       setState((prev) => ({
         ...prev,
         messages: prev.messages.map((m) =>
-          m.id === messageId ? { ...m, text: "[deleted]", deletedAt: new Date() as any } : m,
+          m.id === messageId ? { ...m, text: "[deleted]", deletedAt: new Date() } : m,
         ),
       }));
     };

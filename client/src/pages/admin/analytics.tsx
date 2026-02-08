@@ -94,15 +94,6 @@ export default function AdminAnalyticsPage() {
   }
 
   // Форматируем данные для графиков
-  const eventTypeColors: Record<string, string> = {
-    book_open: '#8884d8',
-    chapter_start: '#82ca9d',
-    chapter_complete: '#ffc658',
-    reading_session: '#ff7c7c',
-    bookmark_create: '#a78bfa',
-    note_create: '#fb923c',
-  };
-
   const eventTypeLabels: Record<string, string> = {
     book_open: 'Открытие книги',
     chapter_start: 'Начало главы',

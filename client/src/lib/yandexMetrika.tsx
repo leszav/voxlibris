@@ -2,8 +2,8 @@ import { useEffect, useRef } from "react";
 import { useLocation } from "wouter";
 
 // Тип функции Яндекс.Метрики
-export type YandexMetrikaFunction = ((...args: any[]) => void) & {
-  a?: any[];
+export type YandexMetrikaFunction = ((...args: unknown[]) => void) & {
+  a?: unknown[][];
   l?: number;
 };
 
@@ -19,28 +19,28 @@ declare global {
  * Загружает tag.js и вызывает ym('init', ...). Вызывается лениво и только один раз.
  */
 function ensureYandexMetrikaInitialized() {
-  const g = globalThis as any;
-  const win = g.window as Window | undefined;
-  const doc = g.document as Document | undefined;
+  const globalWithYM = globalThis as typeof globalThis & { __ymInitialized?: boolean };
+  const win = typeof window !== "undefined" ? window : undefined;
+  const doc = typeof document !== "undefined" ? document : undefined;
 
   if (!win || !doc) {
     return;
   }
 
   // Защита от повторной инициализации
-  if (g.__ymInitialized) {
+  if (globalWithYM.__ymInitialized) {
     return;
   }
-  g.__ymInitialized = true;
+  globalWithYM.__ymInitialized = true;
 
   // Очередь вызовов до загрузки tag.js (аналог официального сниппета)
-  const ym: YandexMetrikaFunction = (...args: any[]) => {
+  const ym: YandexMetrikaFunction = (...args: unknown[]) => {
     ym.a ??= [];
     ym.a.push(args);
   };
   ym.l = Date.now();
 
-  (win as any).ym = ym;
+  win.ym = ym;
 
   const script = doc.createElement("script");
   script.async = true;
@@ -48,7 +48,7 @@ function ensureYandexMetrikaInitialized() {
   doc.head?.appendChild(script);
 
   // Инициализация счётчика с настройками для SPA
-  (win as any).ym(106167747, "init", {
+  win.ym?.(106167747, "init", {
     defer: true,
     clickmap: true,
     trackLinks: true,
@@ -68,8 +68,7 @@ export function YandexMetrikaTracker() {
   useEffect(() => {
     ensureYandexMetrikaInitialized();
 
-    const g = globalThis as any;
-    const win = g.window as (Window & { ym?: (...args: any[]) => void }) | undefined;
+    const win = typeof window !== "undefined" ? window : undefined;
     if (!win || !win.ym) {
       return;
     }
@@ -78,11 +77,11 @@ export function YandexMetrikaTracker() {
       win.location.pathname + win.location.search + win.location.hash;
     const referrer = prevPathRef.current
       ? prevPathRef.current
-      : g.document?.referrer || undefined;
+      : document?.referrer || undefined;
 
     win.ym(106167747, "hit", currentUrl, {
       referer: referrer,
-      title: g.document?.title,
+      title: document?.title,
     });
 
     prevPathRef.current = currentUrl;

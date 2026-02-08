@@ -40,8 +40,10 @@ export function ClubProgressIndicator({ clubId, bookId }: ClubProgressIndicatorP
     if (!on) return;
 
     // Подписываемся на обновления прогресса участников
-    const unsubscribe = on("member_progress", (data: MemberProgress) => {
-      setMembers((prev) => updateMemberProgress(prev, data));
+    const unsubscribe = on("member_progress", (data) => {
+      const payload = data as MemberProgress;
+      if (!payload?.userId) return;
+      setMembers((prev) => updateMemberProgress(prev, payload));
     });
 
     return unsubscribe;

@@ -1,6 +1,7 @@
 import type { Request, Response, NextFunction } from "express";
 import { authService } from "./auth-service.js";
 import type { JWTPayload } from "./auth-service";
+import { logger } from "./lib/logger.js";
 
 // Расширяем JWTPayload для включения id
 export interface ExtendedJWTPayload extends JWTPayload {
@@ -29,13 +30,13 @@ export function jwtAuth(req: Request, res: Response, next: NextFunction) {
     // Если нет в header, проверяем cookies
     if (!token && req.cookies?.accessToken) {
       token = req.cookies.accessToken;
-      console.log('[jwtAuth] Token found in cookies');
+      logger.debug('[jwtAuth] Token found in cookies');
     } else if (token) {
-      console.log('[jwtAuth] Token found in Authorization header');
+      logger.debug('[jwtAuth] Token found in Authorization header');
     }
 
     if (!token) {
-      console.log('[jwtAuth] No token found in header or cookies');
+      logger.debug('[jwtAuth] No token found in header or cookies');
       return res.status(401).json({
         message: "Требуется аутентификация",
         code: "NO_TOKEN"

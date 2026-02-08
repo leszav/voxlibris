@@ -10,6 +10,7 @@ import {
   type ClubBook,
   type InsertClubBook
 } from '../../shared/schema.js';
+import { logger } from '../lib/logger.js';
 
 /**
  * Репозиторий для книг клубов
@@ -22,14 +23,14 @@ export class ClubBooksRepository extends BaseRepository {
    */
   async createClubBook(book: InsertClubBook & { uploadedByUserId: string }): Promise<ClubBook> {
     try {
+      const insertData: typeof clubBooks.$inferInsert = {
+        ...(book as typeof clubBooks.$inferInsert),
+        uploadedByUserId: book.uploadedByUserId,
+        isDeleted: false,
+      };
       const result = await this.db
         .insert(clubBooks)
-        .values({
-          ...book,
-          format: book.format as any,
-          uploadedByUserId: book.uploadedByUserId,
-          isDeleted: false,
-        })
+        .values(insertData)
         .returning();
 
       return result[0];
@@ -62,8 +63,8 @@ export class ClubBooksRepository extends BaseRepository {
    */
   async getClubBooksByClub(clubId: string): Promise<ClubBook[]> {
     try {
-      console.log('[ClubBooksRepository] Getting club books for club:', clubId);
-      
+      logger.info({ clubId }, '[ClubBooksRepository] Getting club books for club');
+
       const result = await this.db
         .select()
         .from(clubBooks)
@@ -102,13 +103,13 @@ export class ClubBooksRepository extends BaseRepository {
    */
   async updateClubBook(id: string, updates: Partial<InsertClubBook>): Promise<ClubBook | undefined> {
     try {
+      const updateData: Partial<typeof clubBooks.$inferInsert> = {
+        ...(updates as Partial<typeof clubBooks.$inferInsert>),
+        updatedAt: new Date(),
+      };
       const result = await this.db
         .update(clubBooks)
-        .set({
-          ...updates,
-          format: updates.format as "FB2" | "EPUB" | undefined,
-          updatedAt: new Date()
-        })
+        .set(updateData)
         .where(eq(clubBooks.id, id))
         .returning();
 
@@ -155,8 +156,9 @@ export class ClubBooksRepository extends BaseRepository {
         await tx
           .delete(bookAccessLogs)
           .where(and(eq(bookAccessLogs.bookId, id), eq(bookAccessLogs.bookType, "CLUB")))
-          .catch((error: any) => {
-            if (error?.code === "42P01") return;
+          .catch((error: unknown) => {
+            const pgError = error as { code?: string };
+            if (pgError?.code === "42P01") return;
             throw error;
           });
 
@@ -207,10 +209,11 @@ export class ClubBooksRepository extends BaseRepository {
           await tx
             .delete(clubBookmarks)
             .where(eq(clubBookmarks.clubBookId, id));
-        } catch (error: any) {
+        } catch (error: unknown) {
           // Игнорируем ошибку "таблица не существует" (код 42P01)
-          if (error?.code !== "42P01") {
-            console.error('Error deleting club_bookmarks:', error);
+          const pgError = error as { code?: string; message?: string };
+          if (pgError?.code !== "42P01") {
+            logger.error({ error: pgError?.message ?? error }, 'Error deleting club_bookmarks');
             throw error;
           }
         }
@@ -229,9 +232,10 @@ export class ClubBooksRepository extends BaseRepository {
         await tx
           .delete(bookAccessLogs)
           .where(and(eq(bookAccessLogs.bookId, id), eq(bookAccessLogs.bookType, "CLUB")))
-          .catch((error: any) => {
+          .catch((error: unknown) => {
             // Игнорируем ошибку "таблица не существует"
-            if (error?.code === "42P01") return;
+            const pgError = error as { code?: string };
+            if (pgError?.code === "42P01") return;
             throw error;
           });
 
@@ -240,9 +244,10 @@ export class ClubBooksRepository extends BaseRepository {
           await tx
             .delete(analyticsEvents)
             .where(eq(analyticsEvents.bookId, id));
-        } catch (error: any) {
+        } catch (error: unknown) {
           // Игнорируем любые ошибки FK для analyticsEvents
-          console.warn('Could not delete analytics events for book:', error?.message);
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          logger.warn({ error: errorMessage }, 'Could not delete analytics events for book');
         }
 
         // Наконец, удаляем саму книгу (каскадное удаление сработает для связанных таблиц с ON DELETE CASCADE)

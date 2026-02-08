@@ -1,6 +1,27 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { apiRequest } from "@/lib/queryClient";
+import type { ClubBookmark } from "@shared/schema";
+
+interface ClubBookContentResponse {
+  title: string;
+  content?: string;
+  chapters?: { chapterNumber: number; title?: string }[];
+  totalChapters?: number;
+  chapter?: number;
+}
+
+interface ReadingProgress {
+  currentChapter: number;
+  currentPosition: string;
+  progress: number;
+}
+
+interface ClubReadingProgressResponse {
+  success?: boolean;
+  userProgress?: ReadingProgress;
+  clubProgress?: ReadingProgress;
+}
 
 // Получение контента клубной книги
 export function useClubBookContent(
@@ -16,14 +37,14 @@ export function useClubBookContent(
         ? `/api/clubs/${clubId}/books/${clubBookId}/content?chapter=${chapter}`
         : `/api/clubs/${clubId}/books/${clubBookId}/content`;
 
-      const response = await apiRequest(url);
+      const response = await apiRequest<ClubBookContentResponse>(url);
 
       return {
-        title: (response as any).title,
-        content: (response as any).content,
-        chapters: (response as any).chapters,
-        totalChapters: (response as any).totalChapters || 0,
-        chapter: (response as any).chapter,
+        title: response.title,
+        content: response.content,
+        chapters: response.chapters,
+        totalChapters: response.totalChapters || 0,
+        chapter: response.chapter,
       };
     },
     enabled: !!clubId && !!clubBookId && enabled,
@@ -36,15 +57,15 @@ export function useClubReadingProgress(clubId: string, clubBookId: string) {
   return useQuery({
     queryKey: ["club", clubId, "reading-progress", clubBookId],
     queryFn: async () => {
-      const response = await apiRequest(`/api/clubs/${clubId}/progress`);
+      const response = await apiRequest<ClubReadingProgressResponse>(`/api/clubs/${clubId}/progress`);
 
-      if ((response as any).success === false) {
+      if (response.success === false) {
         throw new Error("Failed to get progress");
       }
 
       return {
-        userProgress: (response as any).userProgress,
-        clubProgress: (response as any).clubProgress,
+        userProgress: response.userProgress,
+        clubProgress: response.clubProgress,
       };
     },
     enabled: !!clubId && !!clubBookId,
@@ -86,8 +107,8 @@ export function useClubBookmarks(clubId: string) {
   const query = useQuery({
     queryKey: ["club", clubId, "bookmarks"],
     queryFn: async () => {
-      const response = await apiRequest(`/api/clubs/${clubId}/bookmarks`);
-      return (response as any).bookmarks;
+      const response = await apiRequest<{ bookmarks: ClubBookmark[] }>(`/api/clubs/${clubId}/bookmarks`);
+      return response.bookmarks;
     },
     enabled: !!clubId,
   });

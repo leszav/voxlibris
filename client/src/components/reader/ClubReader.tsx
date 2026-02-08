@@ -20,14 +20,6 @@ interface ChapterData {
   content?: string;
 }
 
-interface BookData {
-  title: string;
-  chapters?: ChapterData[];
-  totalChapters?: number;
-  content?: string;
-  isPersonalBook?: boolean;
-}
-
 interface ClubReaderProps {
   clubId?: string;
   bookId?: string;
@@ -168,17 +160,34 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
     if (content?.content && currentChapter != null) {
       return content.content;
     }
-    if (bookData.chapters && currentChapter != null) {
-      const chapter = bookData.chapters.find((ch: ChapterData) => ch.chapterNumber === currentChapter);
-      return chapter?.content || "";
-    }
     return bookData.content || "";
-  }, [content, bookData.chapters, currentChapter, bookData.content]);
+  }, [content, currentChapter, bookData.content]);
 
   // Получение списка глав
   const chapters = useMemo(() => {
     return bookData.chapters || [];
   }, [bookData]);
+
+  const normalizedBookmarks = useMemo<BookmarkType[]>(() => {
+    return bookmarks.map((bookmark) => {
+      const chapterNumber = bookmark.chapter ? Number.parseInt(bookmark.chapter, 10) : null;
+      const safeChapter = Number.isFinite(chapterNumber) ? chapterNumber : null;
+      const scrollTop = typeof bookmark.position === "number" ? bookmark.position : 0;
+      const position = JSON.stringify({
+        scrollTop,
+        chapter: safeChapter ?? undefined,
+      });
+      return {
+        id: bookmark.id,
+        userId: bookmark.createdBy,
+        bookId,
+        chapterNumber: safeChapter,
+        position,
+        title: bookmark.title,
+        createdAt: bookmark.createdAt,
+      };
+    });
+  }, [bookmarks, bookId]);
 
   // Смена главы с сохранением текущей позиции
   const changeChapter = (newChapter: number) => {
@@ -590,7 +599,7 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
               ) : (
                 <BookmarksPanel
                   bookId={bookId}
-                  bookmarks={bookmarks}
+                  bookmarks={normalizedBookmarks}
                   onNavigateToBookmark={(bookmark) => {
                     navigateToBookmark(bookmark);
                     setBookmarksOpen(false);

@@ -13,6 +13,7 @@ import {
   CheckCircle,
   BarChart3
 } from "lucide-react";
+import type { ComponentType } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 
@@ -54,7 +55,7 @@ function StatCard({
   title: string;
   value: string | number;
   change?: string;
-  icon: any;
+  icon: ComponentType<{ className?: string }>;
   color?: string;
 }>) {
   const getColorClasses = (color: string): string => {

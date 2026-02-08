@@ -54,7 +54,7 @@ export class SystemRepository extends BaseRepository {
   /**
    * Обновление системной настройки
    */
-  async updateSystemSetting(key: string, value: any, updatedBy: string): Promise<boolean> {
+  async updateSystemSetting(key: string, value: unknown, updatedBy: string): Promise<boolean> {
     try {
       // Получаем текущую настройку для определения типа
       const currentSetting = await this.getSystemSetting(key);

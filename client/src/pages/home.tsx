@@ -9,9 +9,6 @@ import { Link } from "wouter";
 import { useCatalogClubs } from "@/hooks/use-clubs";
 // Import generated assets using aliases
 import heroImage from "@assets/generated_images/cozy_library_atmosphere_with_warm_lighting.png";
-import classicCover from "@assets/generated_images/classic_novel_book_cover_design.png";
-import modernCover from "@assets/generated_images/modern_fiction_book_cover_design.png";
-import mysteryCover from "@assets/generated_images/mystery_thriller_book_cover_design.png";
 
 
 export default function Home() {

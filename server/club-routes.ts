@@ -4,6 +4,7 @@ import { storage } from './repositories/index.js';
 import type { InsertClub, ClubMemberRole, InsertClubInvitation, Club, UserRole } from '../shared/schema.js';
 import { emailService } from './services/email-service.js';
 import crypto from 'node:crypto';
+import { logger } from './lib/logger.js';
 
 const router = express.Router();
 
@@ -105,7 +106,7 @@ router.post('/', jwtAuth, requireActiveUser, async (req, res) => {
     // Автоматически добавляем создателя как владельца
     await storage.joinClub(club.id, req.user.userId, 'owner');
 
-    console.log(`[Clubs] Club "${club.title}" created by user ${req.user.username}`);
+    logger.info(`[Clubs] Club "${club.title}" created by user ${req.user.username}`);
 
     res.status(201).json(club);
   } catch (error) {
@@ -210,7 +211,7 @@ router.put('/:id', jwtAuth, async (req, res) => {
       settings: req.body.settings,
     };
 
-    console.log('[Clubs] Update request body settings:', req.body.settings?.substring(0, 200));
+    logger.info('[Clubs] Update request body settings: %s', req.body.settings?.substring(0, 200));
 
     // Удаляем undefined значения
     Object.keys(updates).forEach(key => 
@@ -223,8 +224,8 @@ router.put('/:id', jwtAuth, async (req, res) => {
       return res.status(500).json({ message: 'Ошибка при обновлении клуба' });
     }
 
-    console.log(`[Clubs] Club "${club.title}" updated by user ${req.user.username}`);
-    console.log('[Clubs] Updated club settings:', updatedClub.settings?.substring(0, 200));
+    logger.info(`[Clubs] Club "${club.title}" updated by user ${req.user.username}`);
+    logger.info('[Clubs] Updated club settings: %s', updatedClub.settings?.substring(0, 200));
 
     res.json(updatedClub);
   } catch (error) {
@@ -256,7 +257,7 @@ router.delete('/:id', jwtAuth, async (req, res) => {
 
     await storage.deleteClub(club.id);
 
-    console.log(`[Clubs] Club "${club.title}" deleted by user ${req.user.username}`);
+    logger.info(`[Clubs] Club "${club.title}" deleted by user ${req.user.username}`);
 
     res.json({ success: true, message: 'Club deleted successfully' });
   } catch (error) {
@@ -335,7 +336,7 @@ router.put('/:id/members/:userId/role', jwtAuth, async (req, res) => {
 
     const updatedMember = await storage.updateMemberRole(club.id, req.params.userId, newRole);
 
-    console.log(`[Clubs] User ${req.params.userId} role changed to ${newRole} in club "${club.title}"`);
+    logger.info(`[Clubs] User ${req.params.userId} role changed to ${newRole} in club "${club.title}"`);
 
     res.json(updatedMember);
   } catch (error) {
@@ -369,7 +370,7 @@ router.delete('/:id/members/:userId', jwtAuth, async (req, res) => {
     // Пользователь может удалить себя
     if (targetUserId === req.user.userId) {
       await storage.removeMember(club.id, targetUserId);
-      console.log(`[Clubs] User ${req.user.username} left club "${club.title}"`);
+      logger.info(`[Clubs] User ${req.user.username} left club "${club.title}"`);
       return res.json({ success: true, message: 'Successfully left the club' });
     }
 
@@ -391,7 +392,7 @@ router.delete('/:id/members/:userId', jwtAuth, async (req, res) => {
 
     await storage.removeMember(club.id, targetUserId);
 
-    console.log(`[Clubs] User ${targetUserId} removed from club "${club.title}" by ${req.user.username}`);
+    logger.info(`[Clubs] User ${targetUserId} removed from club "${club.title}" by ${req.user.username}`);
 
     res.json({ success: true, message: 'Member removed successfully' });
   } catch (error) {
@@ -475,7 +476,7 @@ router.post('/:id/invite', jwtAuth, async (req, res) => {
       console.warn(`[Clubs] Email invitation not sent to ${email} - SMTP may not be configured`);
     }
 
-    console.log(`[Clubs] Invitation sent to ${email} for club "${club.title}" by ${req.user.username}`);
+    logger.info(`[Clubs] Invitation sent to ${email} for club "${club.title}" by ${req.user.username}`);
 
     res.status(201).json({
       message: emailSent 
@@ -658,7 +659,7 @@ router.post('/invitations/:token/accept', jwtAuth, async (req, res) => {
       });
     }
 
-    console.log(`[Clubs] User ${req.user.username} accepted invitation to club "${club.title}"`);
+    logger.info(`[Clubs] User ${req.user.username} accepted invitation to club "${club.title}"`);
 
     res.json({
       message: 'Successfully joined the club',
@@ -706,7 +707,7 @@ router.post('/invitations/:token/decline', jwtAuth, async (req, res) => {
       return res.status(500).json({ message: 'Failed to decline invitation' });
     }
 
-    console.log(`[Clubs] User declined and deleted invitation token ${tokenPreview}`);
+    logger.info(`[Clubs] User declined and deleted invitation token ${tokenPreview}`);
 
     res.json({ message: 'Invitation declined and removed' });
   } catch (error) {
@@ -743,7 +744,7 @@ router.delete('/:clubId/invitations/:invitationId', jwtAuth, async (req, res) =>
       return res.status(404).json({ message: 'Invitation not found' });
     }
 
-    console.log(`[Clubs] Invitation ${invitationId} revoked by ${req.user.username}`);
+    logger.info(`[Clubs] Invitation ${invitationId} revoked by ${req.user.username}`);
 
     res.json({ message: 'Invitation revoked successfully' });
   } catch (error) {
@@ -765,14 +766,14 @@ router.post('/:clubId/invitations/by-email', jwtAuth, async (req, res) => {
     const { clubId } = req.params;
     const { email } = req.body;
 
-    console.log(`[Clubs] Remove invitations request: clubId=${clubId}, email=${email}`);
+    logger.info(`[Clubs] Remove invitations request: clubId=${clubId}, email=${email}`);
 
     if (!email || typeof email !== 'string') {
       return res.status(400).json({ message: 'Email is required' });
     }
 
     const club = await storage.getClub(clubId);
-    console.log(`[Clubs] Club found:`, !!club);
+    logger.info({ found: Boolean(club) }, '[Clubs] Club found');
     if (!club) {
       return res.status(404).json({ message: 'Club not found' });
     }
@@ -784,7 +785,7 @@ router.post('/:clubId/invitations/by-email', jwtAuth, async (req, res) => {
 
     const deletedCount = await storage.deleteClubInvitationsByEmail(clubId, email.toLowerCase());
 
-    console.log(`[Clubs] Invitations for ${email} removed by ${req.user.username}: ${deletedCount} invitations deleted`);
+    logger.info(`[Clubs] Invitations for ${email} removed by ${req.user.username}: ${deletedCount} invitations deleted`);
 
     res.json({ 
       message: `Invitations removed successfully`,
@@ -807,7 +808,7 @@ router.delete('/:clubId/invitations', jwtAuth, async (req, res) => {
     }
 
     const { clubId } = req.params;
-    console.log(`[Clubs] Clear all invitations request: clubId=${clubId}`);
+    logger.info(`[Clubs] Clear all invitations request: clubId=${clubId}`);
 
     const club = await storage.getClub(clubId);
     if (!club) {
@@ -827,7 +828,7 @@ router.delete('/:clubId/invitations', jwtAuth, async (req, res) => {
       deletedCount++;
     }
 
-    console.log(`[Clubs] All invitations cleared by ${req.user.username}: ${deletedCount} invitations deleted`);
+    logger.info(`[Clubs] All invitations cleared by ${req.user.username}: ${deletedCount} invitations deleted`);
 
     res.json({ 
       message: `All invitations cleared successfully`,
@@ -868,7 +869,7 @@ router.post('/:clubId/invitations/by-email', jwtAuth, async (req, res) => {
 
     const deletedCount = await storage.deleteClubInvitationsByEmail(clubId, email.toLowerCase());
 
-    console.log(`[Clubs] Invitations for ${email} removed by ${req.user.username}: ${deletedCount} invitations deleted`);
+    logger.info(`[Clubs] Invitations for ${email} removed by ${req.user.username}: ${deletedCount} invitations deleted`);
 
     res.json({ 
       message: `Invitations removed successfully`,
@@ -960,7 +961,7 @@ router.post('/:clubId/invitations/:invitationId/resend', jwtAuth, async (req, re
       console.warn(`[Clubs] Email invitation not sent to ${oldInvitation.email} - SMTP may not be configured`);
     }
 
-    console.log(`[Clubs] Invitation resent to ${oldInvitation.email} for club "${club.title}" by ${req.user.username}`);
+    logger.info(`[Clubs] Invitation resent to ${oldInvitation.email} for club "${club.title}" by ${req.user.username}`);
 
     res.status(201).json({
       message: emailSent 

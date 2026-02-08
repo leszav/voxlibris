@@ -47,7 +47,7 @@ interface Club {
   end_date: string | null;
   max_participants: number;
   current_participants: number;
-  reading_schedule: any;
+  reading_schedule: unknown;
   is_public: boolean;
 }
 

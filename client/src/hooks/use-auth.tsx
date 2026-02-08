@@ -71,13 +71,14 @@ export function AuthProvider({ children }: AuthProviderProps) {
       const response = await authAPI.getCurrentUser();
       setUser(response.user);
       cacheUser(response.user);
-    } catch (error: any) {
+    } catch (error: unknown) {
       if (import.meta.env.DEV) {
         console.error('Failed to fetch current user:', error);
       }
       
       // Очищаем ТОЛЬКО при явном 401/403 от сервера (сессия невалидна)
-      if (error?.response?.status === 401 || error?.response?.status === 403) {
+      const err = error as { response?: { status?: number } };
+      if (err?.response?.status === 401 || err?.response?.status === 403) {
         authAPI.clearTokens();
         setUser(null);
         cacheUser(null);
@@ -102,7 +103,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   const register = async (username: string, email: string, password: string, rememberMe: boolean = false, inviteToken?: string) => {
     try {
-      const payload: any = { username, email, password, rememberMe };
+      const payload: { username: string; email: string; password: string; rememberMe: boolean; invite?: string } = {
+        username,
+        email,
+        password,
+        rememberMe,
+      };
       if (inviteToken) payload.invite = inviteToken;
       const response = await authAPI.register(payload);
       setUser(response.user);
@@ -154,12 +160,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
       // Получаем актуальные данные пользователя
       await fetchCurrentUser();
-    } catch (error: any) {
+    } catch (error: unknown) {
       if (import.meta.env.DEV) {
         console.error('Auth sync failed:', error);
       }
       // Очищаем только при 401/403
-      if (error?.response?.status === 401 || error?.response?.status === 403) {
+      const err = error as { response?: { status?: number } };
+      if (err?.response?.status === 401 || err?.response?.status === 403) {
         authAPI.clearTokens();
         setUser(null);
         cacheUser(null);
@@ -199,7 +206,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     // Обработчик изменения статуса аккаунта
     const handleAccountStatusChanged = () => {
       if (import.meta.env.DEV) {
-        console.log('Account status changed, refreshing user data...');
+        console.warn('Account status changed, refreshing user data...');
       }
       fetchCurrentUser().catch((error) => {
         if (import.meta.env.DEV) {

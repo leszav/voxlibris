@@ -44,7 +44,7 @@ export interface CreateClubRequest {
 export interface UpdateClubRequest {
   title?: string;
   description?: string;
-  coverImage?: string;
+  coverImage?: string | null;
   maxMembers?: number;
   isPrivate?: boolean;
   schedule?: string;
@@ -159,8 +159,8 @@ export function useDeleteClub() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (clubId: string): Promise<void> => {
-      await apiRequest<void>(`/api/clubs/${clubId}`, {
+    mutationFn: async (_clubId: string): Promise<void> => {
+      await apiRequest<void>(`/api/clubs/${_clubId}`, {
         method: "DELETE",
       });
     },
@@ -235,7 +235,7 @@ export function useJoinClub() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (clubId: string): Promise<void> => {
+    mutationFn: async (_clubId: string): Promise<void> => {
       if (import.meta.env.DEV) {
         console.warn("useJoinClub: Join through invitations not yet implemented");
       }
@@ -320,7 +320,7 @@ export function useResendInvitation(clubId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (invitationId: string): Promise<any> => {
+    mutationFn: async (invitationId: string): Promise<Record<string, unknown>> => {
       return apiRequest(`/api/clubs/${clubId}/invitations/${invitationId}/resend`, {
         method: "POST",
       });
@@ -369,7 +369,25 @@ export function useInvitationByToken(token: string) {
   return useQuery({
     queryKey: ["invitation-by-token", token],
     queryFn: async (): Promise<InvitationWithClub> => {
-      const data = await apiRequest<{ invitation: any; club: any }>(`/api/invitations/${token}`);
+      const data = await apiRequest<{
+        invitation: {
+          id: string;
+          email: string;
+          status?: string;
+          createdAt?: string;
+          expiresAt?: string;
+          acceptedAt?: string;
+          inviterName?: string;
+        };
+        club?: {
+          id: string;
+          title: string;
+          description?: string | null;
+          isPrivate?: boolean;
+          memberCount?: number;
+          maxMembers?: number;
+        } | null;
+      }>(`/api/invitations/${token}`);
 
       // Приводим ответ к старой форме для совместимости с остальной частью UI
       const invitation = {
@@ -396,7 +414,7 @@ export function useAcceptInvitation() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ token }: { token: string }): Promise<{ message: string; club: any }> => {
+    mutationFn: async ({ token }: { token: string }): Promise<{ message: string; club?: { id?: string } | null }> => {
       return apiRequest(`/api/invitations/${token}/accept`, {
         method: "POST",
       });

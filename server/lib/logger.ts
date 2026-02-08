@@ -12,6 +12,8 @@ export const logger = pino({
     level: (label) => ({ level: label }),
   },
   timestamp: pino.stdTimeFunctions.isoTime,
+  // hostname: undefined, // Раскомментируйте, чтобы отключить hostname в логах
+  // base: { hostname: 'custom-hostname' }, // Или задайте кастомный hostname
 });
 
 export function logInfo(message: string, data?: Record<string, unknown>) {

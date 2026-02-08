@@ -1,4 +1,4 @@
-import { CheckCircle, AlertCircle, Clock, Wifi, WifiOff } from "lucide-react";
+import { CheckCircle, Clock, WifiOff } from "lucide-react";
 import { useState, useEffect } from "react";
 
 interface SyncIndicatorProps {

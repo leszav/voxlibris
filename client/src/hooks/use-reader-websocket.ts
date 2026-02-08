@@ -98,7 +98,7 @@ export function useReaderWebSocket(options: UseReaderWebSocketOptions) {
   );
 
   // Подписка на события
-  const on = useCallback((event: string, handler: (data: any) => void) => {
+  const on = useCallback((event: string, handler: (data: unknown) => void) => {
     if (clientRef.current) {
       clientRef.current.on(event, handler);
       return () => {

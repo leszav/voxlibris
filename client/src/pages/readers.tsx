@@ -1,11 +1,11 @@
 import { MainLayout } from "@/components/layout/MainLayout";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ComingSoonOverlay } from "@/components/ui/coming-soon-overlay";
-import { Mic, Users, Star, Trophy, Play, Headphones, Heart } from "lucide-react";
+import { Mic, Star, Trophy, Play, Headphones, Heart } from "lucide-react";
 import soundWaveBg from "@assets/generated_images/abstract_sound_wave_visualization_background.png";
 
 // Mock Data for Readers

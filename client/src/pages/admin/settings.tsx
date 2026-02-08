@@ -619,8 +619,9 @@ function SMTPSettings() {
       } else {
         alert(`Ошибка: ${data.message}`);
       }
-    } catch (error: any) {
-      alert(`Ошибка отправки: ${error.message}`);
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      alert(`Ошибка отправки: ${errorMessage}`);
     } finally {
       setIsTesting(false);
     }

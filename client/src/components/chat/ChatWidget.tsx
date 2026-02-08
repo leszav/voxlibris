@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { MessageCircle, X, Minimize2, Trash2, Eraser, Smile } from "lucide-react";
-import Picker from 'emoji-picker-react';
 import { useChat } from "@/hooks/use-chat";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
@@ -239,8 +238,8 @@ export function ChatWidget({ clubId, channel = "general", onCleanupDeleted, canC
   const sortedMessages: ChatMessageWithUser[] = useMemo(
     () =>
       [...messages].sort((a, b) => {
-        const aTime = a.createdAt ? new Date(a.createdAt as any).getTime() : 0;
-        const bTime = b.createdAt ? new Date(b.createdAt as any).getTime() : 0;
+        const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
         return aTime - bTime;
       }),
     [messages],
@@ -302,15 +301,11 @@ export function ChatWidget({ clubId, channel = "general", onCleanupDeleted, canC
           <ScrollArea className="flex-1 px-3 py-2">
             <div className="space-y-3 text-sm px-1">
               {sortedMessages.map((m) => {
-                // Debug: логируем структуру сообщения
-                if (import.meta.env.DEV) {
-                  console.log('Message structure:', m);
-                }
-                
                 const isOwnMessage = user?.id === m.user?.id;
-                const messageTime = m.createdAt ? new Date(m.createdAt as any).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) : '';
-                // Используем displayName, если есть, иначе username
-                const username = m.user?.displayName || m.user?.username || (m as any).user?.displayName || (m as any).user?.username || (m as any).username || "Участник";
+                const messageTime = m.createdAt
+                  ? new Date(m.createdAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
+                  : '';
+                const username = m.user?.username || "Участник";
                 const userInitial = username.charAt(0).toUpperCase();
                 
                 return (

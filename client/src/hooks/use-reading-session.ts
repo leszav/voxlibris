@@ -20,6 +20,12 @@ interface CreateSessionParams {
   description?: string;
 }
 
+interface SessionJoinedPayload {
+  listenerCount: number;
+  currentChapter: number;
+  currentPosition: string;
+}
+
 export function useReadingSession() {
   const { user } = useAuth();
   const [session, setSession] = useState<ReadingSessionState>({
@@ -50,21 +56,21 @@ export function useReadingSession() {
 
     socket.on('connect', () => {
       if (import.meta.env.DEV) {
-        console.log('WebSocket connected');
+        console.warn('WebSocket connected');
       }
       setSession(prev => ({ ...prev, isConnected: true }));
     });
 
     socket.on('disconnect', () => {
       if (import.meta.env.DEV) {
-        console.log('WebSocket disconnected');
+        console.warn('WebSocket disconnected');
       }
       setSession(prev => ({ ...prev, isConnected: false }));
     });
 
-    socket.on('session_joined', (data: any) => {
+    socket.on('session_joined', (data: SessionJoinedPayload) => {
       if (import.meta.env.DEV) {
-        console.log('Successfully joined session:', data);
+        console.warn('Successfully joined session:', data);
       }
       setSession(prev => ({
         ...prev,
@@ -145,7 +151,7 @@ export function useReadingSession() {
       // Join the WebSocket session after creation
       if (socketRef.current?.connected) {
         if (import.meta.env.DEV) {
-          console.log('Joining WebSocket session:', sessionId);
+          console.warn('Joining WebSocket session:', sessionId);
         }
         socketRef.current.emit('join_session', sessionId);
       }
@@ -176,7 +182,7 @@ export function useReadingSession() {
     }
     
     if (import.meta.env.DEV) {
-      console.log('Starting reading session:', session.sessionId);
+      console.warn('Starting reading session:', session.sessionId);
     }
     socketRef.current.emit('start_reading', session.sessionId);
     startTimer();

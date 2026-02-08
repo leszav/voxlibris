@@ -22,7 +22,7 @@ interface AnalyticsEventData {
   chapterNumber?: number;
   duration?: number;
   progress?: number;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 interface ReadingSessionTracker {
@@ -44,7 +44,7 @@ export function useAnalytics() {
   const { mutate: trackEvent } = useMutation({
     mutationFn: async (data: AnalyticsEventData) => {
       if (import.meta.env.DEV) {
-        console.log('[Analytics] Отправка события:', data);
+        console.warn('[Analytics] Отправка события:', data);
       }
       
       try {
@@ -55,7 +55,7 @@ export function useAnalytics() {
         });
         
         if (import.meta.env.DEV) {
-          console.log('[Analytics] Событие успешно отправлено:', response);
+          console.warn('[Analytics] Событие успешно отправлено:', response);
         }
 
 
@@ -75,13 +75,13 @@ export function useAnalytics() {
     },
     onSuccess: (data, variables) => {
       if (import.meta.env.DEV) {
-        console.log('[Analytics] Событие обработано успешно:', variables.eventType);
+        console.warn('[Analytics] Событие обработано успешно:', variables.eventType);
       }
     },
   });
 
   // Открытие книги
-  const trackBookOpen = useCallback((bookId: string, metadata?: Record<string, any>) => {
+  const trackBookOpen = useCallback((bookId: string, metadata?: Record<string, unknown>) => {
     trackEvent({
       eventType: 'book_open',
       bookId,
@@ -151,7 +151,7 @@ export function useAnalytics() {
   }, [trackEvent]);
 
   // Загрузка книги
-  const trackBookUpload = useCallback((bookId: string, metadata?: Record<string, any>) => {
+  const trackBookUpload = useCallback((bookId: string, metadata?: Record<string, unknown>) => {
     trackEvent({
       eventType: 'book_upload',
       bookId,

@@ -2,8 +2,9 @@ import jwt from "jsonwebtoken";
 import bcrypt from "bcrypt";
 import { randomBytes, createHash } from "node:crypto";
 import { storage } from "./repositories/index.js";
-import type { User, UserRole, UserStatus } from "../shared/schema.js";
+import type { User, UserRole, UserStatus, InsertUser } from "../shared/schema.js";
 import { emailService } from "./services/email-service.js";
+import { logger } from "./lib/logger.js";
 
 export type SessionType = 'normal' | 'remember_me';
 
@@ -27,16 +28,21 @@ interface DatabaseUser {
 }
 
 // Type guard для безопасной валидации БД результатов
-function isDatabaseUser(obj: any): obj is DatabaseUser {
-  return obj && 
-    typeof obj.id === 'string' &&
-    typeof obj.username === 'string' &&
-    typeof obj.email === 'string' &&
-    typeof obj.password === 'string' &&
-    typeof obj.role === 'string' &&
-    typeof obj.status === 'string' &&
-    typeof obj.emailConfirmed === 'boolean' &&
-    obj.createdAt instanceof Date;
+function isDatabaseUser(obj: unknown): obj is DatabaseUser {
+  if (!obj || typeof obj !== 'object') {
+    return false;
+  }
+  const user = obj as Record<string, unknown>;
+  return (
+    typeof user.id === 'string' &&
+    typeof user.username === 'string' &&
+    typeof user.email === 'string' &&
+    typeof user.password === 'string' &&
+    typeof user.role === 'string' &&
+    typeof user.status === 'string' &&
+    typeof user.emailConfirmed === 'boolean' &&
+    user.createdAt instanceof Date
+  );
 }
 
 // Безопасное преобразование DatabaseUser в публичный User
@@ -48,12 +54,12 @@ function toSafeUser(dbUser: DatabaseUser): Omit<User, 'password'> {
     role: dbUser.role,
     status: dbUser.status,
     emailConfirmed: dbUser.emailConfirmed,
-    confirmationToken: dbUser.confirmationToken ?? undefined,
-    invitedBy: dbUser.invitedBy ?? undefined,
-    invitedToClub: dbUser.invitedToClub ?? undefined,
-    lastActivityAt: dbUser.lastActivityAt ?? undefined,
-    suspensionReason: dbUser.suspensionReason ?? undefined,
-    suspendedUntil: dbUser.suspendedUntil ?? undefined,
+    confirmationToken: dbUser.confirmationToken ?? null,
+    invitedBy: dbUser.invitedBy ?? null,
+    invitedToClub: dbUser.invitedToClub ?? null,
+    lastActivityAt: dbUser.lastActivityAt ?? null,
+    suspensionReason: dbUser.suspensionReason ?? null,
+    suspendedUntil: dbUser.suspendedUntil ?? null,
     failedLoginAttempts: dbUser.failedLoginAttempts ?? 0,
     createdAt: dbUser.createdAt,
   };
@@ -115,7 +121,10 @@ export class AuthService {
   /**
    * Генерирует access и refresh токены для пользователя
    */
-  async generateTokens(user: User, rememberMe: boolean = false): Promise<AuthTokens> {
+  async generateTokens(
+    user: Pick<User, "id" | "username" | "role" | "status">,
+    rememberMe: boolean = false
+  ): Promise<AuthTokens> {
     const sessionType: SessionType = rememberMe ? 'remember_me' : 'normal';
     const accessExpiry = rememberMe ? this.ACCESS_TOKEN_LONG : this.ACCESS_TOKEN_SHORT;
     
@@ -209,7 +218,7 @@ export class AuthService {
   async authenticate(emailOrUsername: string, password: string, rememberMe: boolean = false): Promise<AuthResult | null> {
     try {
       // Безопасно пытаемся найти пользователя по email или username
-      let dbUser: any = await storage.getUserByEmail(emailOrUsername);
+      let dbUser: unknown = await storage.getUserByEmail(emailOrUsername);
       if (!dbUser) {
         dbUser = await storage.getUserByUsername(emailOrUsername);
       }
@@ -241,7 +250,7 @@ export class AuthService {
 
       // Генерируем токены с безопасным преобразованием типа
       const safeUser = toSafeUser(dbUser);
-      const tokens = await this.generateTokens(safeUser as any, rememberMe); // Temporal cast для совместимости
+      const tokens = await this.generateTokens(safeUser, rememberMe);
       const sessionType: SessionType = rememberMe ? 'remember_me' : 'normal';
 
       // Обновляем время последней активности
@@ -291,7 +300,7 @@ export class AuthService {
       const confirmationToken = randomBytes(32).toString('hex');
 
       // Создаем пользователя с правильной типизацией InsertUser
-      const userCreateData: any = {
+      const userCreateData: InsertUser = {
         username,
         email,
         password: hashedPassword,
@@ -312,11 +321,9 @@ export class AuthService {
             displayName: username,
             isReader: false,
             bio: null,
-            avatarUrl: null,
-            socialLinks: null,
-            preferences: null
+            avatar: null,
           });
-          console.log(`User profile created for user ${dbNewUser.id}`);
+          logger.info({ userId: dbNewUser.id }, 'User profile created');
         } catch (profileError) {
           console.error('Failed to create user profile:', profileError);
           // Не блокируем регистрацию если профиль не создался
@@ -331,8 +338,8 @@ export class AuthService {
       // Отправляем email подтверждения
       try {
         const safeUserForEmail = toSafeUser(dbNewUser);
-        await this.sendConfirmationEmail(safeUserForEmail as any, confirmationToken, baseUrl); // Temporal cast
-        console.log(`Confirmation email sent to ${email}`);
+        await this.sendConfirmationEmail(safeUserForEmail, confirmationToken, baseUrl);
+        logger.info({ email }, 'Confirmation email sent');
       } catch (emailError) {
         console.error('Failed to send confirmation email:', emailError);
         // Не блокируем регистрацию если email не отправился
@@ -340,7 +347,7 @@ export class AuthService {
 
       // Генерируем токены с безопасным преобразованием типа
       const safeUser = toSafeUser(dbNewUser);
-      const tokens = await this.generateTokens(safeUser as any, rememberMe); // Temporal cast
+      const tokens = await this.generateTokens(safeUser, rememberMe);
       const sessionType: SessionType = rememberMe ? 'remember_me' : 'normal';
 
       return {
@@ -413,8 +420,12 @@ export class AuthService {
   /**
    * Извлекает refresh token из cookies
    */
-  extractRefreshTokenFromCookies(cookies: any): string | null {
-    return cookies?.refreshToken || null;
+  extractRefreshTokenFromCookies(cookies: unknown): string | null {
+    if (!cookies || typeof cookies !== 'object') {
+      return null;
+    }
+    const record = cookies as { refreshToken?: unknown };
+    return typeof record.refreshToken === 'string' ? record.refreshToken : null;
   }
 
   /**
@@ -465,7 +476,11 @@ export class AuthService {
   /**
    * Отправляет email подтверждения
    */
-  private async sendConfirmationEmail(user: User, confirmationToken: string, baseUrl?: string): Promise<void> {
+  private async sendConfirmationEmail(
+    user: Pick<User, "email" | "username">,
+    confirmationToken: string,
+    baseUrl?: string
+  ): Promise<void> {
     try {
       await emailService.sendRegistrationConfirmation({
         email: user.email,
@@ -505,18 +520,16 @@ async confirmEmail(token: string): Promise<{ success: boolean; message: string }
           displayName: user.username,
           isReader: false,
           bio: null,
-          avatarUrl: null,
-          socialLinks: null,
-          preferences: null
+          avatar: null,
         });
-        console.log(`User profile created for user ${user.id} during email confirmation`);
+        logger.info({ userId: user.id }, 'User profile created during email confirmation');
       }
     } catch (profileError) {
       console.error('Failed to create user profile during email confirmation:', profileError);
       // Не блокируем подтверждение email если профиль не создался
     }
 
-    console.log(`Email confirmed for user ${user.username} (${user.email})`);
+    logger.info({ userId: user.id, email: user.email }, 'Email confirmed');
     return { success: true, message: 'Email успешно подтвержден. Теперь вы можете использовать все функции VoxLibris.' };
   } catch (error) {
     console.error('Email confirmation error:', error);
@@ -562,7 +575,7 @@ async requestPasswordReset(
   requestedFromIp?: string
 ): Promise<{ emailSent: boolean }> {
   try {
-    console.log(`[AuthService] Password reset requested for: ${emailOrUsername}`);
+    logger.info({ emailOrUsername }, '[AuthService] Password reset requested');
     
     // Безопасно пытаемся найти пользователя по email или username
     let user = await storage.getUserByEmail(emailOrUsername);
@@ -572,20 +585,20 @@ async requestPasswordReset(
 
     // Не раскрываем существование пользователя
     if (!user || user.status === 'deleted') {
-      console.log(`[AuthService] User not found or deleted: ${emailOrUsername}`);
+      logger.info({ emailOrUsername }, '[AuthService] User not found or deleted');
       return { emailSent: false };
     }
 
-    console.log(`[AuthService] User found: ${user.email} (ID: ${user.id})`);
+    logger.info({ userId: user.id, email: user.email }, '[AuthService] User found');
 
     // Инвалидируем предыдущие активные токены
     await storage.invalidatePasswordResetTokensForUser(user.id);
-    console.log(`[AuthService] Invalidated previous tokens for user: ${user.id}`);
+    logger.info({ userId: user.id }, '[AuthService] Invalidated previous tokens');
 
     const token = randomBytes(32).toString('hex');
     const tokenHash = this.hashToken(token);
     const expiresAt = new Date(Date.now() + this.PASSWORD_RESET_EXPIRY_MINUTES * 60 * 1000);
-    console.log(`[AuthService] Generated reset token: ${token.substring(0, 8)}...`);
+    logger.info({ tokenPrefix: token.substring(0, 8) }, '[AuthService] Generated reset token');
 
     const tokenRecord = await storage.createPasswordResetToken({
       userId: user.id,
@@ -594,9 +607,9 @@ async requestPasswordReset(
       requestedByAdminId,
       requestedFromIp,
     });
-    console.log(`[AuthService] Created token record: ${tokenRecord.id}`);
+    logger.info({ tokenId: tokenRecord.id }, '[AuthService] Created token record');
 
-    console.log(`[AuthService] Attempting to send email to: ${user.email}`);
+    logger.info({ email: user.email }, '[AuthService] Attempting to send email');
     const emailSent = await emailService.sendPasswordReset({
       email: user.email,
       username: user.username,
@@ -605,10 +618,10 @@ async requestPasswordReset(
       baseUrl,
     });
 
-    console.log(`[AuthService] Email send result: ${emailSent}`);
+    logger.info({ emailSent }, '[AuthService] Email send result');
 
     if (!emailSent) {
-      console.log(`[AuthService] Email failed, marking token as used: ${tokenRecord.id}`);
+      logger.warn({ tokenId: tokenRecord.id }, '[AuthService] Email failed, marking token as used');
       await storage.markPasswordResetTokenUsed(tokenRecord.id);
     }
 

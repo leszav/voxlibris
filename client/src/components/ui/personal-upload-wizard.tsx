@@ -4,7 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent } from "@/components/ui/card";
-import { usePersonalBookUpload, type DuplicateMatch } from "@/hooks/use-books-v2";
+import { usePersonalBookUpload, type DuplicateMatch, type UploadMetadata } from "@/hooks/use-books-v2";
 import { Loader2, Upload, FileText } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { DuplicateWarningModal } from "@/components/ui/duplicate-warning-modal";
@@ -17,9 +17,12 @@ interface PersonalUploadWizardProps {
 
 export function PersonalUploadWizard({ onSuccess, onCancel }: PersonalUploadWizardProps) {
     const [step, setStep] = useState<'upload' | 'metadata' | 'processing'>('upload');
-    const [file, setFile] = useState<File | null>(null);
     const [sessionId, setSessionId] = useState<string | null>(null);
-    const [metadata, setMetadata] = useState<any>({});
+    type BookUploadMetadata = UploadMetadata & {
+        coverPreview?: string | null;
+    };
+    const [metadata, setMetadata] = useState<BookUploadMetadata>({ title: "", author: "" });
+    const [file, setFile] = useState<File | null>(null);
     const [duplicates, setDuplicates] = useState<DuplicateMatch[]>([]);
     const [showDuplicateModal, setShowDuplicateModal] = useState(false);
 
@@ -27,8 +30,8 @@ export function PersonalUploadWizard({ onSuccess, onCancel }: PersonalUploadWiza
     const { refetchUser } = useAuth();
 
     const handleFileSelect = async (selectedFile: File) => {
-        setFile(selectedFile);
         setStep('processing');
+        setFile(selectedFile);
 
         try {
             const result = await upload.mutateAsync(selectedFile);
@@ -57,7 +60,6 @@ export function PersonalUploadWizard({ onSuccess, onCancel }: PersonalUploadWiza
             }
             
             setStep('upload');
-            setFile(null);
         }
     };
 
@@ -101,7 +103,7 @@ export function PersonalUploadWizard({ onSuccess, onCancel }: PersonalUploadWiza
         setStep('upload');
         setFile(null);
         setSessionId(null);
-        setMetadata({});
+        setMetadata({ title: "", author: "" });
         setDuplicates([]);
     };
 
@@ -229,8 +231,14 @@ export function PersonalUploadWizard({ onSuccess, onCancel }: PersonalUploadWiza
                                 <Input
                                     id="year"
                                     type="number"
-                                    value={metadata.publicationYear || ''}
-                                    onChange={(e) => setMetadata({ ...metadata, publicationYear: e.target.value })}
+                                    value={metadata.publicationYear ?? ''}
+                                    onChange={(e) => {
+                                        const value = e.target.value;
+                                        setMetadata({
+                                            ...metadata,
+                                            publicationYear: value ? Number(value) : undefined
+                                        });
+                                    }}
                                 />
                             </div>
                         </div>

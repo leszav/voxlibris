@@ -144,6 +144,92 @@ export class ReadingRepository extends BaseRepository {
   }
 
   /**
+   * Получение всех сессий в клубе
+   */
+  async getSessionsByClub(clubId: string): Promise<ReadingSessionWithDetails[]> {
+    try {
+      const result = await this.db
+        .select({
+          session: readingSessions,
+          reader: {
+            id: users.id,
+            username: users.username,
+            role: users.role,
+            createdAt: users.createdAt,
+          },
+          book: books,
+          club: clubs,
+          listenerCount: count(sessionListeners.id),
+        })
+        .from(readingSessions)
+        .leftJoin(users, eq(readingSessions.readerId, users.id))
+        .leftJoin(books, eq(readingSessions.bookId, books.id))
+        .leftJoin(clubs, eq(readingSessions.clubId, clubs.id))
+        .leftJoin(sessionListeners, and(
+          eq(sessionListeners.sessionId, readingSessions.id),
+          eq(sessionListeners.isActive, true)
+        ))
+        .where(eq(readingSessions.clubId, clubId))
+        .groupBy(readingSessions.id, users.id, books.id, clubs.id)
+        .orderBy(desc(readingSessions.startedAt));
+
+      return result.map(row => ({
+        ...row.session,
+        reader: row.reader!,
+        book: row.book!,
+        club: row.club!,
+        listenerCount: Number(row.listenerCount),
+      })) as ReadingSessionWithDetails[];
+    } catch (error) {
+      this.logError('getSessionsByClub', error);
+      throw new Error('Failed to get sessions by club');
+    }
+  }
+
+  /**
+   * Получение сессий по книге
+   */
+  async getSessionsByBook(bookId: string): Promise<ReadingSessionWithDetails[]> {
+    try {
+      const result = await this.db
+        .select({
+          session: readingSessions,
+          reader: {
+            id: users.id,
+            username: users.username,
+            role: users.role,
+            createdAt: users.createdAt,
+          },
+          book: books,
+          club: clubs,
+          listenerCount: count(sessionListeners.id),
+        })
+        .from(readingSessions)
+        .leftJoin(users, eq(readingSessions.readerId, users.id))
+        .leftJoin(books, eq(readingSessions.bookId, books.id))
+        .leftJoin(clubs, eq(readingSessions.clubId, clubs.id))
+        .leftJoin(sessionListeners, and(
+          eq(sessionListeners.sessionId, readingSessions.id),
+          eq(sessionListeners.isActive, true)
+        ))
+        .where(eq(readingSessions.bookId, bookId))
+        .groupBy(readingSessions.id, users.id, books.id, clubs.id)
+        .orderBy(desc(readingSessions.startedAt));
+
+      return result.map(row => ({
+        ...row.session,
+        reader: row.reader!,
+        book: row.book!,
+        club: row.club!,
+        listenerCount: Number(row.listenerCount),
+      })) as ReadingSessionWithDetails[];
+    } catch (error) {
+      this.logError('getSessionsByBook', error);
+      throw new Error('Failed to get sessions by book');
+    }
+  }
+
+  /**
    * Получение сессий читателя
    */
   async getSessionsByReader(readerId: string): Promise<ReadingSessionWithDetails[]> {
@@ -187,6 +273,57 @@ export class ReadingRepository extends BaseRepository {
   }
 
   /**
+   * Получение активной сессии читателя
+   */
+  async getActiveSessionForReader(readerId: string): Promise<ReadingSessionWithDetails | undefined> {
+    try {
+      const result = await this.db
+        .select({
+          session: readingSessions,
+          reader: {
+            id: users.id,
+            username: users.username,
+            role: users.role,
+            createdAt: users.createdAt,
+          },
+          book: books,
+          club: clubs,
+          listenerCount: count(sessionListeners.id),
+        })
+        .from(readingSessions)
+        .leftJoin(users, eq(readingSessions.readerId, users.id))
+        .leftJoin(books, eq(readingSessions.bookId, books.id))
+        .leftJoin(clubs, eq(readingSessions.clubId, clubs.id))
+        .leftJoin(sessionListeners, and(
+          eq(sessionListeners.sessionId, readingSessions.id),
+          eq(sessionListeners.isActive, true)
+        ))
+        .where(and(
+          eq(readingSessions.readerId, readerId),
+          eq(readingSessions.isLive, true),
+          eq(readingSessions.isActive, true)
+        ))
+        .groupBy(readingSessions.id, users.id, books.id, clubs.id)
+        .orderBy(desc(readingSessions.startedAt))
+        .limit(1);
+
+      if (result.length === 0) return undefined;
+
+      const row = result[0];
+      return {
+        ...row.session,
+        reader: row.reader!,
+        book: row.book!,
+        club: row.club!,
+        listenerCount: Number(row.listenerCount),
+      } as ReadingSessionWithDetails;
+    } catch (error) {
+      this.logError('getActiveSessionForReader', error);
+      throw new Error('Failed to get active session for reader');
+    }
+  }
+
+  /**
    * Обновление позиции в сессии чтения
    */
   async updateSessionPosition(sessionId: string, currentChapter: number, currentPosition: string): Promise<boolean> {
@@ -204,6 +341,51 @@ export class ReadingRepository extends BaseRepository {
     } catch (error) {
       this.logError('updateSessionPosition', error);
       throw new Error('Failed to update session position');
+    }
+  }
+
+  /**
+   * Обновление статуса сессии чтения
+   */
+  async updateSessionStatus(
+    sessionId: string,
+    status: 'active' | 'paused' | 'completed' | 'cancelled'
+  ): Promise<ReadingSession | undefined> {
+    try {
+      const now = new Date();
+      const updates: Partial<ReadingSession> = {};
+
+      switch (status) {
+        case 'active':
+          updates.isActive = true;
+          updates.isLive = true;
+          updates.startedAt = now;
+          updates.endedAt = null;
+          break;
+        case 'paused':
+          updates.isActive = true;
+          updates.isLive = false;
+          break;
+        case 'completed':
+        case 'cancelled':
+          updates.isActive = false;
+          updates.isLive = false;
+          updates.endedAt = now;
+          break;
+        default:
+          break;
+      }
+
+      const result = await this.db
+        .update(readingSessions)
+        .set(updates)
+        .where(eq(readingSessions.id, sessionId))
+        .returning();
+
+      return this.getFirstResult(result);
+    } catch (error) {
+      this.logError('updateSessionStatus', error);
+      throw new Error('Failed to update session status');
     }
   }
 

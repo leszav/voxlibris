@@ -4,6 +4,7 @@ import { storage } from '../repositories/index.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { logger } from '../lib/logger.js';
 
 /**
  * Email Service для VoxLibris
@@ -45,7 +46,7 @@ class EmailService {
       const smtpSettings = await storage.getSettingsByCategory('smtp');
       
       if (smtpSettings.length === 0) {
-        console.warn('[EmailService] SMTP settings not configured in database');
+        logger.warn('[EmailService] SMTP settings not configured in database');
         return;
       }
 
@@ -57,13 +58,13 @@ class EmailService {
 
       // Проверяем обязательные поля
       if (!settings['smtp.host'] || !settings['smtp.from']) {
-        console.warn('[EmailService] SMTP host or from email not configured');
+        logger.warn('[EmailService] SMTP host or from email not configured');
         return;
       }
 
       // Проверяем включен ли SMTP
       if (settings['smtp.enabled'] !== 'true') {
-        console.warn('[EmailService] SMTP is disabled in settings');
+        logger.warn('[EmailService] SMTP is disabled in settings');
         return;
       }
 
@@ -91,9 +92,10 @@ class EmailService {
         debug: process.env.NODE_ENV === 'development',
       });
 
-      console.log(`[EmailService] SMTP транспорт инициализирован: ${this.settings.host}:${this.settings.port}`);
+      logger.info(`[EmailService] SMTP транспорт инициализирован: ${this.settings.host}:${this.settings.port}`);
     } catch (error) {
-      console.error('[EmailService] Error initializing SMTP transport:', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.error({ error: errorMessage }, '[EmailService] Error initializing SMTP transport');
       throw error;
     }
   }
@@ -104,7 +106,7 @@ class EmailService {
   resetTransporter(): void {
     this.transporter = null;
     this.settings = null;
-    console.log('[EmailService] Transporter reset');
+    logger.info('[EmailService] Transporter reset');
   }
 
   /**
@@ -121,10 +123,11 @@ class EmailService {
       }
 
       await this.transporter.verify();
-      console.log('[EmailService] SMTP connection verified successfully');
+      logger.info('[EmailService] SMTP connection verified successfully');
       return true;
     } catch (error) {
-      console.error('[EmailService] SMTP connection verification failed:', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.error({ error: errorMessage }, '[EmailService] SMTP connection verification failed');
       return false;
     }
   }
@@ -140,7 +143,7 @@ class EmailService {
       }
 
       if (!this.transporter || !this.settings) {
-        console.error('[EmailService] SMTP not configured or disabled');
+        logger.error('[EmailService] SMTP not configured or disabled');
         return false;
       }
 
@@ -156,12 +159,13 @@ class EmailService {
 
       // Отправляем
       const info = await this.transporter.sendMail(mailOptions);
-      console.log(`[EmailService] Email sent successfully: ${info.messageId}`);
-      console.log(`[EmailService] Preview URL: ${nodemailer.getTestMessageUrl(info)}`);
+      logger.info(`[EmailService] Email sent successfully: ${info.messageId}`);
+      logger.info(`[EmailService] Preview URL: ${nodemailer.getTestMessageUrl(info)}`);
       
       return true;
     } catch (error) {
-      console.error('[EmailService] Error sending email:', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.error({ error: errorMessage }, '[EmailService] Error sending email');
       return false;
     }
   }
@@ -193,7 +197,8 @@ class EmailService {
 
       throw new Error(`Template not found. Tried paths: ${candidatePaths.join(', ')}`);
     } catch (error) {
-      console.error(`[EmailService] Error loading template ${templateName}:`, error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.error({ error: errorMessage }, `[EmailService] Error loading template ${templateName}`);
       throw error;
     }
   }
@@ -244,7 +249,8 @@ class EmailService {
         html,
       });
     } catch (error) {
-      console.error('[EmailService] Error sending club invitation:', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.error({ error: errorMessage }, '[EmailService] Error sending club invitation');
       return false;
     }
   }
@@ -276,7 +282,8 @@ class EmailService {
         html,
       });
     } catch (error) {
-      console.error('[EmailService] Error sending registration confirmation:', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.error({ error: errorMessage }, '[EmailService] Error sending registration confirmation');
       return false;
     }
   }
@@ -310,7 +317,8 @@ class EmailService {
         html,
       });
     } catch (error) {
-      console.error('[EmailService] Error sending password reset email:', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.error({ error: errorMessage }, '[EmailService] Error sending password reset email');
       return false;
     }
   }
@@ -343,7 +351,8 @@ class EmailService {
         html,
       });
     } catch (error) {
-      console.error('[EmailService] Error sending invitation accepted notification:', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.error({ error: errorMessage }, '[EmailService] Error sending invitation accepted notification');
       return false;
     }
   }
@@ -445,11 +454,12 @@ class EmailService {
         success: true,
         messageId: info.messageId,
       };
-    } catch (error: any) {
-      console.error('[EmailService] Error sending test email:', error);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.error({ error: errorMessage }, '[EmailService] Error sending test email');
       return {
         success: false,
-        error: error.message || 'Неизвестная ошибка'
+        error: error instanceof Error ? error.message : 'Неизвестная ошибка'
       };
     }
   }

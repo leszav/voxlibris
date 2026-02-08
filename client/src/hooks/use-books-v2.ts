@@ -16,6 +16,10 @@ export interface PersonalBook {
   fileSizeBytes?: number;
   coverUrl?: string;
   uploadedAt: string;
+  createdAt?: string;
+  updatedAt?: string;
+  progress?: number;
+  currentChapter?: number;
 }
 
 export interface ClubBook {
@@ -46,22 +50,23 @@ export interface DuplicateMatch {
 
 export interface UploadSessionResponse {
   sessionId: string;
-  metadata: {
-    title: string;
-    author: string;
-    description?: string;
-    language?: string;
-    publicationYear?: number;
-    genre?: string;
-    coverImageData?: string; // Base64
-    coverImageType?: string;
-    [key: string]: any;
-  };
+  metadata: UploadMetadata;
   duplicates?: DuplicateMatch[];
 }
 
-// --- Personal Books Hooks ---
+export interface UploadMetadata {
+  title: string;
+  author: string;
+  description?: string;
+  language?: string;
+  publicationYear?: number;
+  genre?: string;
+  coverImageData?: string | null; // Base64
+  coverImageType?: string | null;
+  [key: string]: unknown;
+}
 
+// --- Personal Books Hooks ---
 export function usePersonalBooks() {
   return useQuery<PersonalBook[]>({
     queryKey: ["/api/v1/user/books"],
@@ -86,7 +91,7 @@ export function usePersonalBookUpload() {
   });
 
   // Step 2: Confirm upload with metadata
-  const confirmMutation = useMutation<PersonalBook, Error, { sessionId: string; metadata: any }>({
+  const confirmMutation = useMutation<PersonalBook, Error, { sessionId: string; metadata: UploadMetadata }>({
     mutationFn: async ({ sessionId, metadata }) => {
       return apiRequest<PersonalBook>(`/api/v1/user/books/upload/${sessionId}/confirm`, {
         method: "POST",
@@ -161,7 +166,7 @@ export function useClubBookUpload(clubId: string) {
   });
 
   // Step 2: Confirm upload with metadata
-  const confirmMutation = useMutation<ClubBook, Error, { sessionId: string; metadata: any }>({
+  const confirmMutation = useMutation<ClubBook, Error, { sessionId: string; metadata: UploadMetadata }>({
     mutationFn: async ({ sessionId, metadata }) => {
       return apiRequest<ClubBook>(`/api/v1/clubs/${clubId}/books/upload/${sessionId}/confirm`, {
         method: "POST",
@@ -211,7 +216,7 @@ export function useUpdateClubBook(clubId: string) {
         body: JSON.stringify(data),
       });
     },
-    onSuccess: (_, variables) => {
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/v1/clubs", clubId, "books"] });
       queryClient.invalidateQueries({ queryKey: ["club", clubId] });
     },

@@ -4,6 +4,16 @@ import * as xml2js from 'xml2js';
 import * as mime from 'mime-types';
 import * as crypto from 'node:crypto';
 import { JSDOM } from 'jsdom';
+import { logger } from './lib/logger.js';
+
+type XmlAttributes = Record<string, string>;
+type XmlElement = {
+  $?: XmlAttributes;
+  [key: string]: unknown;
+};
+
+const firstItem = <T>(value: unknown): T | undefined => (Array.isArray(value) ? (value[0] as T | undefined) : undefined);
+const asArray = <T>(value: unknown): T[] => (Array.isArray(value) ? (value as T[]) : []);
 
 export interface BookMetadata {
   title: string;
@@ -136,7 +146,7 @@ export class EPUBParser extends BaseBookParser {
     }
   }
 
-  private async findOpfFile(zip: any): Promise<string | null> {
+  private async findOpfFile(zip: JSZip): Promise<string | null> {
     // Читаем META-INF/container.xml для поиска OPF файла
     const containerFile = zip.file('META-INF/container.xml');
     if (!containerFile) return null;
@@ -164,8 +174,13 @@ export class EPUBParser extends BaseBookParser {
     return null;
   }
 
-  private async extractMetadata(opfData: any, zip: any, opfDir: string): Promise<Omit<BookMetadata, 'totalChapters'>> {
-    const metadata = opfData?.package?.metadata?.[0];
+  private async extractMetadata(
+    opfData: XmlElement,
+    zip: JSZip,
+    opfDir: string
+  ): Promise<Omit<BookMetadata, 'totalChapters'>> {
+    const packageNode = opfData?.package as XmlElement | undefined;
+    const metadata = firstItem<XmlElement>(packageNode?.metadata);
     if (!metadata) {
       return {
         title: 'Unknown Title',
@@ -193,7 +208,7 @@ export class EPUBParser extends BaseBookParser {
         coverImageType = coverInfo.type;
       }
     } catch (error) {
-      console.log('Could not extract cover image:', error);
+      logger.warn({ error }, 'Could not extract cover image');
     }
 
     return {
@@ -209,7 +224,7 @@ export class EPUBParser extends BaseBookParser {
     };
   }
 
-  private extractMetaValue(metaValue: any): string | undefined {
+  private extractMetaValue(metaValue: unknown): string | undefined {
     if (!metaValue) return undefined;
 
     if (typeof metaValue === 'string') return metaValue;
@@ -218,17 +233,29 @@ export class EPUBParser extends BaseBookParser {
       if (metaValue.length === 0) return undefined;
       const firstItem = metaValue[0];
       if (typeof firstItem === 'string') return firstItem;
-      if (typeof firstItem === 'object' && firstItem._) return firstItem._;
+      if (typeof firstItem === 'object' && firstItem !== null && '_' in firstItem) {
+        const text = (firstItem as { _: unknown })._;
+        if (typeof text === 'string') return text;
+      }
       return undefined;
     }
 
-    if (typeof metaValue === 'object' && metaValue._) return metaValue._;
+    if (typeof metaValue === 'object' && metaValue !== null && '_' in metaValue) {
+      const text = (metaValue as { _: unknown })._;
+      if (typeof text === 'string') return text;
+    }
 
     return undefined;
   }
 
-  private async findCoverImage(opfData: any, zip: any, opfDir: string): Promise<{ data: Buffer; type: string } | null> {
-    const manifest = opfData?.package?.manifest?.[0]?.item || [];
+  private async findCoverImage(
+    opfData: XmlElement,
+    zip: JSZip,
+    opfDir: string
+  ): Promise<{ data: Buffer; type: string } | null> {
+    const packageNode = opfData?.package as XmlElement | undefined;
+    const manifestRoot = firstItem<XmlElement>(packageNode?.manifest);
+    const manifest = asArray<XmlElement>(manifestRoot?.item);
 
     // Искать элемент с id="cover" или media-type содержащий "image"
     for (const item of manifest) {
@@ -248,7 +275,7 @@ export class EPUBParser extends BaseBookParser {
             };
           }
         } catch (error) {
-          console.log('Error reading cover image:', error);
+          logger.warn({ error }, 'Error reading cover image');
         }
       }
     }
@@ -257,18 +284,24 @@ export class EPUBParser extends BaseBookParser {
   }
 
   private async extractChapters(
-    opfData: any,
-    zip: any,
+    opfData: XmlElement,
+    zip: JSZip,
     opfDir: string,
     bookTitle?: string
   ): Promise<BookChapter[]> {
-    const spine = opfData?.package?.spine?.[0]?.itemref || [];
-    const manifest = opfData?.package?.manifest?.[0]?.item || [];
+    const packageNode = opfData?.package as XmlElement | undefined;
+    const spineRoot = firstItem<XmlElement>(packageNode?.spine);
+    const manifestRoot = firstItem<XmlElement>(packageNode?.manifest);
+    const spine = asArray<XmlElement>(spineRoot?.itemref);
+    const manifest = asArray<XmlElement>(manifestRoot?.item);
 
     // Создать карту manifest items
-    const manifestMap = new Map<string, any>();
-    manifest.forEach((item: any) => {
-      manifestMap.set(item.$?.id, item);
+    const manifestMap = new Map<string, XmlElement>();
+    manifest.forEach((item) => {
+      const id = item.$?.id;
+      if (id) {
+        manifestMap.set(id, item);
+      }
     });
 
     const tocMap = await this.extractTocMap(opfData, zip, opfDir);
@@ -447,9 +480,11 @@ export class EPUBParser extends BaseBookParser {
     return false;
   }
 
-  private async extractTocMap(opfData: any, zip: any, opfDir: string): Promise<Map<string, string>> {
+  private async extractTocMap(opfData: XmlElement, zip: JSZip, opfDir: string): Promise<Map<string, string>> {
     const tocMap = new Map<string, string>();
-    const manifest = opfData?.package?.manifest?.[0]?.item || [];
+    const packageNode = opfData?.package as XmlElement | undefined;
+    const manifestRoot = firstItem<XmlElement>(packageNode?.manifest);
+    const manifest = asArray<XmlElement>(manifestRoot?.item);
 
     await this.appendNavToc(manifest, zip, opfDir, tocMap);
 
@@ -486,41 +521,46 @@ export class EPUBParser extends BaseBookParser {
     }
   }
 
-  private extractTocFromNcx(ncxData: any, opfDir: string, tocMap: Map<string, string>): void {
-    const navMap = ncxData?.ncx?.navMap?.[0]?.navPoint;
-    if (!Array.isArray(navMap)) return;
+  private extractTocFromNcx(ncxData: XmlElement, opfDir: string, tocMap: Map<string, string>): void {
+    const ncxRoot = ncxData?.ncx as XmlElement | undefined;
+    const navMap = firstItem<XmlElement>(ncxRoot?.navMap);
+    const navPoints = asArray<XmlElement>(navMap?.navPoint);
+    if (!Array.isArray(navPoints)) return;
 
-    const walk = (points: any[]) => {
+    const walk = (points: XmlElement[]) => {
       for (const point of points) {
-        const label = point?.navLabel?.[0]?.text?.[0]?.trim();
-        const src = point?.content?.[0]?.$?.src;
-        if (label && src) {
+        const navLabel = asArray<XmlElement>(point?.navLabel);
+        const label = firstItem<XmlElement>(navLabel)?.text;
+        const labelText = Array.isArray(label) ? (label[0] as string | undefined)?.trim() : undefined;
+        const content = asArray<XmlElement>(point?.content);
+        const src = firstItem<XmlElement>(content)?.$?.src;
+        if (labelText && src) {
           const filePath = this.resolveZipPath(opfDir, src.split('#')[0]);
           if (!tocMap.has(filePath)) {
-            tocMap.set(filePath, label);
+            tocMap.set(filePath, labelText);
           }
         }
         const children = point?.navPoint;
         if (Array.isArray(children) && children.length > 0) {
-          walk(children);
+          walk(children as XmlElement[]);
         }
       }
     };
 
-    walk(navMap);
+    walk(navPoints);
   }
 
-  private findNavItem(manifest: any[]): Record<string, any> | null {
-    return manifest.find((item: any) => String(item.$?.properties || "").toLowerCase().includes("nav")) || null;
+  private findNavItem(manifest: XmlElement[]): XmlElement | null {
+    return manifest.find((item) => String(item.$?.properties || "").toLowerCase().includes("nav")) || null;
   }
 
-  private findNcxItem(manifest: any[]): Record<string, any> | null {
-    return manifest.find((item: any) =>
+  private findNcxItem(manifest: XmlElement[]): XmlElement | null {
+    return manifest.find((item) =>
       String(item.$?.['media-type'] || "").toLowerCase().includes("x-dtbncx+xml")
     ) || null;
   }
 
-  private async readZipText(zip: any, filePath: string): Promise<string | null> {
+  private async readZipText(zip: JSZip, filePath: string): Promise<string | null> {
     const file = zip.file(filePath);
     if (!file) return null;
     try {
@@ -531,7 +571,12 @@ export class EPUBParser extends BaseBookParser {
     }
   }
 
-  private async appendNavToc(manifest: any[], zip: any, opfDir: string, tocMap: Map<string, string>): Promise<void> {
+  private async appendNavToc(
+    manifest: XmlElement[],
+    zip: JSZip,
+    opfDir: string,
+    tocMap: Map<string, string>
+  ): Promise<void> {
     const navItem = this.findNavItem(manifest);
     if (!navItem?.$?.href) return;
 
@@ -542,7 +587,12 @@ export class EPUBParser extends BaseBookParser {
     this.extractTocFromNavHtml(navContent, opfDir, tocMap);
   }
 
-  private async appendNcxToc(manifest: any[], zip: any, opfDir: string, tocMap: Map<string, string>): Promise<void> {
+  private async appendNcxToc(
+    manifest: XmlElement[],
+    zip: JSZip,
+    opfDir: string,
+    tocMap: Map<string, string>
+  ): Promise<void> {
     const ncxItem = this.findNcxItem(manifest);
     if (!ncxItem?.$?.href) return;
 
@@ -559,7 +609,7 @@ export class EPUBParser extends BaseBookParser {
     }
   }
 
-  private getSpineItemHref(manifestMap: Map<string, any>, idref: string): string | null {
+  private getSpineItemHref(manifestMap: Map<string, XmlElement>, idref: string): string | null {
     const manifestItem = manifestMap.get(idref);
     if (!manifestItem) return null;
 
@@ -622,12 +672,12 @@ export class FB2Parser extends BaseBookParser {
    * Пытается декодировать с указанной кодировкой
    */
   private tryDecodeWithEncoding(fileBuffer: Buffer, encoding: string, fallback: string): string {
-    console.log(`🔍 [FB2Parser] Detected encoding from XML declaration: ${encoding}`);
+    logger.info({ encoding }, '[FB2Parser] Detected encoding from XML declaration');
     try {
       if (encoding === 'windows-1251' || encoding === 'cp1251') {
         return this.decodeWindows1251(fileBuffer);
       }
-      console.log(`⚠️ [FB2Parser] Unsupported encoding ${encoding}, using UTF-8 fallback`);
+      logger.warn({ encoding }, '[FB2Parser] Unsupported encoding, using UTF-8 fallback');
     } catch (error) {
       console.warn(`⚠️ [FB2Parser] Failed to decode with ${encoding}:`, error);
     }
@@ -638,7 +688,7 @@ export class FB2Parser extends BaseBookParser {
    * Пытается декодировать из Windows-1251 с обработкой ошибок
    */
   private tryDecodeWindows1251(fileBuffer: Buffer, fallback: string): string {
-    console.log(`🔍 [FB2Parser] Detected encoding issues, trying Windows-1251 decode`);
+    logger.warn('[FB2Parser] Detected encoding issues, trying Windows-1251 decode');
     try {
       return this.decodeWindows1251(fileBuffer);
     } catch (error) {
@@ -727,7 +777,7 @@ export class FB2Parser extends BaseBookParser {
       const parser = new xml2js.Parser();
       const fb2Data = await parser.parseStringPromise(content);
 
-      const fictionBook = fb2Data?.FictionBook;
+      const fictionBook = fb2Data?.FictionBook as XmlElement | undefined;
       if (!fictionBook) {
         throw new Error('Invalid FB2 format: FictionBook element not found');
       }
@@ -757,23 +807,26 @@ export class FB2Parser extends BaseBookParser {
     }
   }
 
-  private async extractMetadata(fictionBook: any): Promise<Omit<BookMetadata, 'totalChapters'>> {
-    const description = fictionBook?.description?.[0];
+  private async extractMetadata(fictionBook: XmlElement): Promise<Omit<BookMetadata, 'totalChapters'>> {
+    const description = (fictionBook?.description as XmlElement[] | undefined)?.[0];
     if (!description) {
       throw new Error('No description section found in FB2');
     }
 
-    const titleInfo = description['title-info']?.[0];
-    const publishInfo = description['publish-info']?.[0];
+    const titleInfo = (description['title-info'] as XmlElement[] | undefined)?.[0];
+    const publishInfo = (description['publish-info'] as XmlElement[] | undefined)?.[0];
 
     // Извлечь основные метаданные
     const title = this.extractFB2Text(titleInfo?.['book-title']);
     const author = this.extractAuthorName(titleInfo?.author);
     const description_text = this.extractFB2Text(titleInfo?.annotation);
     const isbn = this.extractFB2Text(publishInfo?.isbn);
-    const language = titleInfo?.lang?.[0] || titleInfo?.['src-lang']?.[0];
+    const language = (titleInfo?.lang as string[] | undefined)?.[0]
+      || (titleInfo?.['src-lang'] as string[] | undefined)?.[0];
     const publisher = this.extractFB2Text(publishInfo?.publisher);
-    const publishDate = publishInfo?.year?.[0];
+    const publishDate = Array.isArray(publishInfo?.year)
+      ? (publishInfo?.year[0] as string | undefined)
+      : undefined;
 
     // Попытаться найти обложку
     let coverImageData: Buffer | undefined;
@@ -786,7 +839,7 @@ export class FB2Parser extends BaseBookParser {
         coverImageType = coverInfo.type;
       }
     } catch (error) {
-      console.log('Could not extract cover image:', error);
+      logger.warn({ error }, 'Could not extract cover image');
     }
 
     return {
@@ -802,10 +855,10 @@ export class FB2Parser extends BaseBookParser {
     };
   }
 
-  private extractFB2Text(element: any): string | undefined {
+  private extractFB2Text(element: unknown): string | undefined {
     if (!element || !Array.isArray(element)) return undefined;
 
-    const firstElement = element[0];
+    const firstElement = element[0] as unknown;
     if (typeof firstElement === 'string') return firstElement;
     if (typeof firstElement === 'object') {
       // Извлечь текст из вложенных элементов
@@ -815,19 +868,20 @@ export class FB2Parser extends BaseBookParser {
     return undefined;
   }
 
-  private extractTextFromFB2Element(element: any): string {
+  private extractTextFromFB2Element(element: unknown): string {
     if (typeof element === 'string') return element;
     if (!element) return '';
 
     let text = '';
 
     // Извлечь прямой текст
-    if (element._) text += element._;
+    const xmlElement = element as XmlElement;
+    if (typeof xmlElement._ === 'string') text += xmlElement._;
 
     // Рекурсивно извлечь из дочерних элементов
-    Object.keys(element).forEach(key => {
+    Object.keys(xmlElement).forEach(key => {
       if (key !== '$' && key !== '_') {
-        const childElement = element[key];
+        const childElement = xmlElement[key];
         if (Array.isArray(childElement)) {
           childElement.forEach(child => {
             text += this.extractTextFromFB2Element(child);
@@ -839,10 +893,10 @@ export class FB2Parser extends BaseBookParser {
     return text;
   }
 
-  private extractAuthorName(authors: any): string | undefined {
+  private extractAuthorName(authors: unknown): string | undefined {
     if (!authors || !Array.isArray(authors)) return undefined;
 
-    const author = authors[0];
+    const author = authors[0] as XmlElement | undefined;
     if (!author) return undefined;
 
     const firstName = this.extractFB2Text(author['first-name']) || '';
@@ -852,15 +906,15 @@ export class FB2Parser extends BaseBookParser {
     return [firstName, middleName, lastName].filter(Boolean).join(' ') || undefined;
   }
 
-  private findCoverImage(fictionBook: any): { data: string; type: string } | null {
-    const binaries = fictionBook?.binary;
+  private findCoverImage(fictionBook: XmlElement): { data: string; type: string } | null {
+    const binaries = fictionBook?.binary as XmlElement[] | undefined;
     if (!binaries || !Array.isArray(binaries)) return null;
 
     // 1. Попытка найти ID обложки из метаданных (description -> title-info -> coverpage -> image)
-    const description = fictionBook?.description?.[0];
-    const titleInfo = description?.['title-info']?.[0];
-    const coverpage = titleInfo?.coverpage?.[0];
-    const coverImage = coverpage?.image?.[0];
+    const description = (fictionBook?.description as XmlElement[] | undefined)?.[0];
+    const titleInfo = (description?.['title-info'] as XmlElement[] | undefined)?.[0];
+    const coverpage = (titleInfo?.coverpage as XmlElement[] | undefined)?.[0];
+    const coverImage = (coverpage?.image as XmlElement[] | undefined)?.[0];
 
     // xml2js может сохранять namespace в ключе атрибута, например "l:href"
     let coverImageId = coverImage?.$?.['l:href'] || coverImage?.$?.['href'];
@@ -871,18 +925,18 @@ export class FB2Parser extends BaseBookParser {
     }
 
     if (coverImageId) {
-      const binary = binaries.find((b: any) => b.$?.id === coverImageId);
+      const binary = binaries.find((b) => b.$?.id === coverImageId);
       if (binary) {
         const contentType = binary.$?.['content-type'];
         return {
-          data: binary._ || '',
+          data: typeof binary._ === 'string' ? binary._ : '',
           type: contentType || 'image/jpeg',
         };
       }
     }
 
     // 2. Fallback: Ищем бинарник с ID, содержащим "cover"
-    const coverBinary = binaries.find((b: any) => {
+    const coverBinary = binaries.find((b) => {
       const id = b.$?.id?.toLowerCase();
       return id && (id.includes('cover') || id === 'cover.jpg' || id === 'cover.png');
     });
@@ -890,7 +944,7 @@ export class FB2Parser extends BaseBookParser {
     if (coverBinary) {
       const contentType = coverBinary.$?.['content-type'];
       return {
-        data: coverBinary._ || '',
+        data: typeof coverBinary._ === 'string' ? coverBinary._ : '',
         type: contentType || 'image/jpeg',
       };
     }
@@ -900,7 +954,7 @@ export class FB2Parser extends BaseBookParser {
       const contentType = binary.$?.['content-type'];
       if (contentType?.startsWith('image/')) {
         return {
-          data: binary._ || '',
+          data: typeof binary._ === 'string' ? binary._ : '',
           type: contentType,
         };
       }
@@ -909,25 +963,25 @@ export class FB2Parser extends BaseBookParser {
     return null;
   }
 
-  private extractChapters(fictionBook: any): BookChapter[] {
-    const body = fictionBook?.body;
+  private extractChapters(fictionBook: XmlElement): BookChapter[] {
+    const body = fictionBook?.body as XmlElement[] | undefined;
     if (!body || !Array.isArray(body)) return [];
 
     const chapters: BookChapter[] = [];
     let chapterNumber = 1;
 
     // Обработать каждый body (может быть несколько)
-    body.forEach((bodyElement: any) => {
+    body.forEach((bodyElement) => {
       // Фильтр: пропускаем body с name="notes" (сноски, примечания)
       const bodyName = bodyElement?.$?.name?.toLowerCase();
       if (bodyName === 'notes' || bodyName === 'comments') {
-        console.log(`🔍 [FB2Parser] Пропуск секции <body name="${bodyName}">`);
+        logger.info({ bodyName }, '[FB2Parser] Skipping body section');
         return; // Пропускаем это body
       }
 
-      const sections = bodyElement?.section || [];
+      const sections = bodyElement?.section as XmlElement[] | undefined ?? [];
 
-      sections.forEach((section: any) => {
+      sections.forEach((section) => {
         const chapterContent = this.extractSectionContent(section);
         if (chapterContent.trim()) {
           // Попытаться извлечь заголовок
@@ -946,17 +1000,17 @@ export class FB2Parser extends BaseBookParser {
     return chapters;
   }
 
-  private extractSectionTitle(section: any): string | undefined {
-    const title = section?.title;
+  private extractSectionTitle(section: XmlElement): string | undefined {
+    const title = section?.title as XmlElement[] | undefined;
     if (!title || !Array.isArray(title)) return undefined;
 
-    const titleElement = title[0];
+    const titleElement = title[0] as XmlElement | undefined;
     
     // Если в заголовке несколько параграфов (обычно автор + название в антологиях)
-    const paragraphs = titleElement?.p;
+    const paragraphs = titleElement?.p as XmlElement[] | undefined;
     if (Array.isArray(paragraphs) && paragraphs.length > 1) {
       const parts = paragraphs
-        .map((p: any) => this.extractTextFromFB2Element(p))
+        .map((p) => this.extractTextFromFB2Element(p))
         .filter((text: string) => text?.trim());
       
       // Соединяем через точку с пробелом: "Автор. Название"
@@ -967,7 +1021,7 @@ export class FB2Parser extends BaseBookParser {
     return this.extractTextFromFB2Element(titleElement);
   }
 
-  private extractSectionContent(section: any): string {
+  private extractSectionContent(section: XmlElement): string {
     let content = '';
 
     // Обработать заголовок секции как <h3>
@@ -977,8 +1031,8 @@ export class FB2Parser extends BaseBookParser {
     }
 
     // Извлечь параграфы с сохранением HTML структуры
-    const paragraphs = section?.p || [];
-    paragraphs.forEach((paragraph: any) => {
+    const paragraphs = section?.p as XmlElement[] | undefined ?? [];
+    paragraphs.forEach((paragraph) => {
       const paragraphText = this.extractTextFromFB2Element(paragraph);
       if (paragraphText.trim()) {
         content += `<p>${this.escapeHtml(paragraphText)}</p>\n`;
@@ -986,8 +1040,8 @@ export class FB2Parser extends BaseBookParser {
     });
 
     // Обработать эпиграфы
-    const epigraphs = section?.epigraph || [];
-    epigraphs.forEach((epigraph: any) => {
+    const epigraphs = section?.epigraph as XmlElement[] | undefined ?? [];
+    epigraphs.forEach((epigraph) => {
       const epigraphText = this.extractTextFromFB2Element(epigraph);
       if (epigraphText.trim()) {
         content += `<blockquote class="epigraph">${this.escapeHtml(epigraphText)}</blockquote>\n`;
@@ -995,14 +1049,14 @@ export class FB2Parser extends BaseBookParser {
     });
 
     // Обработать стихи/поэмы
-    const poems = section?.poem || [];
-    poems.forEach((poem: any) => {
+    const poems = section?.poem as XmlElement[] | undefined ?? [];
+    poems.forEach((poem) => {
       content += '<div class="poem">';
-      const stanzas = poem?.stanza || [];
-      stanzas.forEach((stanza: any) => {
+      const stanzas = poem?.stanza as XmlElement[] | undefined ?? [];
+      stanzas.forEach((stanza) => {
         content += '<div class="stanza">';
-        const verses = stanza?.v || [];
-        verses.forEach((verse: any) => {
+        const verses = stanza?.v as XmlElement[] | undefined ?? [];
+        verses.forEach((verse) => {
           const verseText = this.extractTextFromFB2Element(verse);
           if (verseText.trim()) {
             content += `<p class="verse">${this.escapeHtml(verseText)}</p>`;
@@ -1014,8 +1068,8 @@ export class FB2Parser extends BaseBookParser {
     });
 
     // Рекурсивно обработать подсекции
-    const subsections = section?.section || [];
-    subsections.forEach((subsection: any) => {
+    const subsections = section?.section as XmlElement[] | undefined ?? [];
+    subsections.forEach((subsection) => {
       content += this.extractSectionContent(subsection);
     });
 

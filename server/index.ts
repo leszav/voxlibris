@@ -9,6 +9,7 @@ import { createServer } from "node:http";
 import cookieParser from "cookie-parser";
 import cors from "cors";
 import express from "express";
+import type { Request, Response, NextFunction } from "express";
 import rateLimit from "express-rate-limit";
 import slowDown from "express-slow-down";
 import helmet from "helmet";
@@ -27,6 +28,14 @@ import { serveStatic } from "./static.js";
 import { setupWebSocketHandlers } from "./websocket.js";
 import { initializeReaderWebSocket } from "./websocket-reader.js";
 import { initializeChatWebSocket } from "./websocket-chat.js";
+import { setupReadingSessionsHandlers } from "./websocket/reading-sessions.js";
+import { scheduler } from "./services/scheduler.js";
+import webrtcRoutes from "./routes/webrtc.js";
+import readingSessionsRoutes from "./routes/reading-sessions.js";
+import reactionsRoutes from "./routes/reactions.js";
+import questionsRoutes from "./routes/questions.js";
+import scheduleRoutes from "./routes/schedule.js";
+import { logger } from "./lib/logger.js";
 
 export const app = express();
 
@@ -58,11 +67,11 @@ export function log(message: string, source = "express") {
 		hour12: true,
 	});
 
-	console.log(`${formattedTime} [${source}] ${message}`);
+	logger.info(`${formattedTime} [${source}] ${message}`);
 }
 
 // Функция для маскирования чувствительных данных в логах
-function maskSensitiveData(obj: any): any {
+function maskSensitiveData(obj: unknown): unknown {
 	if (!obj || typeof obj !== "object") return obj;
 
 	const sensitiveKeys = [
@@ -74,14 +83,16 @@ function maskSensitiveData(obj: any): any {
 		"accesstoken",
 		"refreshtoken",
 	];
-	const masked = Array.isArray(obj) ? [...obj] : { ...obj };
+	const masked: Record<string, unknown> | unknown[] = Array.isArray(obj) ? [...obj] : { ...(obj as Record<string, unknown>) };
 
-	for (const key in masked) {
-		const lowerKey = key.toLowerCase();
-		if (sensitiveKeys.some((sensitive) => lowerKey.includes(sensitive))) {
-			masked[key] = "***";
-		} else if (typeof masked[key] === "object" && masked[key] !== null) {
-			masked[key] = maskSensitiveData(masked[key]);
+	if (!Array.isArray(masked)) {
+		for (const key in masked) {
+			const lowerKey = key.toLowerCase();
+			if (sensitiveKeys.some((sensitive) => lowerKey.includes(sensitive))) {
+				masked[key] = "***";
+			} else if (typeof masked[key] === "object" && masked[key] !== null) {
+				masked[key] = maskSensitiveData(masked[key]);
+			}
 		}
 	}
 
@@ -210,18 +221,22 @@ setupAuthRoutes(app);
 ); // 1 hour
 
 // Setup WebSocket handlers for live reading
-const socketIO = setupWebSocketHandlers(io);
+setupWebSocketHandlers(io);
 
 // Initialize Reader WebSocket (JWT-based authentication)
-const readerIO = initializeReaderWebSocket(httpServer);
+initializeReaderWebSocket(httpServer);
 
 // Initialize Club Chat WebSocket
-const chatIO = initializeChatWebSocket(httpServer);
+initializeChatWebSocket(httpServer);
+
+// Initialize Reading Sessions WebSocket namespace
+const readingSessionsNamespace = io.of('/reading-sessions');
+setupReadingSessionsHandlers(io, readingSessionsNamespace);
 
 app.use((req, res, next) => {
 	const start = Date.now();
 	const path = req.path;
-	let capturedJsonResponse: Record<string, any> | undefined;
+	let capturedJsonResponse: Record<string, unknown> | undefined;
 
 	const originalResJson = res.json;
 	res.json = (bodyJson, ...args) => {
@@ -249,8 +264,9 @@ app.use((req, res, next) => {
 try {
 	validateEnvironment();
 	log("Environment validation passed");
-} catch (error: any) {
-	console.error("Environment validation failed:", error.message);
+} catch (error: unknown) {
+	const errorMessage = error instanceof Error ? error.message : String(error);
+	console.error("Environment validation failed:", errorMessage);
 	process.exit(1);
 }
 
@@ -274,10 +290,31 @@ try {
 	// Setup Reader routes (JWT protected)
 	app.use("/api/v1/books", jwtAuth, readerRoutes);
 
+	// Setup WebRTC routes (JWT protected)
+	app.use("/api/webrtc", jwtAuth, webrtcRoutes);
+
+	// Setup Reading Sessions routes (JWT protected)
+	app.use("/api/reading-sessions", jwtAuth, readingSessionsRoutes);
+
+	// Setup Reactions routes (JWT protected)
+	app.use("/api/reactions", jwtAuth, reactionsRoutes);
+
+	// Setup Questions routes (JWT protected)
+	app.use("/api/questions", jwtAuth, questionsRoutes);
+
+	// Setup Schedule routes (JWT protected)
+	app.use("/api/schedule", jwtAuth, scheduleRoutes);
+
+	// Start scheduler for notifications (only in production or if enabled)
+	if (process.env.NODE_ENV === 'production' || process.env.ENABLE_SCHEDULER === 'true') {
+		scheduler.start();
+	}
+
 	// Error handling middleware
-	app.use((err: any, _req: any, res: any, _next: any) => {
-		const status = err.status || err.statusCode || 500;
-		const message = err.message || "Internal Server Error";
+	app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+		const errorLike = err as { status?: number; statusCode?: number; message?: string };
+		const status = errorLike.status ?? errorLike.statusCode ?? 500;
+		const message = errorLike.message || "Internal Server Error";
 		res.status(status).json({ message });
 		throw err;
 	});

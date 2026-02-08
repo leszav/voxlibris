@@ -91,12 +91,14 @@ export class PersonalBooksRepository extends BaseRepository {
    */
   async updatePersonalBook(id: string, updates: Partial<InsertPersonalBook>): Promise<PersonalBook | undefined> {
     try {
+      const updateData: Partial<typeof personalBooks.$inferInsert> = {
+        ...(updates as Partial<typeof personalBooks.$inferInsert>),
+        updatedAt: new Date(),
+      };
+
       const result = await this.db
         .update(personalBooks)
-        .set({
-          ...(updates as any),
-          updatedAt: new Date(),
-        })
+        .set(updateData)
         .where(eq(personalBooks.id, id))
         .returning();
 
@@ -135,8 +137,9 @@ export class PersonalBooksRepository extends BaseRepository {
         await tx
           .delete(bookAccessLogs)
           .where(and(eq(bookAccessLogs.bookId, id), eq(bookAccessLogs.bookType, "PERSONAL")))
-          .catch((error: any) => {
-            if (error?.code === "42P01") return;
+          .catch((error: unknown) => {
+            const pgError = error as { code?: string };
+            if (pgError?.code === "42P01") return;
             throw error;
           });
 
@@ -189,8 +192,9 @@ export class PersonalBooksRepository extends BaseRepository {
         await tx
           .delete(bookAccessLogs)
           .where(and(eq(bookAccessLogs.bookId, id), eq(bookAccessLogs.bookType, "PERSONAL")))
-          .catch((error: any) => {
-            if (error?.code === "42P01") return;
+          .catch((error: unknown) => {
+            const pgError = error as { code?: string };
+            if (pgError?.code === "42P01") return;
             throw error;
           });
 

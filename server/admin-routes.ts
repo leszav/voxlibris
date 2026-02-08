@@ -3,10 +3,11 @@ import { jwtAuth, requireAdmin } from './jwt-middleware.js';
 import { storage } from './repositories/index.js';
 import { authService } from './auth-service.js';
 import { emailService } from './services/email-service.js';
-import type { UserRole, UserStatus } from '../shared/schema.js';
+import type { UserRole, UserStatus, AdminActionType, AdminActionTargetType } from '../shared/schema.js';
 import { db } from './db.js';
 import postgres from 'postgres';
 import { books, personalBooks, clubBooks } from '../shared/schema.js';
+import { logger } from './lib/logger.js';
 const PostgresError = postgres.PostgresError;
 
 const router = express.Router();
@@ -27,8 +28,8 @@ const requireFullAdmin = (req: express.Request, res: express.Response, next: exp
 // Интерфейс для логирования действий администратора (KISS: группируем параметры)
 interface AdminActionLog {
   adminId: string;
-  actionType: string;
-  targetType: string;
+  actionType: AdminActionType;
+  targetType: AdminActionTargetType;
   targetId: string;
   reason?: string;
   previousValue?: string;
@@ -59,8 +60,8 @@ const logAdminAction = async (params: AdminActionLog) => {
 // Helper для упрощения вызовов (KISS: уменьшаем повторяющийся код)
 const logAction = (
   req: express.Request,
-  actionType: string,
-  targetType: string,
+  actionType: AdminActionType,
+  targetType: AdminActionTargetType,
   targetId: string,
   reason?: string,
   previousValue?: string,
@@ -106,7 +107,7 @@ router.get('/users', jwtAuth, requireAdmin, async (req, res) => {
     const paginatedUsers = filteredUsers.slice(offset, offset + Number(limit));
 
     const usersWithStats = await Promise.all(paginatedUsers.map(async (user) => {
-      const { password, createdAt, lastActivityAt, ...rest } = user;
+      const { password: _password, createdAt, lastActivityAt, ...rest } = user;
 
       const personalBooks = await storage.getPersonalBooksByUser(user.id);
       const booksRead = personalBooks.filter(book => !book.isDeleted).length;
@@ -170,7 +171,7 @@ router.put('/users/:username/role', jwtAuth, requireFullAdmin, async (req, res) 
       role
     );
 
-    const { password, ...safeUser } = updatedUser;
+    const { password: _password, ...safeUser } = updatedUser;
     res.json({ user: safeUser });
   } catch (error) {
     console.error('Error updating user role:', error);
@@ -204,7 +205,7 @@ router.put('/users/:username/status', jwtAuth, requireAdmin, async (req, res) =>
       status
     );
 
-    const { password, ...safeUser } = updatedUser;
+    const { password: _password, ...safeUser } = updatedUser;
     res.json({ user: safeUser });
   } catch (error) {
     console.error('Error updating user status:', error);
@@ -256,7 +257,7 @@ router.post('/users/:id/reset-password', jwtAuth, requireFullAdmin, async (req, 
 router.get('/users/pending', jwtAuth, requireAdmin, async (req, res) => {
   try {
     const pendingUsers = await storage.getPendingUsers();
-    const safeUsers = pendingUsers.map(({ password, ...user }) => user);
+    const safeUsers = pendingUsers.map(({ password: _password, ...user }) => user);
 
     res.json({ users: safeUsers });
   } catch (error) {
@@ -338,7 +339,7 @@ router.put('/users/:id/restore', jwtAuth, requireAdmin, async (req, res) => {
       'active'
     );
 
-    const { password, ...safeUser } = restoredUser;
+    const { password: _password, ...safeUser } = restoredUser;
     res.json({ user: safeUser, message: 'User restored successfully' });
   } catch (error) {
     console.error('Error restoring user:', error);
@@ -405,7 +406,7 @@ router.get('/users/deleted', jwtAuth, requireAdmin, async (req, res) => {
     const deletedUsers = await storage.getDeletedUsers();
 
     const usersWithStats = await Promise.all(deletedUsers.map(async (user) => {
-      const { password, createdAt, lastActivityAt, ...rest } = user;
+      const { password: _password, createdAt, lastActivityAt, ...rest } = user;
 
       const personalBooks = await storage.getPersonalBooksByUser(user.id);
       const booksRead = personalBooks.filter(book => !book.isDeleted).length;
@@ -510,13 +511,13 @@ function formatBookForAdmin(book: BookWithSource, usersMap: Map<string, string>)
   
   switch (book.source) {
     case 'books':
-      bookData = formatSystemBookForAdmin(book as any, usersMap);
+      bookData = formatSystemBookForAdmin(book, usersMap);
       break;
     case 'personal_books':
-      bookData = formatPersonalBookForAdmin(book as any, usersMap);
+      bookData = formatPersonalBookForAdmin(book, usersMap);
       break;
     case 'club_books':
-      bookData = formatClubBookForAdmin(book as any, usersMap);
+      bookData = formatClubBookForAdmin(book, usersMap);
       break;
     default:
       bookData = {
@@ -1049,13 +1050,28 @@ router.get('/settings', jwtAuth, requireAdmin, async (req, res) => {
     const settings = await storage.getSystemSettings(category as string);
 
     // Группируем настройки по категориям для удобного отображения
-    const grouped = settings.reduce((acc: any, setting) => {
+    type GroupedSettings = Record<
+      string,
+      Record<
+        string,
+        {
+          value: unknown;
+          type: string;
+          description: string | null;
+          isPublic: boolean;
+          updatedAt: Date;
+          updatedBy: string | null;
+        }
+      >
+    >;
+
+    const grouped = settings.reduce<GroupedSettings>((acc, setting) => {
       if (!acc[setting.category]) {
         acc[setting.category] = {};
       }
 
       // Парсим значение в зависимости от типа
-      let value: any = setting.value;
+      let value: unknown = setting.value;
       try {
         switch (setting.type) {
           case 'boolean':
@@ -1208,7 +1224,7 @@ router.put('/settings/smtp', jwtAuth, requireFullAdmin, async (req, res) => {
     // Сбрасываем транспорт email сервиса для применения новых настроек
     emailService.resetTransporter();
 
-    console.log(`[Admin] SMTP settings updated by ${req.user!.username}`);
+    logger.info({ admin: req.user?.username }, 'SMTP settings updated');
 
     res.json({ 
       success: true,
@@ -1371,7 +1387,7 @@ router.get('/reports', jwtAuth, requireAdmin, async (req, res) => {
   try {
     const { page = 1, limit = 20, status, type, assignedTo } = req.query;
 
-    const filters: any = {};
+    const filters: { status?: string; type?: string; assignedTo?: string } = {};
     if (status) filters.status = status as string;
     if (type) filters.type = type as string;
     if (assignedTo) filters.assignedTo = assignedTo as string;
@@ -1443,12 +1459,12 @@ router.get('/settings/smtp', jwtAuth, requireFullAdmin, async (req, res) => {
     const smtpSettings = await storage.getSettingsByCategory('smtp');
     
     // Формируем объект настроек, исключая пароль в явном виде
-    const settings: Record<string, any> = {};
+    const settings: Record<string, string> = {};
     smtpSettings.forEach(setting => {
       if (setting.key === 'smtp.password') {
         settings[setting.key] = setting.value ? '********' : '';
       } else {
-        settings[setting.key] = setting.value;
+        settings[setting.key] = setting.value ?? '';
       }
     });
 

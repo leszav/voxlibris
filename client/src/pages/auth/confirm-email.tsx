@@ -1,9 +1,8 @@
 import { AlertCircle, CheckCircle, Loader2, Mail, Mic, XCircle } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Link, useLocation, useRoute } from "wouter";
+import { Link, useRoute } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { useToast } from "@/hooks/use-toast";
 
 interface ConfirmEmailResponse {
   success: boolean;
@@ -13,8 +12,6 @@ interface ConfirmEmailResponse {
 
 export default function ConfirmEmail() {
   const [, params] = useRoute("/confirm-email/:token");
-  const [, setLocation] = useLocation();
-  const { toast } = useToast();
   const token = params?.token || "";
 
   const [status, setStatus] = useState<"loading" | "success" | "error" | "idle">("loading");

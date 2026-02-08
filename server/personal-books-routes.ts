@@ -5,9 +5,11 @@ import { BookFormat } from '../shared/schema.js';
 import { jwtAuth, requireActiveUser } from './jwt-middleware.js';
 import crypto from 'node:crypto';
 import { BookParserFactory } from './book-parser.js';
+import type { BookMetadata, BookChapter } from './book-parser.js';
 import { CryptoService } from './crypto-service.js';
 import { fileStorage } from './file-storage.js';
 import { duplicateDetectionService } from './duplicate-detection-service.js';
+import { logger } from './lib/logger.js';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -19,13 +21,18 @@ interface UploadSession {
     originalName: string;
     mimeType: string;
     fileSize: number;
-    parsedMetadata: any;
+    parsedMetadata: UploadMetadata;
     createdAt: Date;
 }
 
+type UploadMetadata = Partial<BookMetadata> & {
+    coverImageData?: Buffer | string | null;
+    coverImageType?: string | null;
+};
+
 // Cache for parsed books (to avoid re-parsing on every request)
 interface ParsedBookCache {
-    chapters: any[];
+    chapters: BookChapter[];
     title: string;
     author: string;
     totalChapters: number;
@@ -53,7 +60,7 @@ function evictLRUCache(): void {
     }
     if (oldestKey) {
         bookCache.delete(oldestKey);
-        console.log(`🗑️ [Cache LRU] Evicted book ${oldestKey}`);
+        logger.info({ bookId: oldestKey }, '[Cache LRU] Evicted book');
     }
 }
 
@@ -70,7 +77,7 @@ setInterval(async () => {
                 console.warn(`[Cleanup] Failed to delete temp file ${session.tempStorageKey}:`, e);
             }
             uploadSessions.delete(id);
-            console.log(`🗑️ [Cleanup] Removed expired upload session ${id}`);
+            logger.info({ sessionId: id }, '[Cleanup] Removed expired upload session');
         }
     }
     
@@ -78,7 +85,7 @@ setInterval(async () => {
     for (const [bookId, cached] of Array.from(bookCache.entries())) {
         if (now.getTime() - cached.cachedAt.getTime() > CACHE_TTL_MS) {
             bookCache.delete(bookId);
-            console.log(`🗑️ [Cache] Removed expired cache for book ${bookId}`);
+            logger.info({ bookId }, '[Cache] Removed expired cache');
         }
     }
 }, 3600000);
@@ -95,7 +102,7 @@ router.post('/upload', jwtAuth, requireActiveUser, upload.single('file'), async 
         }
 
         const parser = BookParserFactory.createParser(fileType);
-        let metadata: any = {};
+        let metadata: UploadMetadata = {};
 
         try {
             const parsedBook = await parser.parseBook(req.file.buffer, req.file.originalname);
@@ -133,14 +140,14 @@ router.post('/upload', jwtAuth, requireActiveUser, upload.single('file'), async 
 
         // Convert cover image buffer to base64 string for preview
         let coverPreview: string | undefined;
-        if (metadata.coverImageData) {
-            const buffer = metadata.coverImageData as Buffer;
+        if (metadata.coverImageData && Buffer.isBuffer(metadata.coverImageData)) {
+            const buffer = metadata.coverImageData;
             const type = metadata.coverImageType || 'image/jpeg';
             coverPreview = `data:${type};base64,${buffer.toString('base64')}`;
         }
 
         // Remove raw buffer from metadata to avoid huge JSON and client issues
-        const { coverImageData, ...cleanMetadata } = metadata;
+        const { coverImageData: _coverImageData, ...cleanMetadata } = metadata;
 
         res.json({
             sessionId,
@@ -168,7 +175,7 @@ router.post('/upload', jwtAuth, requireActiveUser, upload.single('file'), async 
 
 // Helper: Process cover image
 async function processPersonalCoverImage(
-    metadata: any,
+    metadata: UploadMetadata,
     session: UploadSession,
     userId: string,
     sessionId: string
@@ -363,12 +370,16 @@ router.patch('/:id', jwtAuth, async (req, res) => {
     if (!book) return res.status(404).json({ error: 'Book not found' });
     if (book.userId !== req.user.id) return res.status(403).json({ error: 'Forbidden' });
 
-    const updates = req.body;
+    const updates = req.body as Record<string, unknown>;
     // Filter allowed updates
-    const allowedUpdates = ['title', 'author', 'description', 'publicationYear', 'genre', 'language'];
-    const filteredUpdates: any = {};
+    const allowedUpdates = ['title', 'author', 'description', 'publicationYear', 'genre', 'language'] as const;
+    type AllowedUpdate = typeof allowedUpdates[number];
+    const filteredUpdates: Partial<Parameters<typeof storage.updatePersonalBook>[1]> = {};
     for (const key of allowedUpdates) {
-        if (updates[key] !== undefined) filteredUpdates[key] = updates[key];
+        const value = updates[key];
+        if (value !== undefined) {
+            filteredUpdates[key as AllowedUpdate] = value as never;
+        }
     }
 
     const updatedBook = await storage.updatePersonalBook(req.params.id, filteredUpdates);
@@ -405,7 +416,7 @@ router.get('/:id/content', jwtAuth, async (req, res) => {
         let cached = bookCache.get(book.id);
         
         if (!cached || cached === undefined) {
-            console.log(`📚 [Cache MISS] Parsing book ${book.id} (${book.title})`);
+            logger.info({ bookId: book.id, title: book.title }, '[Cache MISS] Parsing book');
             
             // Получаем зашифрованный файл из S3
             const encryptedFile = await fileStorage.getFile(book.storagePath);
@@ -432,10 +443,13 @@ router.get('/:id/content', jwtAuth, async (req, res) => {
             };
             bookCache.set(book.id, cached);
             evictLRUCache();
-            console.log(`✅ [Cache] Cached book ${book.id} with ${cached.totalChapters} chapters (cache size: ${bookCache.size}/${MAX_CACHE_SIZE})`);
+            logger.info(
+                { bookId: book.id, chapters: cached.totalChapters, size: bookCache.size, max: MAX_CACHE_SIZE },
+                '[Cache] Cached book'
+            );
         } else {
             cached.lastAccessedAt = new Date();
-            console.log(`⚡ [Cache HIT] Returning cached book ${book.id}`);
+            logger.info({ bookId: book.id }, '[Cache HIT] Returning cached book');
         }
 
         // Если запрошена конкретная глава

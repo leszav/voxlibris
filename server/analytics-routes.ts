@@ -1,9 +1,10 @@
 import { Router, Request, Response } from 'express';
 import { db } from './db.js';
-import { analyticsEvents, books, users, clubs, type InsertAnalyticsEvent } from '../shared/schema.js';
+import { analyticsEvents, books, users, type InsertAnalyticsEvent } from '../shared/schema.js';
 import { jwtAuth, requireAdmin } from './jwt-middleware.js';
 import { eq, sql, and, gte, desc, count, inArray } from 'drizzle-orm';
 import { kpiCalculator } from './analytics/kpi-calculator.js';
+import { logger } from './lib/logger.js';
 
 const router = Router();
 
@@ -197,12 +198,15 @@ router.get('/stats', jwtAuth, requireAdmin, async (req: Request, res: Response) 
       .groupBy(sql`DATE(${analyticsEvents.createdAt})`)
       .orderBy(sql`DATE(${analyticsEvents.createdAt})`);
 
+    const topBooksFiltered = topBooks.filter((book) => Boolean(book.bookId));
+    const topUsersFiltered = topUsers.filter((user) => Boolean(user.userId));
+
     res.json({
       period,
       totalEvents: totalEventsResult.count,
       eventsByType,
-      topBooks: topBooks.filter((b: any) => b.bookId), // Убираем записи без книг
-      topUsers: topUsers.filter((u: any) => u.userId), // Убираем записи без пользователей
+      topBooks: topBooksFiltered, // Убираем записи без книг
+      topUsers: topUsersFiltered, // Убираем записи без пользователей
       clubStats,
       avgReadingTime: Math.round(avgReadingTimeResult.avgDuration || 0),
       eventsTrend,
@@ -277,7 +281,7 @@ router.get('/book/:bookId', jwtAuth, requireAdmin, async (req: Request, res: Res
       opens: openCount.count,
       completions: completeCount.count,
       avgReadingTime: Math.round(avgTime.avgDuration || 0),
-      popularChapters: popularChapters.filter((c: any) => c.chapterNumber),
+      popularChapters: popularChapters.filter((chapter) => chapter.chapterNumber !== null),
     });
   } catch (error) {
     console.error('[Analytics] Error fetching book stats:', error);
@@ -294,7 +298,7 @@ router.get('/kpi', jwtAuth, requireAdmin, async (req: Request, res: Response) =>
     const { period = '30' } = req.query;
     const periodDays = parseInt(period as string, 10) || 30;
 
-    console.log(`[Analytics] Calculating KPIs for period: ${periodDays} days`);
+    logger.info({ periodDays }, '[Analytics] Calculating KPIs');
     
     const kpis = await kpiCalculator.calculateKPIs(periodDays);
 

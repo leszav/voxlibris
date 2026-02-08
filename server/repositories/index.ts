@@ -8,13 +8,27 @@ import { ModerationRepository } from './ModerationRepository.js';
 import { AnalyticsRepository } from './AnalyticsRepository.js';
 import { SystemRepository } from './SystemRepository.js';
 
+// VoxLibris Studio repositories
+import { ClubReadingStatusRepository } from './ClubReadingStatusRepository.js';
+import { SessionReactionsRepository } from './SessionReactionsRepository.js';
+import { SessionQuestionsRepository } from './SessionQuestionsRepository.js';
+import { SessionAnalyticsRepository } from './SessionAnalyticsRepository.js';
+import { ClubMonetizationRepository } from './ClubMonetizationRepository.js';
+import { ReaderEarningsRepository } from './ReaderEarningsRepository.js';
+import { ListenerPaymentsRepository } from './ListenerPaymentsRepository.js';
+import { ClubSubscriptionsRepository } from './ClubSubscriptionsRepository.js';
+import { ReadingScheduleRepository } from './ReadingScheduleRepository.js';
+import { SessionRecordingsRepository } from './SessionRecordingsRepository.js';
+import { ReaderQualityRatingsRepository } from './ReaderQualityRatingsRepository.js';
+import type { ReadingSessionWithDetails, InvitationStatus } from '../../shared/schema.js';
+
 /**
  * Интерфейс для обратной совместимости со старым IStorage
  * Используется только для типизации StorageAdapter
  */
-export interface IStorage {
-  [key: string]: any;
-}
+export interface IStorage {}
+
+type LegacyReadingSessionStatus = 'active' | 'paused' | 'completed' | 'cancelled';
 
 /**
  * Главный композитный репозиторий - архитектурная замена монолитного storage.ts
@@ -41,6 +55,19 @@ export class RepositoryContainer {
   private _moderation?: ModerationRepository;
   private _analytics?: AnalyticsRepository;
   private _system?: SystemRepository;
+
+  // VoxLibris Studio repositories
+  private _clubReadingStatus?: ClubReadingStatusRepository;
+  private _sessionReactions?: SessionReactionsRepository;
+  private _sessionQuestions?: SessionQuestionsRepository;
+  private _sessionAnalytics?: SessionAnalyticsRepository;
+  private _clubMonetization?: ClubMonetizationRepository;
+  private _readerEarnings?: ReaderEarningsRepository;
+  private _listenerPayments?: ListenerPaymentsRepository;
+  private _clubSubscriptions?: ClubSubscriptionsRepository;
+  private _readingSchedule?: ReadingScheduleRepository;
+  private _sessionRecordings?: SessionRecordingsRepository;
+  private _readerQualityRatings?: ReaderQualityRatingsRepository;
 
   // Ленивая инициализация репозиториев
   get users(): UserRepository {
@@ -87,6 +114,62 @@ export class RepositoryContainer {
     this._system ??= new SystemRepository();
     return this._system;
   }
+
+  // VoxLibris Studio getters
+  get clubReadingStatus(): ClubReadingStatusRepository {
+    this._clubReadingStatus ??= new ClubReadingStatusRepository();
+    return this._clubReadingStatus;
+  }
+
+  get sessionReactions(): SessionReactionsRepository {
+    this._sessionReactions ??= new SessionReactionsRepository();
+    return this._sessionReactions;
+  }
+
+  get sessionQuestions(): SessionQuestionsRepository {
+    this._sessionQuestions ??= new SessionQuestionsRepository();
+    return this._sessionQuestions;
+  }
+
+  get sessionAnalytics(): SessionAnalyticsRepository {
+    this._sessionAnalytics ??= new SessionAnalyticsRepository();
+    return this._sessionAnalytics;
+  }
+
+  get clubMonetization(): ClubMonetizationRepository {
+    this._clubMonetization ??= new ClubMonetizationRepository();
+    return this._clubMonetization;
+  }
+
+  get readerEarnings(): ReaderEarningsRepository {
+    this._readerEarnings ??= new ReaderEarningsRepository();
+    return this._readerEarnings;
+  }
+
+  get listenerPayments(): ListenerPaymentsRepository {
+    this._listenerPayments ??= new ListenerPaymentsRepository();
+    return this._listenerPayments;
+  }
+
+  get clubSubscriptions(): ClubSubscriptionsRepository {
+    this._clubSubscriptions ??= new ClubSubscriptionsRepository();
+    return this._clubSubscriptions;
+  }
+
+  get readingSchedule(): ReadingScheduleRepository {
+    this._readingSchedule ??= new ReadingScheduleRepository();
+    return this._readingSchedule;
+  }
+
+  get sessionRecordings(): SessionRecordingsRepository {
+    this._sessionRecordings ??= new SessionRecordingsRepository();
+    return this._sessionRecordings;
+  }
+
+  get readerQualityRatings(): ReaderQualityRatingsRepository {
+    this._readerQualityRatings ??= new ReaderQualityRatingsRepository();
+    return this._readerQualityRatings;
+  }
 }
 
 /**
@@ -95,10 +178,160 @@ export class RepositoryContainer {
  */
 class StorageAdapter implements Partial<IStorage> {
   private readonly repos: RepositoryContainer;
+  private readonly readingSessionRoomIds = new Map<string, string>();
+  private readonly readingSessionStatusOverrides = new Map<string, LegacyReadingSessionStatus>();
 
   constructor() {
     this.repos = new RepositoryContainer();
   }
+
+  private getLegacySessionStatus(session: ReadingSessionWithDetails): LegacyReadingSessionStatus {
+    const override = this.readingSessionStatusOverrides.get(session.id);
+    if (override) {
+      return override;
+    }
+    if (session.isLive) {
+      return 'active';
+    }
+    if (session.isActive === false) {
+      return 'completed';
+    }
+    return 'paused';
+  }
+
+  private toLegacySession(session: ReadingSessionWithDetails) {
+    return {
+      ...session,
+      userId: session.readerId,
+      chapter: session.currentChapter,
+      position: session.currentPosition,
+      status: this.getLegacySessionStatus(session),
+      listenerCount: session.listenerCount ?? 0,
+      roomId: this.readingSessionRoomIds.get(session.id),
+    };
+  }
+
+  readonly readingSessions = {
+    createSession: async (params: {
+      clubId: string;
+      bookId: string;
+      userId: string;
+      chapter?: number;
+      status?: LegacyReadingSessionStatus;
+      position?: string;
+      title?: string;
+    }) => {
+      const { clubId, bookId, userId, chapter, status, position, title } = params;
+
+      const book = await this.repos.books.getBook(bookId);
+      const sessionTitle = title ?? book?.title ?? 'Reading Session';
+
+      const created = await this.repos.reading.createReadingSession({
+        clubId,
+        bookId,
+        title: sessionTitle,
+        currentChapter: chapter ?? 1,
+        currentPosition: position ?? null,
+        readerId: userId,
+      });
+
+      if (status) {
+        await this.repos.reading.updateSessionStatus(created.id, status);
+        if (status === 'cancelled') {
+          this.readingSessionStatusOverrides.set(created.id, status);
+        }
+      }
+
+      const session = await this.repos.reading.getReadingSession(created.id);
+      return session ? this.toLegacySession(session) : undefined;
+    },
+
+    getSession: async (sessionId: string) => {
+      const session = await this.repos.reading.getReadingSession(sessionId);
+      return session ? this.toLegacySession(session) : undefined;
+    },
+
+    getClubSessions: async (clubId: string) => {
+      const sessions = await this.repos.reading.getSessionsByClub(clubId);
+      return sessions.map(session => this.toLegacySession(session));
+    },
+
+    getClubSessionsByStatus: async (clubId: string, status: LegacyReadingSessionStatus) => {
+      const sessions = await this.repos.reading.getSessionsByClub(clubId);
+      return sessions
+        .map(session => this.toLegacySession(session))
+        .filter(session => session.status === status);
+    },
+
+    getBookSessions: async (bookId: string) => {
+      const sessions = await this.repos.reading.getSessionsByBook(bookId);
+      return sessions.map(session => this.toLegacySession(session));
+    },
+
+    getUserActiveSession: async (userId: string) => {
+      const session = await this.repos.reading.getActiveSessionForReader(userId);
+      return session ? this.toLegacySession(session) : undefined;
+    },
+
+    updateSessionStatus: async (sessionId: string, status: LegacyReadingSessionStatus) => {
+      await this.repos.reading.updateSessionStatus(sessionId, status);
+      if (status === 'cancelled') {
+        this.readingSessionStatusOverrides.set(sessionId, status);
+      } else {
+        this.readingSessionStatusOverrides.delete(sessionId);
+      }
+      const session = await this.repos.reading.getReadingSession(sessionId);
+      return session ? this.toLegacySession(session) : undefined;
+    },
+
+    updateSessionPosition: async (sessionId: string, position?: string, chapter?: number) => {
+      const current = await this.repos.reading.getReadingSession(sessionId);
+      if (!current) {
+        return undefined;
+      }
+
+      const nextChapter = chapter ?? current.currentChapter;
+      const nextPosition = position ?? current.currentPosition ?? '';
+
+      await this.repos.reading.updateSessionPosition(sessionId, nextChapter, nextPosition);
+      const updated = await this.repos.reading.getReadingSession(sessionId);
+      return updated ? this.toLegacySession(updated) : undefined;
+    },
+
+    updateListenerCount: async (sessionId: string, count: number) => {
+      const status = await this.repos.clubReadingStatus.getReadingStatusBySessionId(sessionId);
+      if (status) {
+        await this.repos.clubReadingStatus.updateListenerCount(status.id, count);
+      }
+      const session = await this.repos.reading.getReadingSession(sessionId);
+      return session ? this.toLegacySession(session) : undefined;
+    },
+
+    addSessionListener: async (sessionId: string, userId: string) => {
+      return this.repos.reading.joinSession(sessionId, userId);
+    },
+
+    removeSessionListener: async (sessionId: string, userId: string) => {
+      return this.repos.reading.leaveSession(sessionId, userId);
+    },
+
+    getSessionListenerCount: async (sessionId: string) => {
+      return this.repos.reading.getActiveListenersCount(sessionId);
+    },
+
+    getSessionListeners: async (sessionId: string) => {
+      return this.repos.reading.getSessionListeners(sessionId);
+    },
+
+    endSession: async (sessionId: string) => {
+      await this.repos.reading.endSession(sessionId);
+      this.readingSessionStatusOverrides.delete(sessionId);
+    },
+
+    updateSessionRoomId: async (sessionId: string, roomId: string) => {
+      this.readingSessionRoomIds.set(sessionId, roomId);
+    },
+  };
 
   // =================================================================
   // User Domain Delegation - делегирование пользовательского домена
@@ -116,15 +349,15 @@ class StorageAdapter implements Partial<IStorage> {
     return this.repos.users.getUserByEmail(email);
   }
 
-  async createUser(user: any) {
+  async createUser(user: Parameters<UserRepository['createUser']>[0]) {
     return this.repos.users.createUser(user);
   }
 
-  async updateUserRole(username: string, role: any) {
+  async updateUserRole(username: string, role: Parameters<UserRepository['updateUserRole']>[1]) {
     return this.repos.users.updateUserRole(username, role);
   }
 
-  async updateUserStatus(username: string, status: any) {
+  async updateUserStatus(username: string, status: Parameters<UserRepository['updateUserStatus']>[1]) {
     return this.repos.users.updateUserStatus(username, status);
   }
 
@@ -218,11 +451,11 @@ class StorageAdapter implements Partial<IStorage> {
     return this.repos.books.searchBooks(query);
   }
 
-  async createBook(book: any) {
+  async createBook(book: Parameters<BookRepository['createBook']>[0]) {
     return this.repos.books.createBook(book);
   }
 
-  async updateBook(id: string, updates: any) {
+  async updateBook(id: string, updates: Parameters<BookRepository['updateBook']>[1]) {
     const result = await this.repos.books.updateBook(id, updates);
     if (!result) {
       throw new Error(`Book with id ${id} not found`);
@@ -242,11 +475,11 @@ class StorageAdapter implements Partial<IStorage> {
     return this.repos.books.getBookChapter(bookId, chapterNumber);
   }
 
-  async createBookContent(content: any) {
+  async createBookContent(content: Parameters<BookRepository['createBookContent']>[0]) {
     return this.repos.books.createBookContent(content);
   }
 
-  async updateBookContent(id: string, updates: any) {
+  async updateBookContent(id: string, updates: Parameters<BookRepository['updateBookContent']>[1]) {
     const result = await this.repos.books.updateBookContent(id, updates);
     if (!result) {
       throw new Error(`BookContent with id ${id} not found`);
@@ -282,11 +515,11 @@ class StorageAdapter implements Partial<IStorage> {
     return this.repos.clubs.getClubsOwnedByUser(userId);
   }
 
-  async createClub(club: any) {
+  async createClub(club: Parameters<ClubRepository['createClub']>[0]) {
     return this.repos.clubs.createClub(club);
   }
 
-  async updateClub(id: string, updates: any) {
+  async updateClub(id: string, updates: Parameters<ClubRepository['updateClub']>[1]) {
     return this.repos.clubs.updateClub(id, updates);
   }
 
@@ -294,7 +527,7 @@ class StorageAdapter implements Partial<IStorage> {
     return this.repos.clubs.deleteClub(id);
   }
 
-  async joinClub(clubId: string, userId: string, role?: any) {
+  async joinClub(clubId: string, userId: string, role?: Parameters<ClubRepository['joinClub']>[2]) {
     return this.repos.clubs.joinClub(clubId, userId, role);
   }
 
@@ -318,7 +551,11 @@ class StorageAdapter implements Partial<IStorage> {
     return this.repos.clubs.getActiveClubMembersCount(clubId, excludeUserId);
   }
 
-  async updateMemberRole(clubId: string, userId: string, role: any) {
+  async updateMemberRole(
+    clubId: string,
+    userId: string,
+    role: Parameters<ClubRepository['updateMemberRole']>[2]
+  ) {
     return this.repos.clubs.updateMemberRole(clubId, userId, role);
   }
 
@@ -326,7 +563,7 @@ class StorageAdapter implements Partial<IStorage> {
     return this.repos.clubs.removeMember(clubId, userId);
   }
 
-  async createClubInvitation(invitation: any) {
+  async createClubInvitation(invitation: Parameters<ClubRepository['createClubInvitation']>[0]) {
     return this.repos.clubs.createClubInvitation(invitation);
   }
 
@@ -338,7 +575,7 @@ class StorageAdapter implements Partial<IStorage> {
     return this.repos.clubs.getClubInvitations(clubId);
   }
 
-  async updateInvitationStatus(inviteToken: string, status: string, acceptedAt?: Date) {
+  async updateInvitationStatus(inviteToken: string, status: InvitationStatus, acceptedAt?: Date) {
     return this.repos.clubs.updateInvitationStatus(inviteToken, status, acceptedAt);
   }
 
@@ -382,7 +619,7 @@ class StorageAdapter implements Partial<IStorage> {
   // Personal Books Domain - личные книги пользователей
   // =================================================================
 
-  async createPersonalBook(book: any) {
+  async createPersonalBook(book: Parameters<PersonalBooksRepository['createPersonalBook']>[0]) {
     return this.repos.personalBooks.createPersonalBook(book);
   }
 
@@ -394,7 +631,7 @@ class StorageAdapter implements Partial<IStorage> {
     return this.repos.personalBooks.getPersonalBooksByUser(userId);
   }
 
-  async updatePersonalBook(id: string, updates: any) {
+  async updatePersonalBook(id: string, updates: Parameters<PersonalBooksRepository['updatePersonalBook']>[1]) {
     return this.repos.personalBooks.updatePersonalBook(id, updates);
   }
 
@@ -414,7 +651,7 @@ class StorageAdapter implements Partial<IStorage> {
   // Club Books Domain - книги клубов
   // =================================================================
 
-  async createClubBook(book: any) {
+  async createClubBook(book: Parameters<ClubBooksRepository['createClubBook']>[0]) {
     return this.repos.clubBooks.createClubBook(book);
   }
 
@@ -430,7 +667,7 @@ class StorageAdapter implements Partial<IStorage> {
     return this.repos.clubBooks.getAllClubBooks();
   }
 
-  async updateClubBook(id: string, updates: any) {
+  async updateClubBook(id: string, updates: Parameters<ClubBooksRepository['updateClubBook']>[1]) {
     return this.repos.clubBooks.updateClubBook(id, updates);
   }
 
@@ -451,7 +688,7 @@ class StorageAdapter implements Partial<IStorage> {
   // =================================================================
 
   // Reading Sessions
-  async createReadingSession(session: any) {
+  async createReadingSession(session: Parameters<ReadingRepository['createReadingSession']>[0]) {
     return this.repos.reading.createReadingSession(session);
   }
 
@@ -497,7 +734,7 @@ class StorageAdapter implements Partial<IStorage> {
   }
 
   // Reading Progress
-  async updateReadingProgress(progress: any) {
+  async updateReadingProgress(progress: Parameters<ReadingRepository['updateReadingProgress']>[0]) {
     return this.repos.reading.updateReadingProgress(progress);
   }
 
@@ -523,7 +760,7 @@ class StorageAdapter implements Partial<IStorage> {
   }
 
   // Reader Ratings
-  async rateReader(rating: any) {
+  async rateReader(rating: Parameters<ReadingRepository['rateReader']>[0]) {
     return this.repos.reading.rateReader(rating);
   }
 
@@ -536,7 +773,10 @@ class StorageAdapter implements Partial<IStorage> {
   }
 
   // User Profiles
-  async createOrUpdateUserProfile(userId: string, profile: any) {
+  async createOrUpdateUserProfile(
+    userId: string,
+    profile: Parameters<ReadingRepository['createOrUpdateUserProfile']>[1]
+  ) {
     return this.repos.reading.createOrUpdateUserProfile(userId, profile);
   }
 
@@ -556,7 +796,7 @@ class StorageAdapter implements Partial<IStorage> {
   // Moderation Domain - модерация
   // =================================================================
 
-  async logAdminAction(action: any) {
+  async logAdminAction(action: Parameters<ModerationRepository['logAdminAction']>[0]) {
     return this.repos.moderation.logAdminAction(action);
   }
 
@@ -564,19 +804,26 @@ class StorageAdapter implements Partial<IStorage> {
     return this.repos.moderation.getAdminActions(adminId, limit);
   }
 
-  async updateBookStatus(bookId: string, status: any, adminId: string) {
+  async updateBookStatus(
+    bookId: string,
+    status: Parameters<ModerationRepository['updateBookStatus']>[1],
+    adminId: string
+  ) {
     return this.repos.moderation.updateBookStatus(bookId, status, adminId);
   }
 
-  async getModerationReports(filters?: any) {
+  async getModerationReports(filters?: Parameters<ModerationRepository['getModerationReports']>[0]) {
     return this.repos.moderation.getModerationReports(filters);
   }
 
-  async updateModerationReport(reportId: string, updates: any) {
+  async updateModerationReport(
+    reportId: string,
+    updates: Parameters<ModerationRepository['updateModerationReport']>[1]
+  ) {
     return this.repos.moderation.updateModerationReport(reportId, updates);
   }
 
-  async createModerationReport(report: any) {
+  async createModerationReport(report: Parameters<ModerationRepository['createModerationReport']>[0]) {
     return this.repos.moderation.createModerationReport(report);
   }
 
@@ -584,7 +831,7 @@ class StorageAdapter implements Partial<IStorage> {
   // Analytics Domain - аналитика
   // =================================================================
 
-  async logBookAccess(log: any) {
+  async logBookAccess(log: Parameters<AnalyticsRepository['logBookAccess']>[0]) {
     return this.repos.analytics.logBookAccess(log);
   }
 
@@ -608,7 +855,11 @@ class StorageAdapter implements Partial<IStorage> {
     return this.repos.system.getSystemSetting(key);
   }
 
-  async updateSystemSetting(key: string, value: any, updatedBy: string) {
+  async updateSystemSetting(
+    key: string,
+    value: Parameters<SystemRepository['updateSystemSetting']>[1],
+    updatedBy: string
+  ) {
     return this.repos.system.updateSystemSetting(key, value, updatedBy);
   }
 
@@ -620,7 +871,7 @@ class StorageAdapter implements Partial<IStorage> {
     return this.repos.system.getSettingsByCategory(category);
   }
 
-  async setSetting(setting: any) {
+  async setSetting(setting: Parameters<SystemRepository['setSetting']>[0]) {
     return this.repos.system.setSetting(setting);
   }
 
@@ -648,3 +899,16 @@ export { ReadingRepository } from './ReadingRepository.js';
 export { ModerationRepository } from './ModerationRepository.js';
 export { AnalyticsRepository } from './AnalyticsRepository.js';
 export { SystemRepository } from './SystemRepository.js';
+
+// VoxLibris Studio exports
+export { ClubReadingStatusRepository } from './ClubReadingStatusRepository.js';
+export { SessionReactionsRepository } from './SessionReactionsRepository.js';
+export { SessionQuestionsRepository } from './SessionQuestionsRepository.js';
+export { SessionAnalyticsRepository } from './SessionAnalyticsRepository.js';
+export { ClubMonetizationRepository } from './ClubMonetizationRepository.js';
+export { ReaderEarningsRepository } from './ReaderEarningsRepository.js';
+export { ListenerPaymentsRepository } from './ListenerPaymentsRepository.js';
+export { ClubSubscriptionsRepository } from './ClubSubscriptionsRepository.js';
+export { ReadingScheduleRepository } from './ReadingScheduleRepository.js';
+export { SessionRecordingsRepository } from './SessionRecordingsRepository.js';
+export { ReaderQualityRatingsRepository } from './ReaderQualityRatingsRepository.js';

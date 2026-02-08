@@ -6,6 +6,7 @@
 import { db } from './db.js';
 import { personalBooks, clubBooks } from '../shared/schema.js';
 import { and, eq } from 'drizzle-orm';
+import { logger } from './lib/logger.js';
 
 /**
  * Нормализация строки для сравнения
@@ -37,7 +38,7 @@ function normalizeString(str: string): string {
     .replaceAll('}', '')
     .trim();
   
-  console.log(`     [normalizeString] "${str}" → "${result}"`);
+  logger.debug(`     [normalizeString] "${str}" → "${result}"`);
   
   return result;
 }
@@ -82,17 +83,17 @@ function calculateSimilarity(str1: string, str2: string): number {
   const normalized1 = normalizeString(str1);
   const normalized2 = normalizeString(str2);
 
-  console.log(`   → Сравнение: "${str1}" vs "${str2}"`);
-  console.log(`   → Нормализовано: "${normalized1}" (${normalized1.length} символов) vs "${normalized2}" (${normalized2.length} символов)`);
+  logger.debug(`   → Сравнение: "${str1}" vs "${str2}"`);
+  logger.debug(`   → Нормализовано: "${normalized1}" (${normalized1.length} символов) vs "${normalized2}" (${normalized2.length} символов)`);
 
   // Если одна из строк пуста или неполадка при нормализации
   if (!normalized1 || !normalized2) {
-    console.log(`   ⚠️  Одна из строк пуста после нормализации - возвращаем 0%`);
+    logger.debug(`   ⚠️  Одна из строк пуста после нормализации - возвращаем 0%`);
     return 0;
   }
 
   if (normalized1 === normalized2) {
-    console.log(`   → Точное совпадение после нормализации (100%)`);
+    logger.debug(`   → Точное совпадение после нормализации (100%)`);
     return 100;
   }
 
@@ -101,7 +102,7 @@ function calculateSimilarity(str1: string, str2: string): number {
   
   const similarity = ((maxLength - distance) / maxLength) * 100;
   const result = Math.round(similarity);
-  console.log(`   → Расстояние Левенштейна: ${distance}, макс длина: ${maxLength}, подобие: ${result}%`);
+  logger.debug(`   → Расстояние Левенштейна: ${distance}, макс длина: ${maxLength}, подобие: ${result}%`);
   return result;
 }
 
@@ -157,8 +158,8 @@ export class DuplicateDetectionService {
 
       const duplicates: DuplicateMatch[] = [];
 
-      console.log(`🔍 [DuplicateDetection] Поиск дубликатов для личной книги "${title}" от "${author}"`);
-      console.log(`   Найдено ${userBooks.length} книг у пользователя для сравнения`);
+      logger.debug(`🔍 [DuplicateDetection] Поиск дубликатов для личной книги "${title}" от "${author}"`);
+      logger.debug(`   Найдено ${userBooks.length} книг у пользователя для сравнения`);
 
       for (const book of userBooks) {
         const titleSimilarity = calculateSimilarity(title, book.title);
@@ -167,7 +168,7 @@ export class DuplicateDetectionService {
         // Комбинированный score: автор важнее (60%), название (40%)
         const combinedScore = Math.round(authorSimilarity * 0.6 + titleSimilarity * 0.4);
 
-        console.log(`   📖 "${book.title}" от "${book.author}": title=${titleSimilarity}%, author=${authorSimilarity}%, combined=${combinedScore}%`);
+        logger.debug(`   📖 "${book.title}" от "${book.author}": title=${titleSimilarity}%, author=${authorSimilarity}%, combined=${combinedScore}%`);
 
         if (combinedScore >= similarityThreshold) {
           let matchReason = '';
@@ -224,8 +225,8 @@ export class DuplicateDetectionService {
 
       const duplicates: DuplicateMatch[] = [];
 
-      console.log(`🔍 [DuplicateDetection] Поиск дубликатов для книги "${title}" от "${author}" в клубе ${clubId}`);
-      console.log(`   Найдено ${books.length} книг в клубе для сравнения`);
+      logger.debug(`🔍 [DuplicateDetection] Поиск дубликатов для книги "${title}" от "${author}" в клубе ${clubId}`);
+      logger.debug(`   Найдено ${books.length} книг в клубе для сравнения`);
 
       for (const book of books) {
         const titleSimilarity = calculateSimilarity(title, book.title);
@@ -233,7 +234,7 @@ export class DuplicateDetectionService {
 
         const combinedScore = Math.round(authorSimilarity * 0.6 + titleSimilarity * 0.4);
 
-        console.log(`   📖 "${book.title}" от "${book.author}": title=${titleSimilarity}%, author=${authorSimilarity}%, combined=${combinedScore}%`);
+        logger.debug(`   📖 "${book.title}" от "${book.author}": title=${titleSimilarity}%, author=${authorSimilarity}%, combined=${combinedScore}%`);
 
         if (combinedScore >= similarityThreshold) {
           let matchReason = '';

@@ -33,7 +33,7 @@ interface ReaderControlsProps {
   bookId: string;
 }
 
-export function ReaderControls({ bookId }: ReaderControlsProps) {
+export function ReaderControls({ bookId: _bookId }: ReaderControlsProps) {
   const [settings, setSettings] = useState<ReaderSettings>(() => {
     const saved = localStorage.getItem("readerSettings");
     return saved ? JSON.parse(saved) : DEFAULT_SETTINGS;

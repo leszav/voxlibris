@@ -217,7 +217,7 @@ export class KPICalculator {
   /**
    * Вычисление клубных метрик
    */
-  private async calculateClubMetrics(startDate: Date) {
+  private async calculateClubMetrics(_startDate: Date) {
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
@@ -272,7 +272,7 @@ export class KPICalculator {
   /**
    * Вычисление бизнес-метрик
    */
-  private async calculateBusinessMetrics(startDate: Date) {
+  private async calculateBusinessMetrics(_startDate: Date) {
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
     
@@ -346,7 +346,7 @@ export class KPICalculator {
   /**
    * Вычисление метрик активности
    */
-  private async calculateActivityMetrics(startDate: Date) {
+  private async calculateActivityMetrics(_startDate: Date) {
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 

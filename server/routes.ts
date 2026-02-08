@@ -7,7 +7,13 @@ import { emailService } from "./services/email-service.js";
 import personalBooksRouter from "./personal-books-routes.js";
 import clubBooksRouter from "./club-books-routes.js";
 import accessRouter from "./access-routes.js";
+import scheduleRouter from "./routes/schedule.js";
+import notificationsRouter from "./routes/notifications.js";
+import recordingsRouter from "./routes/recordings.js";
+import sessionAnalyticsRouter from "./routes/session-analytics.js";
+import readerQualityRouter from "./routes/reader-quality.js";
 import { jwtAuth, requireActiveUser } from "./jwt-middleware.js";
+import { logger } from "./lib/logger.js";
 import {
   insertClubSchema,
   insertBookSchema,
@@ -43,7 +49,7 @@ async function findInvitationByToken(token: string) {
 }
 
 // Улучшенный fileFilter с проверкой magic numbers
-const fileFilter = (req: any, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
+const fileFilter = (_req: Request, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
   const allowedMimeTypes = ['application/epub+zip', 'application/x-fictionbook+xml'];
   const allowedExtensions = ['.epub', '.fb2'];
 
@@ -71,7 +77,7 @@ const fileFilter = (req: any, file: Express.Multer.File, cb: multer.FileFilterCa
 };
 
 // Обновить multer конфигурацию
-const upload = multer({
+const _upload = multer({
   storage: multer.memoryStorage(),
   limits: {
     fileSize: 50 * 1024 * 1024, // 50MB
@@ -89,7 +95,7 @@ function validateStoragePath(path: string): { valid: boolean; normalizedPath?: s
   // Удалить leading slash
   const normalizedPath = path.startsWith('/') ? path.slice(1) : path;
 
-  console.log(`[validateStoragePath] Original path: "${path}", Normalized: "${normalizedPath}"`);
+  logger.debug(`[validateStoragePath] Original path: "${path}", Normalized: "${normalizedPath}"`);
 
   // Проверки безопасности
   const dangerousPatterns = [
@@ -100,14 +106,14 @@ function validateStoragePath(path: string): { valid: boolean; normalizedPath?: s
 
   for (const pattern of dangerousPatterns) {
     if (pattern.test(normalizedPath)) {
-      console.log(`[validateStoragePath] Failed dangerous pattern: ${pattern}`);
+      logger.debug(`[validateStoragePath] Failed dangerous pattern: ${pattern}`);
       return { valid: false };
     }
   }
 
   // Ограничить длину пути
   if (normalizedPath.length > 255) {
-    console.log(`[validateStoragePath] Failed length check: ${normalizedPath.length}`);
+    logger.debug(`[validateStoragePath] Failed length check: ${normalizedPath.length}`);
     return { valid: false };
   }
 
@@ -121,10 +127,10 @@ function validateStoragePath(path: string): { valid: boolean; normalizedPath?: s
 
   const isAllowed = allowedPatterns.some(pattern => {
     const matches = pattern.test(normalizedPath);
-    console.log(`[validateStoragePath] Testing pattern ${pattern} against "${normalizedPath}": ${matches}`);
+    logger.debug(`[validateStoragePath] Testing pattern ${pattern} against "${normalizedPath}": ${matches}`);
     return matches;
   });
-  console.log(`[validateStoragePath] Final result: ${isAllowed}`);
+  logger.debug(`[validateStoragePath] Final result: ${isAllowed}`);
   return { valid: isAllowed, normalizedPath: isAllowed ? normalizedPath : undefined };
 }
 
@@ -140,6 +146,9 @@ export async function registerRoutes(
   app.use('/api/v1/user/books', personalBooksRouter);
   app.use('/api/v1', clubBooksRouter);
   app.use('/api/v1', accessRouter);
+
+  // ===== SCHEDULE API (Phase 5) =====
+  app.use('/api/schedule', jwtAuth, scheduleRouter);
 
   // ===== CLUBS API =====
   // Все club routes теперь в club-routes.ts
@@ -212,7 +221,7 @@ export async function registerRoutes(
 
       const invitation = await findInvitationByToken(req.params.token);
       if (!invitation) {
-        console.log(`Invitation not found for token: ${req.params.token}`);
+        logger.debug(`Invitation not found for token: ${req.params.token}`);
         return res.status(404).json({ message: 'Invitation not found' });
       }
 
@@ -279,7 +288,7 @@ export async function registerRoutes(
         });
       }
 
-      console.log(`[Clubs] User ${req.user.username} accepted invitation to club "${club.title}"`);
+      logger.debug(`[Clubs] User ${req.user.username} accepted invitation to club "${club.title}"`);
 
       res.json({
         message: 'Successfully joined the club',
@@ -322,7 +331,7 @@ export async function registerRoutes(
         return res.status(500).json({ message: 'Failed to decline invitation' });
       }
 
-      console.log(`[Clubs] User declined and deleted invitation token ${req.params.token}`);
+      logger.debug(`[Clubs] User declined and deleted invitation token ${req.params.token}`);
 
       res.json({ message: 'Invitation declined and removed' });
     } catch (error) {
@@ -746,7 +755,7 @@ export async function registerRoutes(
       if (book.contentPath) {
         try {
           await fileStorage.deleteFile(book.contentPath);
-          console.log(`Deleted file from storage: ${book.contentPath}`);
+          logger.debug(`Deleted file from storage: ${book.contentPath}`);
         } catch (fileError) {
           console.warn(`Failed to delete file from storage: ${book.contentPath}`, fileError);
           // Continue with database deletion even if file deletion fails
@@ -760,7 +769,7 @@ export async function registerRoutes(
           const coverKey = book.coverUrl.split('/').pop();
           if (coverKey) {
             await fileStorage.deleteFile(`covers/${coverKey}`);
-            console.log(`Deleted cover from storage: covers/${coverKey}`);
+            logger.debug(`Deleted cover from storage: covers/${coverKey}`);
           }
         } catch (coverError) {
           console.warn(`Failed to delete cover from storage`, coverError);
@@ -1139,19 +1148,19 @@ export async function registerRoutes(
       if (!currentUser) {
         return res.status(401).json({ message: "Пользователь не аутентифицирован" });
       }
-      console.log("Getting profile for user:", currentUser.id);
+      logger.debug({ userId: currentUser.id }, "Getting profile for user");
       
       let profile = await storage.getUserProfile(currentUser.id);
-      console.log("Profile found:", profile);
+      logger.debug({ profile }, "Profile found");
 
       // Создаем профиль если не существует
       if (!profile) {
-        console.log("Creating new profile for user:", currentUser.id);
+        logger.debug({ userId: currentUser.id }, "Creating new profile for user");
         profile = await storage.createOrUpdateUserProfile(currentUser.id, {
           displayName: currentUser.username,
           isReader: false
         });
-        console.log("Profile created:", profile);
+        logger.debug({ profile }, "Profile created");
       }
 
       if (!profile) {
@@ -1332,9 +1341,9 @@ export async function registerRoutes(
 
   // Update reading progress
   app.put("/api/progress", jwtAuth, async (req: Request, res: Response) => {
-    console.log('[Progress] === Начало обработки PUT /api/progress ===');
-      console.log('[Progress] req.user:', req.user);
-      console.log('[Progress] req.body:', req.body);
+    logger.debug('[Progress] === Начало обработки PUT /api/progress ===');
+      logger.debug({ user: req.user }, '[Progress] req.user');
+      logger.debug({ body: req.body }, '[Progress] req.body');
       
       try {
         const currentUser = req.user;
@@ -1344,10 +1353,10 @@ export async function registerRoutes(
         const userId = currentUser.id;
         const { bookId, clubId, currentChapter, currentPosition, progress } = req.body;
 
-      console.log('[Progress] Извлечённые данные:', { userId, bookId, clubId, currentChapter, currentPosition, progress });
+      logger.debug({ userId, bookId, clubId, currentChapter, currentPosition, progress }, '[Progress] Извлечённые данные');
 
       if (!bookId || currentChapter === undefined || progress === undefined) {
-        console.log('[Progress] Валидация не прошла - отсутствуют обязательные поля');
+        logger.debug('[Progress] Валидация не прошла - отсутствуют обязательные поля');
         return res.status(400).json({
           message: "Обязательные поля: bookId, currentChapter, progress"
         });
@@ -1362,16 +1371,16 @@ export async function registerRoutes(
         progress
       };
 
-      console.log('[Progress] Вызов storage.updateReadingProgress с данными:', progressData);
+      logger.debug({ progressData }, '[Progress] Вызов storage.updateReadingProgress с данными');
       const updatedProgress = await storage.updateReadingProgress(progressData);
-      console.log('[Progress] Успешно обновлено:', updatedProgress);
+      logger.debug({ updatedProgress }, '[Progress] Успешно обновлено');
 
       // Если прогресс достиг 100% (или почти), добавляем в историю
       if (progress >= 99) {
         try {
           // Проверяем, не добавлена ли уже книга в историю
           const existingHistory = await storage.getReadingHistory(userId);
-          const alreadyInHistory = existingHistory.some((h: any) => h.bookId === bookId);
+          const alreadyInHistory = existingHistory.some((h) => h.bookId === bookId);
 
           if (!alreadyInHistory) {
             // Получаем данные о книге из personal_books
@@ -1385,7 +1394,7 @@ export async function registerRoutes(
                 bookData.author,
                 bookData.coverUrl || undefined
               );
-              console.log(`[Progress] Книга "${bookData.title}" добавлена в историю`);
+              logger.debug(`[Progress] Книга "${bookData.title}" добавлена в историю`);
             }
           }
         } catch (historyError) {
@@ -1433,6 +1442,18 @@ export async function registerRoutes(
   app.get("/api/health", (_req: Request, res: Response) => {
     res.json({ status: "ok", timestamp: new Date().toISOString() });
   });
+
+  // ===== NOTIFICATIONS API (Phase 6) =====
+  app.use("/api/notifications", jwtAuth, notificationsRouter);
+
+  // ===== RECORDINGS API (Phase 7) =====
+  app.use("/api/recordings", jwtAuth, recordingsRouter);
+
+  // ===== SESSION ANALYTICS API (Phase 8) =====
+  app.use("/api", jwtAuth, sessionAnalyticsRouter);
+
+  // ===== READER QUALITY API (Phase 10) =====
+  app.use("/api/reader-quality", jwtAuth, readerQualityRouter);
 
   return httpServer;
 }

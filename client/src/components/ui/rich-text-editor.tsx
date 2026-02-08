@@ -7,11 +7,11 @@ import Link from "@tiptap/extension-link";
 import TextAlign from "@tiptap/extension-text-align";
 import { cn } from "@/lib/utils";
 import {
-  Bold, Italic, Underline, Strikethrough,
+  Bold, Italic, Strikethrough,
   List, ListOrdered, Quote, Undo, Redo,
   AlignLeft, AlignCenter, AlignRight,
   Link as LinkIcon, ChevronDown,
-  Heading1, Heading2, Heading3
+  Heading1
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -33,7 +33,7 @@ interface RichTextEditorProps {
 }
 
 export const RichTextEditor = React.forwardRef<RichTextEditorRef, RichTextEditorProps>(
-  ({ placeholder, initialValue, onChange, className = "", value, ...props }, ref) => {
+  ({ initialValue, onChange, className = "", value }, ref) => {
     const editor = useEditor({
       extensions: [
         StarterKit.configure({
@@ -60,7 +60,7 @@ export const RichTextEditor = React.forwardRef<RichTextEditorRef, RichTextEditor
           class: "prose prose-sm max-w-none focus:outline-none p-4",
         },
       },
-      onUpdate: ({ editor }: { editor: any }) => {
+      onUpdate: ({ editor }) => {
         onChange?.(editor.getHTML());
       },
     });
@@ -225,10 +225,7 @@ export const RichTextEditor = React.forwardRef<RichTextEditorRef, RichTextEditor
           </MenuButton>
         </div>
         <div className="flex-1 overflow-hidden min-h-[200px]">
-          <EditorContent
-            editor={editor}
-            {...props}
-          />
+          <EditorContent editor={editor} />
         </div>
       </div>
     );

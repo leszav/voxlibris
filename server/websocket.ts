@@ -1,5 +1,8 @@
 import { Server as SocketIOServer, Socket } from "socket.io";
 import { storage } from "./repositories/index.js";
+import { WebRTCHandler } from "./webrtc/webrtc-handler.js";
+import { MediasoupManager } from "./webrtc/mediasoup-manager.js";
+import { logger } from "./lib/logger.js";
 import type { 
   SessionPositionUpdate, 
   ListenerUpdate 
@@ -8,6 +11,8 @@ import type {
 interface AuthenticatedSocket extends Socket {
   userId?: string;
   currentSession?: string;
+  peerId?: string;
+  roomId?: string;
 }
 
 // Helper function to handle leaving current session
@@ -31,44 +36,58 @@ async function leaveCurrentSession(socket: AuthenticatedSocket) {
     // Leave socket room
     await socket.leave(`session_${socket.currentSession}`);
     
-    console.log(`User ${socket.userId} left session ${socket.currentSession}`);
+    logger.info(`User ${socket.userId} left session ${socket.currentSession}`);
     socket.currentSession = undefined;
   } catch (error) {
-    console.error("Error leaving session:", error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error({ error: errorMessage }, "Error leaving session");
   }
 }
 
 export function setupWebSocketHandlers(io: SocketIOServer) {
+  // Инициализация mediasoup
+  const mediasoupManager = MediasoupManager.getInstance();
+  mediasoupManager.initialize().catch(error => {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error({ error: errorMessage }, 'Failed to initialize mediasoup');
+  });
+
+  // Создаем обработчик WebRTC
+  const webrtcHandler = new WebRTCHandler();
   // Authentication middleware for WebSocket connections
   io.use(async (socket: AuthenticatedSocket, next) => {
     try {
       // Use session-based authentication for WebSocket
       const userId = socket.handshake.auth.userId;
-      console.log('WebSocket auth attempt for userId:', userId);
+      logger.info({ userId }, 'WebSocket auth attempt');
       
       if (!userId) {
-        console.error('WebSocket auth failed: No userId provided');
+        logger.error('WebSocket auth failed: No userId provided');
         return next(new Error("Authentication required"));
       }
 
       // Verify user exists in database
       const user = await storage.getUser(userId);
       if (!user) {
-        console.error('WebSocket auth failed: User not found:', userId);
+        logger.error({ userId }, 'WebSocket auth failed: User not found');
         return next(new Error("User not found"));
       }
 
       socket.userId = userId;
-      console.log('WebSocket authenticated for user:', userId);
+      logger.info({ userId }, 'WebSocket authenticated');
       next();
     } catch (error) {
-      console.error('WebSocket authentication error:', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.error({ error: errorMessage }, 'WebSocket authentication error');
       next(new Error("Authentication failed"));
     }
   });
 
   io.on("connection", (socket: AuthenticatedSocket) => {
-    console.log(`User ${socket.userId} connected to WebSocket`);
+    logger.info(`User ${socket.userId} connected to WebSocket`);
+
+    // Настраиваем обработчики WebRTC
+    webrtcHandler.setupHandlers(socket);
 
     // Join a reading session room
     socket.on("join_session", async (sessionId: string) => {
@@ -111,9 +130,10 @@ export function setupWebSocketHandlers(io: SocketIOServer) {
           listenerCount
         });
 
-        console.log(`User ${socket.userId} joined session ${sessionId}`);
+        logger.info(`User ${socket.userId} joined session ${sessionId}`);
       } catch (error) {
-        console.error("Error joining session:", error);
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        logger.error({ error: errorMessage }, "Error joining session");
         socket.emit("error", { message: "Failed to join session" });
       }
     });
@@ -152,9 +172,10 @@ export function setupWebSocketHandlers(io: SocketIOServer) {
           currentChapter: data.chapterNumber
         });
 
-        console.log(`User ${socket.userId} started session ${session.id}`);
+        logger.info(`User ${socket.userId} started session ${session.id}`);
       } catch (error) {
-        console.error("Error starting session:", error);
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        logger.error({ error: errorMessage }, "Error starting session");
         socket.emit("error", { message: "Failed to start session" });
       }
     });
@@ -182,9 +203,10 @@ export function setupWebSocketHandlers(io: SocketIOServer) {
           timestamp: new Date().toISOString()
         });
 
-        console.log(`Position updated in session ${socket.currentSession}: Chapter ${data.currentChapter}, Position ${data.currentPosition}`);
+        logger.info(`Position updated in session ${socket.currentSession}: Chapter ${data.currentChapter}, Position ${data.currentPosition}`);
       } catch (error) {
-        console.error("Error updating position:", error);
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        logger.error({ error: errorMessage }, "Error updating position");
         socket.emit("error", { message: "Failed to update position" });
       }
     });
@@ -207,10 +229,11 @@ export function setupWebSocketHandlers(io: SocketIOServer) {
           timestamp: new Date().toISOString()
         });
 
-        console.log(`Session ${socket.currentSession} ended by ${socket.userId}`);
+        logger.info(`Session ${socket.currentSession} ended by ${socket.userId}`);
         socket.currentSession = undefined;
       } catch (error) {
-        console.error("Error ending session:", error);
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        logger.error({ error: errorMessage }, "Error ending session");
         socket.emit("error", { message: "Failed to end session" });
       }
     });
@@ -244,17 +267,21 @@ export function setupWebSocketHandlers(io: SocketIOServer) {
           rating: data.rating 
         });
 
-        console.log(`User ${socket.userId} rated reader ${data.readerId}: ${data.rating} stars`);
+        logger.info(`User ${socket.userId} rated reader ${data.readerId}: ${data.rating} stars`);
       } catch (error) {
-        console.error("Error submitting rating:", error);
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        logger.error({ error: errorMessage }, "Error submitting rating");
         socket.emit("error", { message: "Failed to submit rating" });
       }
     });
 
     // Handle disconnect
     socket.on("disconnect", async (reason) => {
-      console.log(`User ${socket.userId} disconnected: ${reason}`);
+      logger.info(`User ${socket.userId} disconnected: ${reason}`);
       
+      // Обрабатываем WebRTC отключение
+      await webrtcHandler.handleDisconnect(socket);
+
       if (socket.currentSession && socket.userId) {
         await leaveCurrentSession(socket);
       }

@@ -5,9 +5,11 @@ import { BookFormat } from '../shared/schema.js';
 import { jwtAuth, requireActiveUser } from './jwt-middleware.js';
 import crypto from 'node:crypto';
 import { BookParserFactory } from './book-parser.js';
+import type { BookMetadata } from './book-parser.js';
 import { CryptoService } from './crypto-service.js';
 import { fileStorage } from './file-storage.js';
 import { duplicateDetectionService } from './duplicate-detection-service.js';
+import { logger } from './lib/logger.js';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -19,15 +21,20 @@ interface UploadSession {
     fileBuffer: Buffer;
     originalName: string;
     mimeType: string;
-    parsedMetadata: any;
+    parsedMetadata: UploadMetadata;
     createdAt: Date;
 }
+
+type UploadMetadata = Partial<BookMetadata> & {
+    coverImageData?: Buffer | string | null;
+    coverImageType?: string | null;
+};
 
 const uploadSessions = new Map<string, UploadSession>();
 
 // Helper function to process cover image data
 async function processCoverImage(
-    metadata: any,
+    metadata: UploadMetadata,
     session: UploadSession,
     clubId: string,
     sessionId: string
@@ -57,10 +64,10 @@ async function processCoverImage(
     if (coverBuffer) {
         try {
             const coverPath = `covers/club/${clubId}/${sessionId}-cover.jpg`;
-            console.log(`📸 [ClubBooks] Uploading cover with path: ${coverPath}`);
+            logger.info({ coverPath }, '[ClubBooks] Uploading cover');
             const coverResult = await fileStorage.uploadFile(coverBuffer, coverPath, coverType);
             const coverUrl = `/api/storage/${coverResult.key}`;
-            console.log(`✅ [ClubBooks] Cover uploaded successfully. Key: ${coverResult.key}, URL: ${coverUrl}`);
+            logger.info({ key: coverResult.key, url: coverUrl }, '[ClubBooks] Cover uploaded');
             return coverUrl;
         } catch (e) {
             console.warn('Failed to upload cover', e);
@@ -117,7 +124,7 @@ router.post('/clubs/:clubId/books/upload', jwtAuth, requireActiveUser, upload.si
         }
 
         const parser = BookParserFactory.createParser(fileType);
-        let metadata: any = {};
+        let metadata: UploadMetadata = {};
 
         try {
             const parsedBook = await parser.parseBook(req.file.buffer, req.file.originalname);
@@ -150,14 +157,14 @@ router.post('/clubs/:clubId/books/upload', jwtAuth, requireActiveUser, upload.si
 
         // Convert cover image buffer to base64 string for preview
         let coverPreview: string | undefined;
-        if (metadata.coverImageData) {
-            const buffer = metadata.coverImageData as Buffer;
+        if (metadata.coverImageData && Buffer.isBuffer(metadata.coverImageData)) {
+            const buffer = metadata.coverImageData;
             const type = metadata.coverImageType || 'image/jpeg';
             coverPreview = `data:${type};base64,${buffer.toString('base64')}`;
         }
 
         // Remove raw buffer from metadata
-        const { coverImageData, ...cleanMetadata } = metadata;
+        const { coverImageData: _coverImageData, ...cleanMetadata } = metadata;
 
         res.json({
             sessionId,
@@ -267,7 +274,7 @@ async function deleteBookFiles(book: { storagePath: string; coverUrl: string | n
     if (book.storagePath) {
         try {
             await fileStorage.deleteFile(book.storagePath);
-            console.log(`Deleted club book file from storage: ${book.storagePath}`);
+            logger.info({ storagePath: book.storagePath }, 'Deleted club book file from storage');
         } catch (fileError) {
             console.warn(`Failed to delete club book file from storage: ${book.storagePath}`, fileError);
         }
@@ -278,7 +285,7 @@ async function deleteBookFiles(book: { storagePath: string; coverUrl: string | n
             const coverKey = book.coverUrl.replace('/api/storage/', '');
             if (coverKey && coverKey !== book.coverUrl) {
                 await fileStorage.deleteFile(coverKey);
-                console.log(`Deleted club book cover from storage: ${coverKey}`);
+                logger.info({ coverKey }, 'Deleted club book cover from storage');
             }
         } catch (coverError) {
             console.warn(`Failed to delete club book cover from storage`, coverError);

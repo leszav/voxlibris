@@ -1,4 +1,4 @@
-import { useEffect, useRef, useMemo } from "react";
+import { useMemo } from "react";
 import DOMPurify from "dompurify";
 
 interface ContentRendererProps {
@@ -31,7 +31,7 @@ export function ContentRenderer({ content }: ContentRendererProps) {
         fontSize: "var(--reader-font-size, 18px)",
         fontFamily: "var(--reader-font-family, Georgia)",
         lineHeight: "var(--reader-line-height, 1.8)",
-        textAlign: "var(--reader-text-align, justify)" as any,
+        textAlign: "justify",
       }}
       dangerouslySetInnerHTML={{ __html: sanitizedContent }}
     />

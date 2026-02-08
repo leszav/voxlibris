@@ -56,7 +56,7 @@ export default function ReaderStudio() {
         });
         // Логируем только в режиме разработки, чтобы не засорять консоль в продакшене
         if (import.meta.env.DEV) {
-          console.log('Сессия создана:', sessionId);
+          console.warn('Сессия создана:', sessionId);
         }
         setIsInitialized(true);
       } catch (error) {

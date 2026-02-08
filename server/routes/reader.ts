@@ -17,6 +17,7 @@ import {
   generateShortLivedToken,
 } from "../encryption.js";
 import { analyticsEvents } from "../../shared/schema.js";
+import { logger } from "../lib/logger.js";
 
 const router = express.Router();
 
@@ -32,7 +33,7 @@ router.get("/:id/content", async (req: Request, res: Response) => {
     const userId = req.user?.id; // Из JWT middleware
 
     if (!userId) {
-      console.log('[Reader API] No userId in request');
+      logger.warn('[Reader API] No userId in request');
       return res.status(401).json({ error: "Unauthorized" });
     }
 
@@ -87,7 +88,8 @@ router.get("/:id/content", async (req: Request, res: Response) => {
       accessToken, // Для последующих запросов
     });
   } catch (error) {
-    console.error("[Reader API] Error fetching book content:", error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error({ error: errorMessage }, "[Reader API] Error fetching book content");
     res.status(500).json({ error: "Failed to fetch book content" });
   }
 });
@@ -165,7 +167,7 @@ router.put("/:id/progress", async (req: Request, res: Response) => {
               bookCoverUrl: bookData[0].coverUrl || null,
               completedAt: new Date(),
             });
-            console.log(`[Reader API] Книга "${bookData[0].title}" добавлена в историю пользователя ${userId}`);
+            logger.info(`[Reader API] Книга "${bookData[0].title}" добавлена в историю пользователя ${userId}`);
 
             // Записываем событие book_complete в аналитику
             try {
@@ -176,21 +178,24 @@ router.put("/:id/progress", async (req: Request, res: Response) => {
                 progress: 100,
                 clubId: clubId || null,
               }).returning();
-              console.log(`[Reader API] Analytics event recorded: ${analyticsEvent.id}`);
+              logger.info(`[Reader API] Analytics event recorded: ${analyticsEvent.id}`);
             } catch (analyticsError) {
-              console.error('[Reader API] Error recording analytics event:', analyticsError);
+              const errorMessage = analyticsError instanceof Error ? analyticsError.message : String(analyticsError);
+              logger.error({ error: errorMessage }, '[Reader API] Error recording analytics event');
             }
           }
         }
       } catch (historyError) {
-        console.error("[Reader API] Error adding to history:", historyError);
+        const errorMessage = historyError instanceof Error ? historyError.message : String(historyError);
+        logger.error({ error: errorMessage }, "[Reader API] Error adding to history");
         // Не прерываем основной запрос из-за ошибки истории
       }
     }
 
     res.json({ success: true });
   } catch (error) {
-    console.error("[Reader API] Error updating progress:", error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error({ error: errorMessage }, "[Reader API] Error updating progress");
     res.status(500).json({ error: "Failed to update progress" });
   }
 });
@@ -229,7 +234,8 @@ router.get("/:id/progress", async (req: Request, res: Response) => {
 
     res.json(progress);
   } catch (error) {
-    console.error("[Reader API] Error fetching progress:", error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error({ error: errorMessage }, "[Reader API] Error fetching progress");
     res.status(500).json({ error: "Failed to fetch progress" });
   }
 });
@@ -257,7 +263,8 @@ router.get("/:id/bookmarks", async (req: Request, res: Response) => {
 
     res.json({ bookmarks: userBookmarks });
   } catch (error) {
-    console.error("[Reader API] Error fetching bookmarks:", error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error({ error: errorMessage }, "[Reader API] Error fetching bookmarks");
     res.status(500).json({ error: "Failed to fetch bookmarks" });
   }
 });
@@ -289,7 +296,8 @@ router.post("/:id/bookmarks", async (req: Request, res: Response) => {
 
     res.status(201).json({ bookmark });
   } catch (error) {
-    console.error("[Reader API] Error adding bookmark:", error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error({ error: errorMessage }, "[Reader API] Error adding bookmark");
     res.status(500).json({ error: "Failed to add bookmark" });
   }
 });
@@ -319,7 +327,8 @@ router.delete("/:id/bookmarks/:bookmarkId", async (req: Request, res: Response) 
 
     res.json({ success: true });
   } catch (error) {
-    console.error("[Reader API] Error deleting bookmark:", error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error({ error: errorMessage }, "[Reader API] Error deleting bookmark");
     res.status(500).json({ error: "Failed to delete bookmark" });
   }
 });
@@ -345,7 +354,8 @@ router.get("/:id/notes", async (req: Request, res: Response) => {
 
     res.json({ notes: userNotes });
   } catch (error) {
-    console.error("[Reader API] Error fetching notes:", error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error({ error: errorMessage }, "[Reader API] Error fetching notes");
     res.status(500).json({ error: "Failed to fetch notes" });
   }
 });
@@ -389,7 +399,8 @@ router.post("/:id/notes", async (req: Request, res: Response) => {
 
     res.status(201).json({ note });
   } catch (error) {
-    console.error("[Reader API] Error adding note:", error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error({ error: errorMessage }, "[Reader API] Error adding note");
     res.status(500).json({ error: "Failed to add note" });
   }
 });
@@ -430,7 +441,8 @@ router.put("/:id/notes/:noteId", async (req: Request, res: Response) => {
 
     res.json({ note });
   } catch (error) {
-    console.error("[Reader API] Error updating note:", error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error({ error: errorMessage }, "[Reader API] Error updating note");
     res.status(500).json({ error: "Failed to update note" });
   }
 });
@@ -460,7 +472,8 @@ router.delete("/:id/notes/:noteId", async (req: Request, res: Response) => {
 
     res.json({ success: true });
   } catch (error) {
-    console.error("[Reader API] Error deleting note:", error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error({ error: errorMessage }, "[Reader API] Error deleting note");
     res.status(500).json({ error: "Failed to delete note" });
   }
 });
@@ -515,7 +528,8 @@ async function verifyBookAccess(userId: string, bookId: string): Promise<boolean
 
     return !!book;
   } catch (error) {
-    console.error("[Reader API] Error verifying book access:", error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error({ error: errorMessage }, "[Reader API] Error verifying book access");
     return false;
   }
 }

@@ -58,11 +58,6 @@ export function ClubSettingsModal({ club }: ClubSettingsModalProps) {
       const parsedSettings = club.settings ? JSON.parse(club.settings) as ClubSettings : {};
       const parsedSchedule = club.schedule ? JSON.parse(club.schedule) as ScheduleItem[] : [];
 
-      // Диагностический лог только в режиме разработки
-      if (import.meta.env.DEV) {
-        console.log("[ClubSettings] Открываем модал с настройками:", parsedSettings);
-      }
-
       setCoverImage(club.coverImage || "");
       setCoverPreview(club.coverImage || "");
       setWelcomeTitle(parsedSettings?.welcomeTitle || "");
@@ -149,16 +144,6 @@ export function ClubSettingsModal({ club }: ClubSettingsModalProps) {
 
   const handleSave = async () => {
     try {
-      // Диагностический лог только в режиме разработки
-      if (import.meta.env.DEV) {
-        console.log("[ClubSettings] Сохраняем состояние:", {
-          welcomeHtml: welcomeHtml.substring(0, 100),
-          rulesHtml: rulesHtml.substring(0, 100),
-          welcomeTitle,
-          shortDescription: shortDescription.substring(0, 50)
-        });
-      }
-
       const settingsJson = JSON.stringify({
         welcomeTitle,
         welcomeHtml,
@@ -167,7 +152,7 @@ export function ClubSettingsModal({ club }: ClubSettingsModalProps) {
       });
       const scheduleJson = JSON.stringify(schedule);
 
-      const updateData: any = {
+      const updateData: { settings: string; schedule: string; coverImage?: string | null } = {
         settings: settingsJson,
         schedule: scheduleJson,
       };
@@ -176,14 +161,6 @@ export function ClubSettingsModal({ club }: ClubSettingsModalProps) {
         updateData.coverImage = coverImage;
       } else if (!coverImage && club.coverImage) {
         updateData.coverImage = null;
-      }
-
-      if (import.meta.env.DEV) {
-        console.log("[ClubSettings] Сохранение:", {
-          coverImage: updateData.coverImage ? "set" : "unchanged",
-          settings: settingsJson,
-          schedule: scheduleJson,
-        });
       }
 
       await updateClubMutation.mutateAsync({

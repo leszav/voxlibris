@@ -1,4 +1,4 @@
-import { useEffect, useRef, useMemo } from "react";
+import { useMemo } from "react";
 import DOMPurify from "dompurify";
 
 interface ClubContentRendererProps {
@@ -31,7 +31,7 @@ export function ClubContentRenderer({ content }: ClubContentRendererProps) {
         fontSize: "var(--club-reader-font-size, 18px)",
         fontFamily: "var(--club-reader-font-family, Georgia)",
         lineHeight: "var(--club-reader-line-height, 1.8)",
-        textAlign: "var(--club-reader-text-align, justify)" as any,
+        textAlign: "justify",
       }}
       dangerouslySetInnerHTML={{ __html: sanitizedContent }}
     />

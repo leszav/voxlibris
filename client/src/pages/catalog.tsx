@@ -8,7 +8,6 @@ import { useCatalogClubs } from "@/hooks/use-clubs";
 import { AccountActivationBanner } from "@/components/AccountActivationBanner";
 import { useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
-import { useToast } from "@/hooks/use-toast";
 
 interface CatalogClubSettings {
   shortDescription?: string;
@@ -26,8 +25,7 @@ const parseSettings = (settings: string | null): CatalogClubSettings => {
 export default function Catalog() {
   const { data: clubsData, isLoading, error } = useCatalogClubs();
   const [, setLocation] = useLocation();
-  const { isAuthenticated, user } = useAuth();
-  const { toast } = useToast();
+  const { isAuthenticated } = useAuth();
 
   const clubs = Array.isArray(clubsData) ? clubsData : [];
 

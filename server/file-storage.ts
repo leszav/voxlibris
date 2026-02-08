@@ -1,9 +1,19 @@
-import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, HeadObjectCommand, CreateBucketCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
+import {
+  S3Client,
+  PutObjectCommand,
+  GetObjectCommand,
+  DeleteObjectCommand,
+  HeadObjectCommand,
+  CreateBucketCommand,
+  ListObjectsV2Command,
+  type ListObjectsV2CommandOutput,
+} from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { randomUUID } from "node:crypto";
 import { Readable } from "node:stream";
 import * as mime from "mime-types";
 import * as path from "node:path";
+import { logger } from "./lib/logger.js";
 
 export interface FileUploadResult {
   key: string;
@@ -57,13 +67,13 @@ export class FileStorageService {
       maxAttempts: 1, // Отключаем retry логику AWS
     });
     
-    console.log(`🔧 [FileStorage] S3 Client configured for MinIO (Quark principles):`);
-    console.log(`   Endpoint: ${endpoint} (explicit)`);
-    console.log(`   Region: ${region} (required by SDK)`);
-    console.log(`   Bucket: ${this.bucketName}`);
-    console.log(`   Access Key: ${accessKeyId.substring(0, 4)}***`);
-    console.log(`   Force Path Style: true (MinIO requirement)`);
-    console.log(`   AWS Smart Features: disabled (compatibility)`);
+    logger.info(`🔧 [FileStorage] S3 Client configured for MinIO (Quark principles):`);
+    logger.info(`   Endpoint: ${endpoint} (explicit)`);
+    logger.info(`   Region: ${region} (required by SDK)`);
+    logger.info(`   Bucket: ${this.bucketName}`);
+    logger.info(`   Access Key: ${accessKeyId.substring(0, 4)}***`);
+    logger.info(`   Force Path Style: true (MinIO requirement)`);
+    logger.info(`   AWS Smart Features: disabled (compatibility)`);
   }
 
   /**
@@ -90,31 +100,33 @@ export class FileStorageService {
       }));
       
       this.isInitialized = true;
-      console.log(`✅ [FileStorage] Bucket "${this.bucketName}" is accessible`);
-    } catch (error: any) {
-      if (error.name === 'NotFound' || error.$metadata?.httpStatusCode === 404) {
+      logger.info(`✅ [FileStorage] Bucket "${this.bucketName}" is accessible`);
+    } catch (error: unknown) {
+      const err = error as { name?: string; $metadata?: { httpStatusCode?: number }; code?: string; message?: string };
+      if (err.name === 'NotFound' || err.$metadata?.httpStatusCode === 404) {
         // Bucket или объект не найден - пробуем создать bucket
         try {
-          console.log(`🗄️ [FileStorage] Bucket initialization: ${this.bucketName}`);
+          logger.info(`🗄️ [FileStorage] Bucket initialization: ${this.bucketName}`);
           await this.s3Client.send(new CreateBucketCommand({
             Bucket: this.bucketName
           }));
-          console.log(`✅ [FileStorage] Created bucket: ${this.bucketName}`);
+          logger.info(`✅ [FileStorage] Created bucket: ${this.bucketName}`);
           this.isInitialized = true;
-        } catch (createError: any) {
-          if (createError.name === 'BucketAlreadyOwnedByYou' ||
-              createError.name === 'BucketAlreadyExists') {
-            console.log(`✅ [FileStorage] Bucket "${this.bucketName}" already exists`);
+        } catch (createError: unknown) {
+          const createErr = createError as { name?: string; message?: string };
+          if (createErr.name === 'BucketAlreadyOwnedByYou' ||
+              createErr.name === 'BucketAlreadyExists') {
+            logger.info(`✅ [FileStorage] Bucket "${this.bucketName}" already exists`);
             this.isInitialized = true;
           } else {
-            console.error('❌ [FileStorage] Bucket creation failed:', createError.message);
-            throw new Error(`Failed to initialize storage bucket: ${createError.message}`);
+            console.error('❌ [FileStorage] Bucket creation failed:', createErr.message);
+            throw new Error(`Failed to initialize storage bucket: ${createErr.message}`);
           }
         }
-      } else if (error.code === 'ECONNREFUSED') {
+      } else if (err.code === 'ECONNREFUSED') {
         throw new Error('MinIO/S3 service is not running. Please start it with: docker compose up minio -d');
       } else {
-        throw new Error(`Storage initialization failed: ${error.message}`);
+        throw new Error(`Storage initialization failed: ${err.message}`);
       }
     }
   }
@@ -132,7 +144,7 @@ export class FileStorageService {
       ? `${prefix}/${uuid}${ext}`
       : `books/${uuid}${ext}`;
     
-    console.log(`🔑 [FileStorage] Generated key: ${originalName} -> ${key}`);
+    logger.info(`🔑 [FileStorage] Generated key: ${originalName} -> ${key}`);
     return key;
   }
 
@@ -153,14 +165,14 @@ export class FileStorageService {
     if (originalName?.includes('/')) {
       // strip leading slash if present
       key = originalName.startsWith('/') ? originalName.slice(1) : originalName;
-      console.log(`📤 [FileStorage] Using explicit key from originalName: ${originalName} -> ${key}`);
+      logger.info(`📤 [FileStorage] Using explicit key from originalName: ${originalName} -> ${key}`);
     } else {
       key = this.generateFileKey(originalName, prefix);
     }
     const detectedContentType = contentType || mime.lookup(originalName) || 'application/octet-stream';
 
     try {
-      console.log(`📤 [FileStorage] Uploading file: ${originalName} -> ${key}`);
+      logger.info(`📤 [FileStorage] Uploading file: ${originalName} -> ${key}`);
       
       // Используем прямой PutObjectCommand для MinIO
       const command = new PutObjectCommand({
@@ -177,7 +189,7 @@ export class FileStorageService {
 
       await this.s3Client.send(command);
       
-      console.log(`✅ [FileStorage] File uploaded successfully: ${key}`);
+      logger.info(`✅ [FileStorage] File uploaded successfully: ${key}`);
 
       return {
         key,
@@ -223,7 +235,7 @@ export class FileStorageService {
       try {
         const found = await this.findKeyByOriginalName(key);
         if (found && found !== key) {
-          console.log(`🔎 [FileStorage] Fallback found actual key for ${key} -> ${found}`);
+          logger.info(`🔎 [FileStorage] Fallback found actual key for ${key} -> ${found}`);
           return await this.getFile(found);
         }
       } catch (error_) {
@@ -259,7 +271,7 @@ export class FileStorageService {
       try {
         const found = await this.findKeyByOriginalName(key);
         if (found && found !== key) {
-          console.log(`🔎 [FileStorage] Fallback metadata lookup for ${key} -> ${found}`);
+          logger.info(`🔎 [FileStorage] Fallback metadata lookup for ${key} -> ${found}`);
           return await this.getFileMetadata(found);
         }
       } catch (error_) {
@@ -283,12 +295,12 @@ export class FileStorageService {
       let pages = 0;
 
       do {
-        const listCmd = new ListObjectsV2Command({
+        const listCmd: ListObjectsV2Command = new ListObjectsV2Command({
           Bucket: this.bucketName,
           ContinuationToken: continuationToken,
           MaxKeys: 1000,
         });
-        const listResp = await this.s3Client.send(listCmd);
+        const listResp = (await this.s3Client.send(listCmd)) as ListObjectsV2CommandOutput;
         const contents = listResp.Contents || [];
 
         for (const item of contents) {
@@ -299,11 +311,12 @@ export class FileStorageService {
               return item.Key;
             }
           } catch (error_) {
-            console.debug(`Could not fetch metadata for ${item.Key}:`, error_);
+            const errorMessage = error_ instanceof Error ? error_.message : String(error_);
+            logger.debug({ error: errorMessage }, `Could not fetch metadata for ${item.Key}`);
           }
         }
 
-        continuationToken = listResp.NextContinuationToken as any;
+        continuationToken = listResp.NextContinuationToken ?? undefined;
         pages++;
       } while (continuationToken && pages < maxPages);
 
@@ -387,7 +400,8 @@ export class FileStorageService {
       }));
     } catch (error) {
       // Bucket уже существует или другая ошибка - это нормально
-      console.log('Bucket initialization:', error instanceof Error ? error.message : 'Done');
+      const errorMessage = error instanceof Error ? error.message : 'Done';
+      logger.info({ error: errorMessage }, 'Bucket initialization');
     }
   }
 }

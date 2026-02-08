@@ -11,7 +11,7 @@ export interface ChatWebSocketConfig {
   reconnectionDelay?: number;
 }
 
-export type ChatEventHandler = (data: any) => void;
+export type ChatEventHandler = (data: unknown) => void;
 
 export class ChatWebSocketClient {
   private socket: Socket | null = null;
@@ -25,7 +25,7 @@ export class ChatWebSocketClient {
     // 2) Если есть VITE_BACKEND_WS_URL — используем его.
     // 3) В продакшн используем текущий хост, в разработке порт 5000.
     const explicitUrl = config.url;
-    const envUrl = (import.meta as any).env?.VITE_BACKEND_WS_URL as string | undefined;
+    const envUrl = import.meta.env.VITE_BACKEND_WS_URL as string | undefined;
     
     // Для продакшн используем текущий хост с правильным протоколом, для разработки порт 5000
     const isProd = import.meta.env.PROD;
@@ -88,8 +88,9 @@ export class ChatWebSocketClient {
         reject(error);
       });
 
-      this.socket.on("error", (error: any) => {
-        this.config.onError?.(new Error(error?.message || "Chat WebSocket error"));
+      this.socket.on("error", (error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        this.config.onError?.(new Error(message || "Chat WebSocket error"));
       });
 
       this.setupEventListeners();
@@ -100,7 +101,7 @@ export class ChatWebSocketClient {
     if (!this.socket) return;
 
     const forward = (event: string) => {
-      this.socket!.on(event, (data: any) => {
+      this.socket!.on(event, (data: unknown) => {
         this.emit(event, data);
       });
     };
@@ -132,7 +133,7 @@ export class ChatWebSocketClient {
     this.socket.emit("leave_room", { clubId, channel });
   }
 
-  sendMessage(payload: { clubId: string; channel?: string; text: string; mentions?: string[]; attachments?: any[] }) {
+  sendMessage(payload: { clubId: string; channel?: string; text: string; mentions?: string[]; attachments?: Record<string, unknown>[] }) {
     if (!this.socket?.connected) return;
     this.socket.emit("chat_message", payload);
   }
@@ -165,14 +166,14 @@ export class ChatWebSocketClient {
   }
 
   once(event: string, handler: ChatEventHandler) {
-    const wrapper: ChatEventHandler = (data: any) => {
+    const wrapper: ChatEventHandler = (data: unknown) => {
       handler(data);
       this.off(event, wrapper);
     };
     this.on(event, wrapper);
   }
 
-  private emit(event: string, data: any) {
+  private emit(event: string, data: unknown) {
     const set = this.eventHandlers.get(event);
     if (!set) return;
     for (const handler of set) {

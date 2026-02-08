@@ -1,7 +1,7 @@
 import { MainLayout } from "@/components/layout/MainLayout";
 import { Button } from "@/components/ui/button";
 import { ComingSoonOverlay } from "@/components/ui/coming-soon-overlay";
-import { Check, X, HelpCircle } from "lucide-react";
+import { Check, X } from "lucide-react";
 import {
   Card,
   CardContent,

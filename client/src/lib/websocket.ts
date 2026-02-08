@@ -15,7 +15,7 @@ export interface ReaderWebSocketConfig {
   reconnectionDelay?: number;
 }
 
-export type ReaderEventHandler = (data: any) => void;
+export type ReaderEventHandler = (data: unknown) => void;
 
 export class ReaderWebSocketClient {
   private socket: Socket | null = null;
@@ -63,14 +63,14 @@ export class ReaderWebSocketClient {
       });
 
       this.socket.on("connect", () => {
-        console.log("[Reader WS] Connected");
+        console.warn("[Reader WS] Connected");
         this.isConnecting = false;
         this.config.onConnect?.();
         resolve();
       });
 
       this.socket.on("disconnect", (reason) => {
-        console.log("[Reader WS] Disconnected:", reason);
+        console.warn("[Reader WS] Disconnected:", reason);
         this.config.onDisconnect?.();
       });
 
@@ -81,9 +81,10 @@ export class ReaderWebSocketClient {
         reject(error);
       });
 
-      this.socket.on("error", (error) => {
+      this.socket.on("error", (error: unknown) => {
         console.error("[Reader WS] Error:", error);
-        this.config.onError?.(new Error(error.message || "WebSocket error"));
+        const message = error instanceof Error ? error.message : String(error);
+        this.config.onError?.(new Error(message || "WebSocket error"));
       });
 
       // Регистрация обработчиков событий
@@ -192,7 +193,7 @@ export class ReaderWebSocketClient {
   }
 
   once(event: string, handler: ReaderEventHandler) {
-    const wrappedHandler = (data: any) => {
+    const wrappedHandler = (data: unknown) => {
       handler(data);
       this.off(event, wrappedHandler);
     };
@@ -206,7 +207,7 @@ export class ReaderWebSocketClient {
     }
   }
 
-  private emit(event: string, data: any) {
+  private emit(event: string, data: unknown) {
     const handlers = this.eventHandlers.get(event);
     if (handlers) {
       handlers.forEach((handler) => handler(data));

@@ -1,6 +1,3 @@
-import classicCover from "@assets/generated_images/classic_novel_book_cover_design.png";
-// Import existing covers as fallbacks
-import modernCover from "@assets/generated_images/modern_fiction_book_cover_design.png";
 import {
   ArrowLeft,
   Bookmark,
@@ -48,45 +45,10 @@ import {
   useDeletePersonalBook,
   usePersonalBooks,
   useUpdatePersonalBook,
+  type PersonalBook,
 } from "@/hooks/use-books-v2";
 import { useClearReadingHistory, useReadingHistory } from "@/hooks/use-reading-history";
 import { toast } from "@/hooks/use-toast";
-
-const CURRENT_READS = [
-  {
-    id: 1,
-    title: "Мастер и Маргарита",
-    author: "Михаил Булгаков",
-    cover: modernCover,
-    progress: 35,
-    totalChapters: 32,
-    currentChapter: 7,
-    lastRead: "2 часа назад",
-    clubName: "Полуночная Библиотека",
-  },
-  {
-    id: 2,
-    title: "Дюна",
-    author: "Фрэнк Герберт",
-    cover: modernCover,
-    progress: 12,
-    totalChapters: 48,
-    currentChapter: 4,
-    lastRead: "Вчера",
-    clubName: "Sci-Fi Будущее",
-  },
-];
-
-const HISTORY = [
-  {
-    id: 3,
-    title: "Гордость и предубеждение",
-    author: "Джейн Остин",
-    cover: classicCover,
-    completedAt: "10 Дек 2024",
-    rating: 5,
-  },
-];
 
 export default function Library() {
   const { isAuthenticated } = useAuth();
@@ -99,14 +61,14 @@ export default function Library() {
   const clearHistory = useClearReadingHistory();
 
   // State for book management dialogs
-  const [editingBook, setEditingBook] = useState<any>(null);
-  const [deletingBook, setDeletingBook] = useState<any>(null);
+  const [editingBook, setEditingBook] = useState<PersonalBook | null>(null);
+  const [deletingBook, setDeletingBook] = useState<PersonalBook | null>(null);
   const [editForm, setEditForm] = useState({
     title: "",
     author: "",
     description: "",
-    isbn: "",
   });
+  const fallbackCover = "/placeholder-book.png";
 
   // Mutations for book management
   const deleteBookMutation = useDeletePersonalBook();
@@ -152,13 +114,12 @@ export default function Library() {
     refetch();
   };
 
-  const handleEditBook = (book: any) => {
+  const handleEditBook = (book: PersonalBook) => {
     setEditingBook(book);
     setEditForm({
       title: book.title || "",
       author: book.author || "",
       description: book.description || "",
-      isbn: book.isbn || "",
     });
   };
 
@@ -211,7 +172,7 @@ export default function Library() {
     }
   };
 
-  const handleReadBook = (book: any) => {
+  const handleReadBook = (book: PersonalBook) => {
     setLocation(`/books/${book.id}/read`);
   };
 
@@ -271,18 +232,18 @@ export default function Library() {
               }
 
               if (books && Array.isArray(books) && books.length > 0) {
-                return books.map((book: any) => (
+                return books.map((book) => (
                 <div
                   key={book.id}
                   className="group flex flex-col sm:flex-row gap-6 bg-card p-6 rounded-xl border hover:border-primary/20 transition-all"
                 >
                   <div className="w-full sm:w-48 aspect-[2/3] shrink-0 rounded-lg overflow-hidden shadow-md">
                     <img
-                      src={book.coverUrl || modernCover}
+                      src={book.coverUrl || fallbackCover}
                       alt={book.title}
                       className="w-full h-full object-cover"
                       onError={(e) => {
-                        e.currentTarget.src = modernCover;
+                        e.currentTarget.src = fallbackCover;
                       }}
                     />
                   </div>
@@ -329,8 +290,8 @@ export default function Library() {
                       <div className="mt-4 flex items-center gap-2 text-sm text-accent-foreground/80 font-medium bg-accent/10 w-fit px-2 py-1 rounded">
                         <LibraryIcon className="w-3.5 h-3.5" />
                         {(() => {
-                          if (book.contentType === "epub") return "EPUB";
-                          if (book.contentType === "fb2") return "FB2";
+                          if (book.format === "EPUB") return "EPUB";
+                          if (book.format === "FB2") return "FB2";
                           return "Книга";
                         })()}
                       </div>
@@ -361,7 +322,7 @@ export default function Library() {
                       </div>
                       <p className="text-xs text-muted-foreground flex items-center gap-1">
                         <Clock className="w-3 h-3" />
-                        Добавлено: {new Date(book.createdAt).toLocaleDateString("ru-RU")}
+                        Добавлено: {new Date(book.createdAt ?? book.uploadedAt).toLocaleDateString("ru-RU")}
                       </p>
                     </div>
 
@@ -483,17 +444,6 @@ export default function Library() {
                 id="author"
                 value={editForm.author}
                 onChange={(e) => setEditForm((prev) => ({ ...prev, author: e.target.value }))}
-                className="col-span-3"
-              />
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="isbn" className="text-right">
-                ISBN
-              </Label>
-              <Input
-                id="isbn"
-                value={editForm.isbn}
-                onChange={(e) => setEditForm((prev) => ({ ...prev, isbn: e.target.value }))}
                 className="col-span-3"
               />
             </div>

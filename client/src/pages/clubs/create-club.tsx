@@ -7,10 +7,9 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { useCreateClub, type CreateClubRequest } from "@/hooks/use-clubs";
+import { useCreateClub } from "@/hooks/use-clubs";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Loader2, Users, Upload } from "lucide-react";
+import { ArrowLeft, Loader2, Users } from "lucide-react";
 
 export default function CreateClub() {
   const [, setLocation] = useLocation();
@@ -44,10 +43,11 @@ export default function CreateClub() {
         description: "Клуб создан. Теперь загрузите книгу для чтения.",
       });
       setLocation(`/clubs/${club.id}`);
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : "Не удалось создать клуб";
       toast({
         title: "Ошибка",
-        description: error.message || "Не удалось создать клуб",
+        description: errorMessage,
         variant: "destructive",
       });
     }

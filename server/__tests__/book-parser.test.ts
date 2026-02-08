@@ -1,29 +1,34 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import * as bookParser from '../book-parser.ts';
+interface MockMetadata {
+  title?: string;
+  author?: string;
+  language?: string;
+  genre?: string;
+}
 
 // Mock functions for testing (since we don't have the actual implementation)
-const extractTitle = (metadata: any) => {
+const extractTitle = (metadata: MockMetadata | null | undefined) => {
   if (!metadata) throw new Error('Metadata is required');
   return metadata.title || 'Unknown Title';
 };
 
-const extractAuthor = (metadata: any) => {
+const extractAuthor = (metadata: MockMetadata | null | undefined) => {
   if (!metadata) throw new Error('Metadata is required');
   return metadata.author || 'Unknown Author';
 };
 
-const extractLanguage = (metadata: any) => {
+const extractLanguage = (metadata: MockMetadata | null | undefined) => {
   if (!metadata) throw new Error('Metadata is required');
   return metadata.language || 'en';
 };
 
-const extractGenres = (metadata: any) => {
+const extractGenres = (metadata: MockMetadata | null | undefined) => {
   if (!metadata || !metadata.genre) return [];
   return metadata.genre.split(',').map((g: string) => g.trim());
 };
 
-const parseMetadata = (metadata: any) => {
+const parseMetadata = (metadata: MockMetadata | null | undefined) => {
   return {
     title: extractTitle(metadata),
     author: extractAuthor(metadata),
@@ -115,11 +120,11 @@ describe('Book Parser Tests', () => {
 
   test('should handle null or undefined metadata', () => {
     assert.throws(() => {
-      extractTitle(null as any);
+      extractTitle(null);
     }, Error, 'Should throw error for null metadata');
     
     assert.throws(() => {
-      extractAuthor(undefined as any);
+      extractAuthor(undefined);
     }, Error, 'Should throw error for undefined metadata');
   });
 });

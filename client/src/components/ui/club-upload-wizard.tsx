@@ -4,7 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent } from "@/components/ui/card";
-import { useClubBookUpload, type DuplicateMatch } from "@/hooks/use-books-v2";
+import { useClubBookUpload, type DuplicateMatch, type UploadMetadata } from "@/hooks/use-books-v2";
 import { Loader2, Upload, FileText, Users } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { DuplicateWarningModal } from "@/components/ui/duplicate-warning-modal";
@@ -17,17 +17,21 @@ interface ClubUploadWizardProps {
 
 export function ClubUploadWizard({ clubId, onSuccess, onCancel }: ClubUploadWizardProps) {
     const [step, setStep] = useState<'upload' | 'metadata' | 'processing'>('upload');
-    const [file, setFile] = useState<File | null>(null);
     const [sessionId, setSessionId] = useState<string | null>(null);
-    const [metadata, setMetadata] = useState<any>({});
+    type BookUploadMetadata = UploadMetadata & {
+        coverPreview?: string | null;
+        recommendedReadingOrder?: number;
+    };
+    const [metadata, setMetadata] = useState<BookUploadMetadata>({ title: "", author: "" });
+    const [file, setFile] = useState<File | null>(null);
     const [duplicates, setDuplicates] = useState<DuplicateMatch[]>([]);
     const [showDuplicateModal, setShowDuplicateModal] = useState(false);
 
     const { upload, confirm } = useClubBookUpload(clubId);
 
     const handleFileSelect = async (selectedFile: File) => {
-        setFile(selectedFile);
         setStep('processing');
+        setFile(selectedFile);
 
         try {
             const result = await upload.mutateAsync(selectedFile);
@@ -48,7 +52,6 @@ export function ClubUploadWizard({ clubId, onSuccess, onCancel }: ClubUploadWiza
                 variant: "destructive"
             });
             setStep('upload');
-            setFile(null);
         }
     };
 
@@ -84,7 +87,7 @@ export function ClubUploadWizard({ clubId, onSuccess, onCancel }: ClubUploadWiza
         setStep('upload');
         setFile(null);
         setSessionId(null);
-        setMetadata({});
+        setMetadata({ title: "", author: "" });
         setDuplicates([]);
     };
 
@@ -205,8 +208,14 @@ export function ClubUploadWizard({ clubId, onSuccess, onCancel }: ClubUploadWiza
                                     id="readingOrder"
                                     type="number"
                                     placeholder="Например: 1"
-                                    value={metadata.recommendedReadingOrder || ''}
-                                    onChange={(e) => setMetadata({ ...metadata, recommendedReadingOrder: e.target.value })}
+                                    value={metadata.recommendedReadingOrder ?? ''}
+                                    onChange={(e) => {
+                                        const value = e.target.value;
+                                        setMetadata({
+                                            ...metadata,
+                                            recommendedReadingOrder: value ? Number(value) : undefined
+                                        });
+                                    }}
                                 />
                             </div>
                             <div className="space-y-2">
@@ -214,8 +223,14 @@ export function ClubUploadWizard({ clubId, onSuccess, onCancel }: ClubUploadWiza
                                 <Input
                                     id="year"
                                     type="number"
-                                    value={metadata.publicationYear || ''}
-                                    onChange={(e) => setMetadata({ ...metadata, publicationYear: e.target.value })}
+                                    value={metadata.publicationYear ?? ''}
+                                    onChange={(e) => {
+                                        const value = e.target.value;
+                                        setMetadata({
+                                            ...metadata,
+                                            publicationYear: value ? Number(value) : undefined
+                                        });
+                                    }}
                                 />
                             </div>
                         </div>

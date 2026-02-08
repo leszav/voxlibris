@@ -6,15 +6,13 @@ import {
   readingProgress,
   clubReadingPlans,
   clubReadingPlanProgress,
-  books,
   users,
   userProfiles,
   chatMessages,
-  type ClubReadingPlan,
-  type ClubReadingPlanProgress
 } from '../shared/schema.js';
 import { db } from './db.js';
-import { eq, and, desc, asc, lt, isNotNull, inArray } from 'drizzle-orm';
+import { eq, and, asc, lt, isNotNull, inArray } from 'drizzle-orm';
+import { logger } from './lib/logger.js';
 
 const router = express.Router();
 
@@ -91,7 +89,7 @@ router.get('/:clubId/progress', jwtAuth, async (req, res) => {
         progress: 0
       }
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('[Club Reader] Get progress error:', error);
     res.status(500).json({ message: 'Failed to get progress' });
   }
@@ -103,13 +101,10 @@ router.put('/:clubId/progress', jwtAuth, async (req, res) => {
     const userId = req.user?.id;
     const { currentChapter, currentPosition, progress } = req.body;
 
-    console.log('[Club Reader] Progress update request:', {
-      clubId,
-      userId,
-      currentChapter,
-      currentPosition,
-      progress
-    });
+    logger.debug(
+      { clubId, userId, currentChapter, currentPosition, progress },
+      '[Club Reader] Progress update request'
+    );
 
     if (!userId) {
       return res.status(401).json({ message: 'Unauthorized' });
@@ -153,7 +148,7 @@ router.put('/:clubId/progress', jwtAuth, async (req, res) => {
         updatedAt: new Date(),
       });
     
-    console.log('[Club Reader] Progress saved successfully');
+    logger.debug('[Club Reader] Progress saved successfully');
 
     // Возвращаем обновленный прогресс включая клубный
     const [adminProgress] = await db
@@ -184,7 +179,7 @@ router.put('/:clubId/progress', jwtAuth, async (req, res) => {
         progress: 0
       }
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('[Club Reader] Update progress error:', error);
     res.status(500).json({ message: 'Failed to update progress' });
   }
@@ -267,7 +262,7 @@ router.get('/:clubId/books/:bookId/content', jwtAuth, async (req, res) => {
         content: sanitizedContent,
         chapter: chapterNum,
         totalChapters: parsedBook.chapters.length,
-        chapters: parsedBook.chapters.map((ch: any) => ({
+        chapters: parsedBook.chapters.map((ch) => ({
           chapterNumber: ch.chapterNumber,
           title: ch.title
         }))
@@ -278,13 +273,13 @@ router.get('/:clubId/books/:bookId/content', jwtAuth, async (req, res) => {
     res.json({
       title: clubBook.title,
       author: clubBook.author,
-      chapters: parsedBook.chapters?.map((ch: any) => ({
+      chapters: parsedBook.chapters?.map((ch) => ({
         chapterNumber: ch.chapterNumber,
         title: ch.title
       })) || [],
       totalChapters: parsedBook.chapters?.length || 1
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('[Club Reader] Get content error:', error);
     res.status(500).json({ message: 'Failed to get content' });
   }
@@ -339,7 +334,7 @@ router.get('/:clubId/reading-plan', jwtAuth, async (req, res) => {
       plan: plans,
       progress
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('[Club Reader] Get reading plan error:', error);
     res.status(500).json({ message: 'Failed to get reading plan' });
   }
@@ -402,7 +397,7 @@ router.post('/:clubId/reading-plan', jwtAuth, async (req, res) => {
       .returning();
 
     res.status(201).json(newPlan);
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('[Club Reader] Create reading plan error:', error);
     res.status(500).json({ message: 'Failed to create reading plan' });
   }
@@ -451,7 +446,7 @@ router.put('/:clubId/reading-plan/:planId', jwtAuth, async (req, res) => {
 
     const { title, description, orderIndex, startChapter, endChapter, targetDate } = req.body;
 
-    const updates: any = {};
+    const updates: Partial<typeof clubReadingPlans.$inferInsert> = {};
     if (title !== undefined) updates.title = title;
     if (description !== undefined) updates.description = description;
     if (orderIndex !== undefined) updates.orderIndex = orderIndex;
@@ -466,7 +461,7 @@ router.put('/:clubId/reading-plan/:planId', jwtAuth, async (req, res) => {
       .returning();
 
     res.json(updatedPlan);
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('[Club Reader] Update reading plan error:', error);
     res.status(500).json({ message: 'Failed to update reading plan' });
   }
@@ -517,7 +512,7 @@ router.delete('/:clubId/reading-plan/:planId', jwtAuth, async (req, res) => {
     await db.delete(clubReadingPlans).where(eq(clubReadingPlans.id, planId));
 
     res.json({ success: true, message: 'Reading plan deleted' });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('[Club Reader] Delete reading plan error:', error);
     res.status(500).json({ message: 'Failed to delete reading plan' });
   }
@@ -537,7 +532,7 @@ router.delete('/:clubId/chat/cleanup', jwtAuth, async (req, res) => {
     }
 
     const userId = user.id;
-    const isAdmin = (user as any).role === 'admin';
+    const isAdmin = user.role === 'admin';
 
     // Проверяем, что пользователь участник клуба
     const [member] = await db
@@ -575,7 +570,7 @@ router.delete('/:clubId/chat/cleanup', jwtAuth, async (req, res) => {
       deletedCount: deleted.length,
       olderThanDays,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('[Club Reader] Cleanup chat error:', error);
     res.status(500).json({ message: 'Failed to cleanup chat messages' });
   }
@@ -666,7 +661,7 @@ router.get('/:clubId/members-progress', jwtAuth, async (req, res) => {
     });
 
     res.json(result);
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('[Club Reader] Get members progress error:', error);
     res.status(500).json({ message: 'Failed to get members progress' });
   }

@@ -9,6 +9,7 @@ import type {
   BookmarkUpdate,
   NoteUpdate,
 } from "../shared/schema.js";
+import { logger } from "./lib/logger.js";
 
 interface AuthenticatedSocket extends Socket {
   userId: string;
@@ -46,7 +47,8 @@ async function authenticateSocket(socket: Socket, next: (err?: Error) => void) {
     
     next();
   } catch (error) {
-    console.error('[WebSocket] Authentication error:', error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error({ error: errorMessage }, '[WebSocket] Authentication error');
     next(new Error('Authentication failed'));
   }
 }
@@ -69,7 +71,7 @@ export function initializeReaderWebSocket(httpServer: HttpServer) {
 
   io.on("connection", (socket: Socket) => {
     const authSocket = socket as AuthenticatedSocket;
-    console.log(`[WS Reader] User ${authSocket.username} (${authSocket.userId}) connected`);
+    logger.info(`[WS Reader] User ${authSocket.username} (${authSocket.userId}) connected`);
 
     // Присоединение к комнате книги
     socket.on("join_book", async (data: { bookId: string; clubId?: string }) => {
@@ -86,7 +88,7 @@ export function initializeReaderWebSocket(httpServer: HttpServer) {
         const roomName = clubId ? `club:${clubId}:book:${bookId}` : `book:${bookId}`;
         await socket.join(roomName);
         
-        console.log(`[WS Reader] User ${authSocket.username} joined room: ${roomName}`);
+        logger.info(`[WS Reader] User ${authSocket.username} joined room: ${roomName}`);
         
         // Уведомление о присоединении
         socket.to(roomName).emit("user_joined", {
@@ -97,7 +99,8 @@ export function initializeReaderWebSocket(httpServer: HttpServer) {
 
         socket.emit("joined_book", { bookId, clubId, roomName });
       } catch (error) {
-        console.error("[WS Reader] Error joining book:", error);
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        logger.error({ error: errorMessage }, "[WS Reader] Error joining book");
         socket.emit("error", { message: "Failed to join book room" });
       }
     });
@@ -143,7 +146,8 @@ export function initializeReaderWebSocket(httpServer: HttpServer) {
         
         socket.emit("progress_saved", { success: true });
       } catch (error) {
-        console.error("[WS Reader] Error updating progress:", error);
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        logger.error({ error: errorMessage }, "[WS Reader] Error updating progress");
         socket.emit("error", { message: "Failed to save progress" });
       }
     });
@@ -161,9 +165,10 @@ export function initializeReaderWebSocket(httpServer: HttpServer) {
 
         socket.emit("bookmark_added", { bookmark });
         
-        console.log(`[WS Reader] Bookmark added by ${authSocket.username} for book ${data.bookId}`);
+        logger.info(`[WS Reader] Bookmark added by ${authSocket.username} for book ${data.bookId}`);
       } catch (error) {
-        console.error("[WS Reader] Error adding bookmark:", error);
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        logger.error({ error: errorMessage }, "[WS Reader] Error adding bookmark");
         socket.emit("error", { message: "Failed to add bookmark" });
       }
     });
@@ -181,9 +186,10 @@ export function initializeReaderWebSocket(httpServer: HttpServer) {
 
         socket.emit("note_added", { note });
         
-        console.log(`[WS Reader] Note added by ${authSocket.username} for book ${data.bookId}`);
+        logger.info(`[WS Reader] Note added by ${authSocket.username} for book ${data.bookId}`);
       } catch (error) {
-        console.error("[WS Reader] Error adding note:", error);
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        logger.error({ error: errorMessage }, "[WS Reader] Error adding note");
         socket.emit("error", { message: "Failed to add note" });
       }
     });
@@ -199,15 +205,15 @@ export function initializeReaderWebSocket(httpServer: HttpServer) {
         timestamp: new Date().toISOString(),
       });
       
-      console.log(`[WS Reader] User ${authSocket.username} left room: ${roomName}`);
+      logger.info(`[WS Reader] User ${authSocket.username} left room: ${roomName}`);
     });
 
     socket.on("disconnect", () => {
-      console.log(`[WS Reader] User ${authSocket.username} (${authSocket.userId}) disconnected`);
+      logger.info(`[WS Reader] User ${authSocket.username} (${authSocket.userId}) disconnected`);
     });
   });
 
-  console.log("[WS Reader] WebSocket server initialized at /ws/reader");
+  logger.info("[WS Reader] WebSocket server initialized at /ws/reader");
   return io;
 }
 
@@ -247,7 +253,8 @@ async function verifyBookAccess(userId: string, bookId: string, clubId?: string)
 
     return false;
   } catch (error) {
-    console.error('[WS Reader] Error verifying book access:', error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error({ error: errorMessage }, '[WS Reader] Error verifying book access');
     return false;
   }
 }

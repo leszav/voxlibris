@@ -8,9 +8,11 @@ import type {
   ClubMemberRole,
   ClubInvitation,
   InsertClubInvitation,
+  InvitationStatus,
   User,
   ClubWithDetails
 } from '../../shared/schema.js';
+import { logger } from '../lib/logger.js';
 
 /**
  * Club Domain Repository - единственная ответственность: управление клубами
@@ -184,7 +186,7 @@ export class ClubRepository extends BaseRepository {
         owner: owner || null,
         memberCount: Number(memberCount),
         tags: clubTagsResult.map(t => t.slug),
-      } as any;
+      } as ClubWithDetails;
     } catch (error) {
       this.logError('getClub', error);
       return undefined;
@@ -306,9 +308,10 @@ export class ClubRepository extends BaseRepository {
     
     try {
       // Создаем клуб (createdAt/updatedAt устанавливаются автоматически)
+      const insertData = club as typeof clubs.$inferInsert;
       const result = await this.db
         .insert(clubs)
-        .values(club as any) // Temporary cast для решения строгой типизации ClubType enum
+        .values(insertData)
         .returning();
       
       const newClub = this.getFirstResult(result);
@@ -333,9 +336,10 @@ export class ClubRepository extends BaseRepository {
     this.validateRequired(id, 'id');
     
     try {
+      const updateData = updates as Partial<typeof clubs.$inferInsert>;
       const result = await this.db
         .update(clubs)
-        .set(updates as any) // Временный cast для решения типизации enum полей (type, status)
+        .set(updateData)
         .where(eq(clubs.id, id))
         .returning();
       
@@ -471,7 +475,7 @@ export class ClubRepository extends BaseRepository {
   /**
    * Получение участников с их ролями в клубе
    */
-  async getClubMembersWithRoles(clubId: string): Promise<Array<User & { role: ClubMemberRole; joinedAt: Date }>> {
+  async getClubMembersWithRoles(clubId: string): Promise<Array<Omit<User, 'role'> & { role: ClubMemberRole; joinedAt: Date }>> {
     this.validateRequired(clubId, 'clubId');
     
     try {
@@ -488,7 +492,7 @@ export class ClubRepository extends BaseRepository {
         })
         .from(users)
         .innerJoin(clubMembers, eq(users.id, clubMembers.userId))
-        .where(eq(clubMembers.clubId, clubId)) as Array<User & { role: ClubMemberRole; joinedAt: Date }>;
+        .where(eq(clubMembers.clubId, clubId)) as Array<Omit<User, 'role'> & { role: ClubMemberRole; joinedAt: Date }>;
     } catch (error) {
       this.logError('getClubMembersWithRoles', error);
       return [];
@@ -526,7 +530,7 @@ export class ClubRepository extends BaseRepository {
     this.validateRequired(clubId, 'clubId');
     
     try {
-      let conditions = [eq(clubMembers.clubId, clubId)];
+      const conditions = [eq(clubMembers.clubId, clubId)];
       
       if (excludeUserId) {
         conditions.push(sql`${clubMembers.userId} != ${excludeUserId}`);
@@ -586,7 +590,7 @@ export class ClubRepository extends BaseRepository {
       // В текущей архитектуре memberCount не хранится в БД
       // Счетчик участников вычисляется динамически через getActiveClubMembersCount
       // Метод оставлен как placeholder для будущих улучшений производительности
-      console.log(`Member count update triggered for club ${clubId} (currently no-op)`);
+      logger.debug({ clubId }, 'Member count update triggered (currently no-op)');
     } catch (error) {
       this.logError('updateMemberCount', error);
     }
@@ -666,12 +670,12 @@ export class ClubRepository extends BaseRepository {
   /**
    * Обновление статуса приглашения
    */
-  async updateInvitationStatus(inviteToken: string, status: string, acceptedAt?: Date): Promise<boolean> {
+  async updateInvitationStatus(inviteToken: string, status: InvitationStatus, acceptedAt?: Date): Promise<boolean> {
     this.validateRequired(inviteToken, 'inviteToken');
     this.validateRequired(status, 'status');
     
     try {
-      const updateData: any = { status };
+      const updateData: Partial<typeof clubInvitations.$inferInsert> = { status };
       if (acceptedAt) {
         updateData.acceptedAt = acceptedAt;
       }

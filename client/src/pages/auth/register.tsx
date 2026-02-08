@@ -51,7 +51,9 @@ export default function Register() {
     try {
       const errorData = JSON.parse(error.message);
       if (errorData.errors && Array.isArray(errorData.errors)) {
-        const passwordError = errorData.errors.find((err: any) => err.path?.includes('password'));
+        const passwordError = errorData.errors.find((err: { path?: string[] }) =>
+          err.path?.includes('password')
+        );
         if (passwordError) {
           return "Ошибка валидации данных. Пароль должен содержать только латинские буквы, цифры и спецсимволы.";
         }
