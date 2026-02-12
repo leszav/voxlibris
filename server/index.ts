@@ -31,7 +31,6 @@ import { initializeReaderWebSocket } from "./websocket-reader.js";
 import { initializeChatWebSocket } from "./websocket-chat.js";
 import { setupReadingSessionsHandlers } from "./websocket/reading-sessions.js";
 import { scheduler } from "./services/scheduler.js";
-import webrtcRoutes from "./routes/webrtc.js";
 import readingSessionsRoutes from "./routes/reading-sessions.js";
 import reactionsRoutes from "./routes/reactions.js";
 import questionsRoutes from "./routes/questions.js";
@@ -315,9 +314,6 @@ try {
 
 	// Setup Reader routes (JWT protected)
 	app.use("/api/v1/books", jwtAuth, readerRoutes);
-
-	// Setup WebRTC routes (JWT protected)
-	app.use("/api/webrtc", jwtAuth, webrtcRoutes);
 
 	// Setup Reading Sessions routes (JWT protected)
 	app.use("/api/reading-sessions", jwtAuth, readingSessionsRoutes);

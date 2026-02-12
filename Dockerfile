@@ -2,14 +2,11 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Install build dependencies for mediasoup and other native modules
+# Install build dependencies for native modules (bcrypt, sharp)
 RUN apk add --no-cache \
-    python3 \
-    py3-pip \
     make \
     g++ \
-    gcc \
-    linux-headers
+    gcc
 
 # Copy package files
 COPY package.json pnpm-lock.yaml ./
@@ -44,9 +41,6 @@ COPY --from=builder /app/package.json ./
 COPY --from=builder /app/pnpm-lock.yaml ./
 RUN npm install -g pnpm@9 && \
     pnpm install --prod --frozen-lockfile --ignore-scripts
-
-# Copy fully built mediasoup from builder (includes compiled worker binary)
-COPY --from=builder /app/node_modules/mediasoup ./node_modules/mediasoup
 
 # Copy built application
 COPY --from=builder /app/dist ./dist

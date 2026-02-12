@@ -1,7 +1,5 @@
 import { Server as SocketIOServer, Socket } from "socket.io";
 import { storage } from "./repositories/index.js";
-import { WebRTCHandler } from "./webrtc/webrtc-handler.js";
-import { MediasoupManager } from "./webrtc/mediasoup-manager.js";
 import { logger } from "./lib/logger.js";
 import type { 
   SessionPositionUpdate, 
@@ -45,15 +43,6 @@ async function leaveCurrentSession(socket: AuthenticatedSocket) {
 }
 
 export function setupWebSocketHandlers(io: SocketIOServer) {
-  // Инициализация mediasoup
-  const mediasoupManager = MediasoupManager.getInstance();
-  mediasoupManager.initialize().catch(error => {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    logger.error({ error: errorMessage }, 'Failed to initialize mediasoup');
-  });
-
-  // Создаем обработчик WebRTC
-  const webrtcHandler = new WebRTCHandler();
   // Authentication middleware for WebSocket connections
   io.use(async (socket: AuthenticatedSocket, next) => {
     try {
@@ -85,9 +74,6 @@ export function setupWebSocketHandlers(io: SocketIOServer) {
 
   io.on("connection", (socket: AuthenticatedSocket) => {
     logger.info(`User ${socket.userId} connected to WebSocket`);
-
-    // Настраиваем обработчики WebRTC
-    webrtcHandler.setupHandlers(socket);
 
     // Join a reading session room
     socket.on("join_session", async (sessionId: string) => {
@@ -279,9 +265,6 @@ export function setupWebSocketHandlers(io: SocketIOServer) {
     socket.on("disconnect", async (reason) => {
       logger.info(`User ${socket.userId} disconnected: ${reason}`);
       
-      // Обрабатываем WebRTC отключение
-      await webrtcHandler.handleDisconnect(socket);
-
       if (socket.currentSession && socket.userId) {
         await leaveCurrentSession(socket);
       }
