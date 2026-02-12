@@ -10,6 +10,7 @@ import { CryptoService } from './crypto-service.js';
 import { fileStorage } from './file-storage.js';
 import { duplicateDetectionService } from './duplicate-detection-service.js';
 import { logger } from './lib/logger.js';
+import { optimizeImage } from './image-optimizer.js';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -40,13 +41,11 @@ async function processCoverImage(
     sessionId: string
 ): Promise<string | undefined> {
     let coverBuffer: Buffer | undefined;
-    let coverType: string = 'image/jpeg';
 
     if (metadata.coverImageData && typeof metadata.coverImageData === 'string') {
         try {
             const matches = metadata.coverImageData.match(/^data:([A-Za-z-+/]+);base64,(.+)$/);
             if (matches?.length === 3) {
-                coverType = matches[1];
                 coverBuffer = Buffer.from(matches[2], 'base64');
             } else {
                 coverBuffer = Buffer.from(metadata.coverImageData, 'base64');
@@ -58,19 +57,31 @@ async function processCoverImage(
         coverBuffer = undefined;
     } else if (session.parsedMetadata.coverImageData) {
         coverBuffer = session.parsedMetadata.coverImageData;
-        coverType = session.parsedMetadata.coverImageType || 'image/jpeg';
     }
 
     if (coverBuffer) {
         try {
-            const coverPath = `covers/club/${clubId}/${sessionId}-cover.jpg`;
-            logger.info({ coverPath }, '[ClubBooks] Uploading cover');
-            const coverResult = await fileStorage.uploadFile(coverBuffer, coverPath, coverType);
+            // Оптимизируем обложку перед загрузкой
+            const optimized = await optimizeImage(coverBuffer, 'cover');
+            const coverPath = `covers/club/${clubId}/${sessionId}-cover.webp`;
+            
+            logger.info({ 
+                coverPath, 
+                originalSize: optimized.originalSize,
+                optimizedSize: optimized.optimizedSize,
+                compressionRatio: optimized.compressionRatio 
+            }, '[ClubBooks] Uploading optimized cover');
+            
+            const coverResult = await fileStorage.uploadFile(
+                optimized.buffer, 
+                coverPath, 
+                optimized.mimeType
+            );
             const coverUrl = `/api/storage/${coverResult.key}`;
             logger.info({ key: coverResult.key, url: coverUrl }, '[ClubBooks] Cover uploaded');
             return coverUrl;
         } catch (e) {
-            console.warn('Failed to upload cover', e);
+            logger.error({ error: e }, '[ClubBooks] Failed to upload cover');
         }
     }
     return undefined;

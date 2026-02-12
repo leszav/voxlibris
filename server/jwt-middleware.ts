@@ -45,6 +45,7 @@ export function jwtAuth(req: Request, res: Response, next: NextFunction) {
 
     const payload = authService.verifyAccessToken(token);
     if (!payload) {
+      logger.debug('[jwtAuth] Invalid or expired token');
       return res.status(401).json({
         message: "Недействительный или истекший токен",
         code: "INVALID_TOKEN"
@@ -55,7 +56,7 @@ export function jwtAuth(req: Request, res: Response, next: NextFunction) {
     req.user = { ...payload, id: payload.userId };
     next();
   } catch (error) {
-    console.error('JWT Auth middleware error:', error);
+    logger.error({ error }, 'JWT Auth middleware error');
     return res.status(500).json({
       message: "Ошибка аутентификации",
       code: "AUTH_ERROR"
@@ -144,7 +145,7 @@ export function requireActiveUser(req: Request, res: Response, next: NextFunctio
         };
         
         return res.status(403).json({
-          message: statusMessages[user.status as keyof typeof statusMessages] || "Ваш аккаунт неактивен.",
+          message: statusMessages[user.status] || "Ваш аккаунт неактивен.",
           code: "ACCOUNT_NOT_ACTIVATED",
           userStatus: user.status
         });

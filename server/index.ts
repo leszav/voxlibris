@@ -20,6 +20,7 @@ import { setupAuthRoutes } from "./auth-routes.js";
 import { authService } from "./auth-service.js";
 import clubReaderRoutes from "./club-reader-routes.js";
 import clubRoutes from "./club-routes.js";
+import readingStatusRoutes from "./reading-status-routes.js";
 import { validateEnvironment } from "./config/validate.js";
 import { jwtAuth } from "./jwt-middleware.js";
 import { registerRoutes } from "./routes.js";
@@ -70,29 +71,54 @@ export function log(message: string, source = "express") {
 	logger.info(`${formattedTime} [${source}] ${message}`);
 }
 
+// Проверка чувствительных ключей
+function isSensitiveKey(key: string): boolean {
+	const lowerKey = key.toLowerCase();
+	const sensitiveKeys = ["password", "token", "secret", "apikey", "api_key", "accesstoken", "refreshtoken"];
+	return sensitiveKeys.some((sensitive) => lowerKey.includes(sensitive));
+}
+
+// Проверка ключей с большими данными
+function isLargeDataKey(key: string): boolean {
+	const lowerKey = key.toLowerCase();
+	const largeDataKeys = ["coverimage", "image", "avatar", "encryptedcontentkey"];
+	return largeDataKeys.some((large) => lowerKey.includes(large));
+}
+
+// Маскирование строковых значений
+function maskStringValue(value: string): string {
+	if (value.startsWith("data:image/") && value.length > 200) {
+		return `[Base64 image: ${value.length} bytes]`;
+	}
+	if (value.length > 1000) {
+		return `${value.substring(0, 100)}... [${value.length} chars total]`;
+	}
+	return value;
+}
+
 // Функция для маскирования чувствительных данных в логах
 function maskSensitiveData(obj: unknown): unknown {
 	if (!obj || typeof obj !== "object") return obj;
 
-	const sensitiveKeys = [
-		"password",
-		"token",
-		"secret",
-		"apikey",
-		"api_key",
-		"accesstoken",
-		"refreshtoken",
-	];
 	const masked: Record<string, unknown> | unknown[] = Array.isArray(obj) ? [...obj] : { ...(obj as Record<string, unknown>) };
 
-	if (!Array.isArray(masked)) {
-		for (const key in masked) {
-			const lowerKey = key.toLowerCase();
-			if (sensitiveKeys.some((sensitive) => lowerKey.includes(sensitive))) {
-				masked[key] = "***";
-			} else if (typeof masked[key] === "object" && masked[key] !== null) {
-				masked[key] = maskSensitiveData(masked[key]);
-			}
+	if (Array.isArray(masked)) {
+		// Для массивов рекурсивно обработать элементы
+		return masked.map((item) => (typeof item === "object" && item !== null ? maskSensitiveData(item) : item));
+	}
+
+	// Для объектов обработать каждый ключ
+	for (const key in masked) {
+		const value = masked[key];
+
+		if (isSensitiveKey(key)) {
+			masked[key] = "***";
+		} else if (isLargeDataKey(key) && typeof value === "string" && value.length > 100) {
+			masked[key] = `[${value.length} bytes]`;
+		} else if (typeof value === "string") {
+			masked[key] = maskStringValue(value);
+		} else if (typeof value === "object" && value !== null) {
+			masked[key] = maskSensitiveData(value);
 		}
 	}
 
@@ -298,6 +324,9 @@ try {
 
 	// Setup Reactions routes (JWT protected)
 	app.use("/api/reactions", jwtAuth, reactionsRoutes);
+
+	// Setup Reading Status routes (JWT protected)
+	app.use("/api/reading-status", jwtAuth, readingStatusRoutes);
 
 	// Setup Questions routes (JWT protected)
 	app.use("/api/questions", jwtAuth, questionsRoutes);

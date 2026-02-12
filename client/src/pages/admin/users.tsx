@@ -308,8 +308,24 @@ function UserActionsMenu({ user }: Readonly<{ user: User }>) {
   const updateRoleMutation = useMutation({
     mutationFn: ({ username, role }: { username: string; role: string }) =>
       updateUserRole(username, role),
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["admin-users"] });
+      const roleNames = {
+        admin: "Администратор",
+        moderator: "Модератор",
+        user: "Пользователь"
+      };
+      toast({
+        title: "Роль изменена",
+        description: `Пользователь ${variables.username} теперь ${roleNames[variables.role as keyof typeof roleNames]}.`,
+      });
+    },
+    onError: (error: unknown) => {
+      toast({
+        title: "Не удалось изменить роль",
+        description: error instanceof Error ? error.message : "Произошла ошибка при изменении роли",
+        variant: "destructive",
+      });
     },
   });
 
@@ -450,6 +466,16 @@ function UserActionsMenu({ user }: Readonly<{ user: User }>) {
               Активировать
             </DropdownMenuItem>
           )}
+          <DropdownMenuItem
+            onClick={() =>
+              updateRoleMutation.mutate({ username: user.username, role: "admin" })
+            }
+            disabled={user.role === "admin" || updateRoleMutation.isPending}
+            className="text-purple-600"
+          >
+            <ShieldCheck className="h-4 w-4 mr-2" />
+            Сделать администратором
+          </DropdownMenuItem>
           <DropdownMenuItem
             onClick={() =>
               updateRoleMutation.mutate({ username: user.username, role: "moderator" })

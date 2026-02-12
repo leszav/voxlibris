@@ -237,9 +237,7 @@ router.post('/users/:id/reset-password', jwtAuth, requireFullAdmin, async (req, 
       'reset_password',
       'user',
       user.id,
-      reason || 'Password reset requested by admin',
-      undefined,
-      undefined
+      reason || 'Password reset requested by admin'
     );
 
     if (!result.emailSent) {

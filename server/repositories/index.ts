@@ -7,6 +7,7 @@ import { ReadingRepository } from './ReadingRepository.js';
 import { ModerationRepository } from './ModerationRepository.js';
 import { AnalyticsRepository } from './AnalyticsRepository.js';
 import { SystemRepository } from './SystemRepository.js';
+import { ClubDiscussionsRepository } from './ClubDiscussionsRepository.js';
 
 // VoxLibris Studio repositories
 import { ClubReadingStatusRepository } from './ClubReadingStatusRepository.js';
@@ -55,6 +56,7 @@ export class RepositoryContainer {
   private _moderation?: ModerationRepository;
   private _analytics?: AnalyticsRepository;
   private _system?: SystemRepository;
+  private _clubDiscussions?: ClubDiscussionsRepository;
 
   // VoxLibris Studio repositories
   private _clubReadingStatus?: ClubReadingStatusRepository;
@@ -113,6 +115,11 @@ export class RepositoryContainer {
   get system(): SystemRepository {
     this._system ??= new SystemRepository();
     return this._system;
+  }
+
+  get clubDiscussions(): ClubDiscussionsRepository {
+    this._clubDiscussions ??= new ClubDiscussionsRepository();
+    return this._clubDiscussions;
   }
 
   // VoxLibris Studio getters
@@ -519,6 +526,10 @@ class StorageAdapter implements Partial<IStorage> {
     return this.repos.clubs.createClub(club);
   }
 
+  async getClubByTitle(title: string) {
+    return this.repos.clubs.getClubByTitle(title);
+  }
+
   async updateClub(id: string, updates: Parameters<ClubRepository['updateClub']>[1]) {
     return this.repos.clubs.updateClub(id, updates);
   }
@@ -561,6 +572,19 @@ class StorageAdapter implements Partial<IStorage> {
 
   async removeMember(clubId: string, userId: string) {
     return this.repos.clubs.removeMember(clubId, userId);
+  }
+
+  // Club Discussions methods
+  async getClubDiscussions(clubId: string) {
+    return this.repos.clubDiscussions.getClubDiscussions(clubId);
+  }
+
+  async createClubDiscussion(discussion: Parameters<ClubDiscussionsRepository['createClubDiscussion']>[0]) {
+    return this.repos.clubDiscussions.createClubDiscussion(discussion);
+  }
+
+  async deleteClubDiscussion(discussionId: string) {
+    return this.repos.clubDiscussions.deleteClubDiscussion(discussionId);
   }
 
   async createClubInvitation(invitation: Parameters<ClubRepository['createClubInvitation']>[0]) {

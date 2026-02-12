@@ -1,4 +1,5 @@
 import type { ClubMemberRole, ClubWithDetails, User } from "@shared/schema";
+import { useState } from "react";
 import {
   ArrowLeft,
   BookOpen,
@@ -15,11 +16,15 @@ import {
   Users,
 } from "lucide-react";
 import { Link, useLocation, useRoute } from "wouter";
+import { useQueryClient } from "@tanstack/react-query";
 import { ClubSettingsModal } from "@/components/club/club-settings-modal";
 import { EditClubBookDialog } from "@/components/club/EditClubBookDialog";
 import { InvitationsList } from "@/components/club/invitations-list";
 import { InviteMemberModal } from "@/components/club/invite-member-modal";
 import { ReadingPlan } from "@/components/club/reading-plan";
+import { ClubDiscussionBoard } from "@/components/club/ClubDiscussionBoard";
+import { BookDescriptionDialog } from "@/components/club/BookDescriptionDialog";
+import { TransferOwnershipDialog } from "@/components/club/TransferOwnershipDialog";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { ChatWidget } from "@/components/chat/ChatWidget";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -147,7 +152,7 @@ type ToastFn = ReturnType<typeof useToast>['toast'];
 function useClubErrorHandling(error: unknown, setLocation: (path: string) => void) {
   if (!error) return null;
 
-  const errorMessage = error instanceof Error ? error.message : String(error);
+  const errorMessage = error instanceof Error ? error.message : JSON.stringify(error);
   const isAuthError = errorMessage.includes("Сессия истекла") ||
     errorMessage.includes("войдите") ||
     errorMessage.includes("401") ||
@@ -225,7 +230,7 @@ function useClubActions({
   deleteBookMutation,
 }: {
   clubId: string;
-  club: ClubWithDetails;
+  club: ClubWithDetails | null;
   user: User | null;
   isOwner: boolean;
   toast: ToastFn;
@@ -249,7 +254,7 @@ function useClubActions({
   };
 
   const handleDeleteBook = async () => {
-    if (!club.book?.id) return;
+    if (!club?.book?.id) return;
     if (!confirm(`Удалить книгу «${club.book.title}» из клуба? Это действие необратимо.`)) return;
 
     try {
@@ -349,9 +354,11 @@ interface ClubHeaderProps {
   readonly removeMemberMutation: RemoveMemberMutation;
   readonly handleLeaveClub: () => void;
   readonly setLocation: (path: string) => void;
+  readonly user: User | null;
+  readonly onOwnershipTransferred: () => void;
 }
 
-function ClubHeader({ club, members, isOwner, isMember, removeMemberMutation, handleLeaveClub, setLocation }: ClubHeaderProps) {
+function ClubHeader({ club, members, isOwner, isMember, removeMemberMutation, handleLeaveClub, setLocation, user, onOwnershipTransferred }: ClubHeaderProps) {
   return (
     <div className="relative h-64 md:h-80 w-full overflow-hidden">
       {club.coverImage ? (
@@ -417,26 +424,41 @@ function ClubHeader({ club, members, isOwner, isMember, removeMemberMutation, ha
           <div className="flex gap-3">
             {isMember && (
               <>
-                {isOwner && <ClubSettingsModal club={club} />}
-                <Button
-                  size="lg"
-                  variant="outline"
-                  className="bg-white/10 text-white border-white/20 hover:bg-white/20"
-                  onClick={handleLeaveClub}
-                  disabled={removeMemberMutation.isPending}
-                >
-                  {removeMemberMutation.isPending ? (
-                    <>
-                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                      Выходим...
-                    </>
-                  ) : (
-                    <>
-                      <LogOut className="w-4 h-4 mr-2" />
-                      Выйти из клуба
-                    </>
-                  )}
-                </Button>
+                {isOwner && (
+                  <>
+                    <ClubSettingsModal club={club} />
+                    {user && members.length > 1 && (
+                      <TransferOwnershipDialog
+                        clubId={club.id}
+                        clubTitle={club.title}
+                        members={members}
+                        currentUserId={user.id}
+                        onSuccess={onOwnershipTransferred}
+                      />
+                    )}
+                  </>
+                )}
+                {!isOwner && (
+                  <Button
+                    size="lg"
+                    variant="outline"
+                    className="bg-white/10 text-white border-white/20 hover:bg-white/20"
+                    onClick={handleLeaveClub}
+                    disabled={removeMemberMutation.isPending}
+                  >
+                    {removeMemberMutation.isPending ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Выходим...
+                      </>
+                    ) : (
+                      <>
+                        <LogOut className="w-4 h-4 mr-2" />
+                        Выйти из клуба
+                      </>
+                    )}
+                  </Button>
+                )}
               </>
             )}
           </div>
@@ -458,6 +480,8 @@ interface CurrentBookCardProps {
 }
 
 function CurrentBookCard({ club, clubId, isOwner, isMember, handleDeleteBook, deleteBookMutation, setLocation }: CurrentBookCardProps) {
+  const [showDescriptionDialog, setShowDescriptionDialog] = useState(false);
+
   return (
     <div className="bg-card rounded-xl border p-6 shadow-sm">
       <h3 className="font-serif font-bold text-xl mb-4">Текущая книга</h3>
@@ -481,9 +505,19 @@ function CurrentBookCard({ club, clubId, isOwner, isMember, handleDeleteBook, de
               <h4 className="font-semibold leading-tight">{club.book.title}</h4>
               <p className="text-sm text-muted-foreground">{club.book.author}</p>
               {club.book.description && (
-                <p className="text-xs text-muted-foreground line-clamp-2">
-                  {club.book.description}
-                </p>
+                <div className="space-y-1">
+                  <p className="text-xs text-muted-foreground line-clamp-2">
+                    {club.book.description}
+                  </p>
+                  {club.book.description.length > 100 && (
+                    <button
+                      onClick={() => setShowDescriptionDialog(true)}
+                      className="text-xs text-primary hover:underline"
+                    >
+                      Показать полностью...
+                    </button>
+                  )}
+                </div>
               )}
             </div>
           </div>
@@ -565,6 +599,16 @@ function CurrentBookCard({ club, clubId, isOwner, isMember, handleDeleteBook, de
             />
           )}
         </div>
+      )}
+
+      {club.book?.description && (
+        <BookDescriptionDialog
+          open={showDescriptionDialog}
+          onOpenChange={setShowDescriptionDialog}
+          title={club.book.title}
+          author={club.book.author}
+          description={club.book.description}
+        />
       )}
     </div>
   );
@@ -659,11 +703,12 @@ interface ClubContentTabsProps {
   readonly clubId: string;
   readonly isMember: boolean;
   readonly isOwner: boolean;
+  readonly currentUserId: string;
   readonly settings: ClubSettings;
   readonly scheduleItems: ScheduleItem[];
 }
 
-function ClubContentTabs({ clubId, isMember, isOwner, settings, scheduleItems }: ClubContentTabsProps) {
+function ClubContentTabs({ clubId, isMember, isOwner, currentUserId, settings, scheduleItems }: ClubContentTabsProps) {
   return (
     <Tabs defaultValue="about" className="w-full">
       <TabsList className="w-full justify-start border-b rounded-none h-auto p-0 bg-transparent gap-6">
@@ -748,18 +793,25 @@ function ClubContentTabs({ clubId, isMember, isOwner, settings, scheduleItems }:
       </TabsContent>
 
       <TabsContent value="discussion" className="pt-6">
-        <div className="flex flex-col items-center justify-center py-12 text-center space-y-4 bg-secondary/20 rounded-xl border border-dashed">
-          <div className="w-12 h-12 bg-background rounded-full flex items-center justify-center shadow-sm">
-            <MessageCircle className="w-6 h-6 text-muted-foreground" />
+        {isMember ? (
+          <ClubDiscussionBoard 
+            clubId={clubId} 
+            isOwner={isOwner}
+            currentUserId={currentUserId}
+          />
+        ) : (
+          <div className="flex flex-col items-center justify-center py-12 text-center space-y-4 bg-secondary/20 rounded-xl border border-dashed">
+            <div className="w-12 h-12 bg-background rounded-full flex items-center justify-center shadow-sm">
+              <MessageCircle className="w-6 h-6 text-muted-foreground" />
+            </div>
+            <div>
+              <h3 className="font-medium">Доска обсуждений</h3>
+              <p className="text-sm text-muted-foreground max-w-sm mx-auto mt-1">
+                Вступите в клуб, чтобы участвовать в обсуждениях.
+              </p>
+            </div>
           </div>
-          <div>
-            <h3 className="font-medium">Доска обсуждений</h3>
-            <p className="text-sm text-muted-foreground max-w-sm mx-auto mt-1">
-              Вступите в клуб, чтобы участвовать в обсуждениях глав и опросах.
-            </p>
-          </div>
-          <Button variant="outline">Подать заявку</Button>
-        </div>
+        )}
       </TabsContent>
 
       <TabsContent value="schedule" className="pt-6">
@@ -818,15 +870,33 @@ export default function ClubDetails() {
   const [, setLocation] = useLocation();
   const { user } = useAuth();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const { data: clubData, isLoading, error } = useClub(clubId);
   const { data: membersData, isLoading: membersLoading } = useClubMembers(clubId);
   const removeMemberMutation = useRemoveMember();
   const deleteBookMutation = useDeleteClubBook(clubId);
 
+  // Вызываем все хуки безусловно (правила React Hooks)
+  const errorComponent = useClubErrorHandling(error, setLocation);
+  
+  const members = Array.isArray(membersData) ? membersData : [];
+  const permissions = useClubPermissions(members, user);
+  const { isOwner, isModerator, isMember, canRemove } = permissions;
+
+  const { handleRemoveMember, handleDeleteBook, handleLeaveClub, handleCleanupChat } = useClubActions({
+    clubId,
+    club: clubData || null,
+    user,
+    isOwner,
+    toast,
+    setLocation,
+    removeMemberMutation,
+    deleteBookMutation
+  });
+
+  // Теперь обрабатываем условия после всех хуков
   if (!clubId) return <ClubNotFound />;
   if (isLoading) return <ClubLoading />;
-  
-  const errorComponent = useClubErrorHandling(error, setLocation);
   if (errorComponent) return errorComponent;
 
   if (!clubData) {
@@ -839,34 +909,20 @@ export default function ClubDetails() {
     );
   }
 
+  // После всех проверок clubData гарантированно не null
   const club = clubData;
-  const settings = parseClubSettings(club.settings);
-  const scheduleItems = parseSchedule(club.schedule);
-  const members = Array.isArray(membersData) ? membersData : [];
-  const permissions = useClubPermissions(members, user);
+  const settings = parseClubSettings(clubData.settings);
+  const scheduleItems = parseSchedule(clubData.schedule);
 
   // Диагностический лог только для режима разработки
   if (import.meta.env.DEV) {
     console.warn("[ClubDetails] Загружены настройки клуба:", {
-      rawSettings: club.settings,
+      rawSettings: clubData.settings,
       parsedSettings: settings,
       welcomeHtml: settings.welcomeHtml?.substring(0, 50),
       rulesHtml: settings.rulesHtml?.substring(0, 50),
     });
   }
-
-  // Use extracted permissions logic
-  const { isOwner, isModerator, isMember, canRemove } = permissions;
-  const { handleRemoveMember, handleDeleteBook, handleLeaveClub, handleCleanupChat } = useClubActions({
-    clubId,
-    club,
-    user,
-    isOwner,
-    toast,
-    setLocation,
-    removeMemberMutation,
-    deleteBookMutation
-  });
 
   return (
     <MainLayout>
@@ -878,6 +934,12 @@ export default function ClubDetails() {
         removeMemberMutation={removeMemberMutation}
         handleLeaveClub={handleLeaveClub}
         setLocation={setLocation}
+        user={user}
+        onOwnershipTransferred={() => {
+          queryClient.invalidateQueries({ queryKey: ["/api/clubs", clubId] });
+          queryClient.invalidateQueries({ queryKey: ["/api/clubs", clubId, "members"] });
+          globalThis.location.reload();
+        }}
       />
 
       <div className="container py-12 px-6 md:px-12 grid grid-cols-1 lg:grid-cols-3 gap-12">
@@ -915,6 +977,7 @@ export default function ClubDetails() {
             clubId={clubId}
             isMember={isMember}
             isOwner={isOwner}
+            currentUserId={user?.id || ''}
             settings={settings}
             scheduleItems={scheduleItems}
           />

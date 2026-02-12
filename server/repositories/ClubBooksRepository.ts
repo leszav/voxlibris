@@ -155,7 +155,7 @@ export class ClubBooksRepository extends BaseRepository {
 
         await tx
           .delete(bookAccessLogs)
-          .where(and(eq(bookAccessLogs.bookId, id), eq(bookAccessLogs.bookType, "CLUB")))
+          .where(and(eq(bookAccessLogs.bookId, id), eq(bookAccessLogs.bookType, "club")))
           .catch((error: unknown) => {
             const pgError = error as { code?: string };
             if (pgError?.code === "42P01") return;
@@ -231,7 +231,7 @@ export class ClubBooksRepository extends BaseRepository {
         // Удаляем логи доступа к книге (если таблица существует)
         await tx
           .delete(bookAccessLogs)
-          .where(and(eq(bookAccessLogs.bookId, id), eq(bookAccessLogs.bookType, "CLUB")))
+          .where(and(eq(bookAccessLogs.bookId, id), eq(bookAccessLogs.bookType, "club")))
           .catch((error: unknown) => {
             // Игнорируем ошибку "таблица не существует"
             const pgError = error as { code?: string };

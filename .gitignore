@@ -190,5 +190,8 @@ docker-compose.override.yml
 # Caprover deployment configuration
 captain-definition
 
-# Voxli Mobile App 
+# Voxli Mobile App
 voxli_mobile/
+
+# Documentation drafts
+KODA.md

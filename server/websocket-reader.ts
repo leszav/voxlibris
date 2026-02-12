@@ -2,7 +2,7 @@ import { Server as HttpServer } from "node:http";
 import { Server, Socket } from "socket.io";
 import jwt, { JwtPayload } from "jsonwebtoken";
 import { db } from "./db.js";
-import { users, readingProgress, bookmarks, notes, books, clubMembers } from "../shared/schema.js";
+import { users, readingProgress, bookmarks, notes, books, clubMembers, bookReadingStatus } from "../shared/schema.js";
 import { eq, and } from "drizzle-orm";
 import type {
   ReaderProgressUpdate,
@@ -131,6 +131,37 @@ export function initializeReaderWebSocket(httpServer: HttpServer) {
               updatedAt: new Date(),
             },
           });
+
+        // Обновляем статус книги в book_reading_status
+        try {
+          const bookType = data.clubId ? 'club' : 'personal';
+          const newStatus = data.progress === 100 ? 'completed' : 'reading';
+          const now = new Date();
+
+          await db
+            .insert(bookReadingStatus)
+            .values({
+              userId: authSocket.userId,
+              bookId: data.bookId,
+              bookType,
+              status: newStatus,
+              progress: data.progress,
+              startedAt: now,
+              completedAt: data.progress === 100 ? now : null,
+            })
+            .onConflictDoUpdate({
+              target: [bookReadingStatus.userId, bookReadingStatus.bookId, bookReadingStatus.bookType],
+              set: {
+                status: newStatus,
+                progress: data.progress,
+                completedAt: data.progress === 100 ? now : undefined,
+                updatedAt: now,
+              },
+            });
+        } catch (statusError) {
+          const errorMessage = statusError instanceof Error ? statusError.message : String(statusError);
+          logger.error({ error: errorMessage }, "[WS Reader] Error updating book reading status");
+        }
 
         // Broadcast в комнату (для клубов)
         if (data.clubId) {

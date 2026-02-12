@@ -1,0 +1,406 @@
+import { useState } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { Card } from "@/components/ui/card";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { useToast } from "@/hooks/use-toast";
+import { apiRequest } from "@/lib/queryClient";
+import { MessageCircle, Reply, Trash2, AlertTriangle, Send, Loader2 } from "lucide-react";
+import { formatDistanceToNow } from "date-fns";
+import { ru } from "date-fns/locale";
+
+interface ClubDiscussionMessage {
+  id: string;
+  clubId: string;
+  userId: string;
+  content: string;
+  parentId: string | null;
+  quotedContent: string | null;
+  isWarning: boolean;
+  createdAt: string;
+  updatedAt: string;
+  user: {
+    id: string;
+    username: string;
+    email: string;
+  };
+  replies?: ClubDiscussionMessage[];
+}
+
+interface ClubDiscussionBoardProps {
+  readonly clubId: string;
+  readonly isOwner: boolean;
+  readonly currentUserId: string;
+}
+
+export function ClubDiscussionBoard({ clubId, isOwner, currentUserId }: Readonly<ClubDiscussionBoardProps>) {
+  const [newMessage, setNewMessage] = useState("");
+  const [replyingTo, setReplyingTo] = useState<ClubDiscussionMessage | null>(null);
+  const [replyContent, setReplyContent] = useState("");
+  const [warningMessage, setWarningMessage] = useState("");
+  const [showWarningDialog, setShowWarningDialog] = useState(false);
+  const [messageToWarn, setMessageToWarn] = useState<ClubDiscussionMessage | null>(null);
+  const [messageToDelete, setMessageToDelete] = useState<ClubDiscussionMessage | null>(null);
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+
+  // Получить все обсуждения
+  const { data: discussions = [], isLoading } = useQuery<ClubDiscussionMessage[]>({
+    queryKey: ["club-discussions", clubId],
+    queryFn: () => apiRequest(`/api/clubs/${clubId}/discussions`),
+    refetchInterval: 5000, // Обновляем каждые 5 секунд
+  });
+
+  // Создать новое сообщение
+  const createMessageMutation = useMutation({
+    mutationFn: (content: string) =>
+      apiRequest(`/api/clubs/${clubId}/discussions`, {
+        method: "POST",
+        body: JSON.stringify({ content }),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["club-discussions", clubId] });
+      setNewMessage("");
+      toast({ title: "Сообщение отправлено" });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Ошибка",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Ответить на сообщение
+  const replyMutation = useMutation({
+    mutationFn: ({ discussionId, content, quotedContent }: { discussionId: string; content: string; quotedContent?: string }) =>
+      apiRequest(`/api/clubs/${clubId}/discussions/${discussionId}/reply`, {
+        method: "POST",
+        body: JSON.stringify({ content, quotedContent }),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["club-discussions", clubId] });
+      setReplyingTo(null);
+      setReplyContent("");
+      toast({ title: "Ответ отправлен" });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Ошибка",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Отправить предупреждение
+  const warnMutation = useMutation({
+    mutationFn: ({ discussionId, content }: { discussionId: string; content: string }) =>
+      apiRequest(`/api/clubs/${clubId}/discussions/${discussionId}/warn`, {
+        method: "POST",
+        body: JSON.stringify({ content }),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["club-discussions", clubId] });
+      setShowWarningDialog(false);
+      setWarningMessage("");
+      setMessageToWarn(null);
+      toast({ title: "Предупреждение отправлено" });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Ошибка",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Удалить сообщение
+  const deleteMutation = useMutation({
+    mutationFn: (discussionId: string) =>
+      apiRequest(`/api/clubs/${clubId}/discussions/${discussionId}`, {
+        method: "DELETE",
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["club-discussions", clubId] });
+      setMessageToDelete(null);
+      toast({ title: "Сообщение удалено" });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Ошибка",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleSendMessage = () => {
+    if (!newMessage.trim()) return;
+    createMessageMutation.mutate(newMessage.trim());
+  };
+
+  const handleReply = (message: ClubDiscussionMessage) => {
+    setReplyingTo(message);
+    setReplyContent("");
+  };
+
+  const handleSendReply = () => {
+    if (!replyingTo || !replyContent.trim()) return;
+    replyMutation.mutate({
+      discussionId: replyingTo.id,
+      content: replyContent.trim(),
+      quotedContent: replyingTo.content.substring(0, 100), // Первые 100 символов
+    });
+  };
+
+  const handleWarn = (message: ClubDiscussionMessage) => {
+    setMessageToWarn(message);
+    setShowWarningDialog(true);
+  };
+
+  const handleSendWarning = () => {
+    if (!messageToWarn || !warningMessage.trim()) return;
+    warnMutation.mutate({
+      discussionId: messageToWarn.id,
+      content: warningMessage.trim(),
+    });
+  };
+
+  const handleDelete = (message: ClubDiscussionMessage) => {
+    setMessageToDelete(message);
+  };
+
+  const confirmDelete = () => {
+    if (!messageToDelete) return;
+    deleteMutation.mutate(messageToDelete.id);
+  };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Форма нового сообщения */}
+      <Card className="p-4">
+        <Textarea
+          value={newMessage}
+          onChange={(e) => setNewMessage(e.target.value)}
+          placeholder="Написать сообщение..."
+          rows={3}
+          className="mb-3"
+        />
+        <div className="flex justify-end">
+          <Button
+            onClick={handleSendMessage}
+            disabled={!newMessage.trim() || createMessageMutation.isPending}
+            size="sm"
+          >
+            {createMessageMutation.isPending ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Отправка...
+              </>
+            ) : (
+              <>
+                <Send className="mr-2 h-4 w-4" />
+                Отправить
+              </>
+            )}
+          </Button>
+        </div>
+      </Card>
+
+      {/* Список сообщений */}
+      <div className="space-y-4">
+        {discussions.length === 0 ? (
+          <div className="text-center py-12 text-muted-foreground">
+            <MessageCircle className="h-12 w-12 mx-auto mb-4 opacity-50" />
+            <p>Пока нет сообщений. Начните обсуждение!</p>
+          </div>
+        ) : (
+          discussions.map((message) => (
+            <Card key={message.id} className={`p-4 ${message.isWarning ? 'border-red-500 bg-red-50' : ''}`}>
+              <div className="flex items-start justify-between mb-2">
+                <div>
+                  <span className="font-semibold text-sm">{message.user.username}</span>
+                  <span className="text-xs text-muted-foreground ml-2">
+                    {formatDistanceToNow(new Date(message.createdAt), { addSuffix: true, locale: ru })}
+                  </span>
+                </div>
+                {isOwner && (
+                  <div className="flex gap-2">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleWarn(message)}
+                      title="Отправить предупреждение"
+                    >
+                      <AlertTriangle className="h-4 w-4 text-yellow-600" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleDelete(message)}
+                      title="Удалить сообщение"
+                    >
+                      <Trash2 className="h-4 w-4 text-red-600" />
+                    </Button>
+                  </div>
+                )}
+              </div>
+              
+              <p className={`text-sm whitespace-pre-wrap ${message.isWarning ? 'font-bold text-red-700' : ''}`}>
+                {message.content}
+              </p>
+
+              {message.quotedContent && (
+                <div className="mt-2 pl-3 border-l-2 border-muted text-xs text-muted-foreground italic">
+                  {message.quotedContent}...
+                </div>
+              )}
+
+              <div className="mt-3">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => handleReply(message)}
+                  className="text-xs"
+                >
+                  <Reply className="h-3 w-3 mr-1" />
+                  Ответить
+                </Button>
+              </div>
+
+              {/* Ответы на сообщение */}
+              {message.replies && message.replies.length > 0 && (
+                <div className="mt-4 ml-6 space-y-3 border-l-2 border-muted pl-4">
+                  {message.replies.map((reply) => (
+                    <div key={reply.id} className={`${reply.isWarning ? 'bg-red-50 p-2 rounded border border-red-200' : ''}`}>
+                      <div className="flex items-start justify-between mb-1">
+                        <div>
+                          <span className="font-semibold text-xs">{reply.user.username}</span>
+                          <span className="text-xs text-muted-foreground ml-2">
+                            {formatDistanceToNow(new Date(reply.createdAt), { addSuffix: true, locale: ru })}
+                          </span>
+                        </div>
+                        {isOwner && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleDelete(reply)}
+                            title="Удалить ответ"
+                          >
+                            <Trash2 className="h-3 w-3 text-red-600" />
+                          </Button>
+                        )}
+                      </div>
+                      {reply.quotedContent && (
+                        <div className="mb-1 text-xs text-muted-foreground italic opacity-70">
+                          &gt; {reply.quotedContent}...
+                        </div>
+                      )}
+                      <p className={`text-xs ${reply.isWarning ? 'font-bold text-red-700' : ''}`}>
+                        {reply.content}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Форма ответа */}
+              {replyingTo?.id === message.id && (
+                <div className="mt-4 ml-6 space-y-2">
+                  <div className="text-xs text-muted-foreground mb-2">
+                    Ответ на сообщение {message.user.username}:
+                  </div>
+                  <Textarea
+                    value={replyContent}
+                    onChange={(e) => setReplyContent(e.target.value)}
+                    placeholder="Ваш ответ..."
+                    rows={2}
+                    className="text-sm"
+                  />
+                  <div className="flex gap-2">
+                    <Button
+                      onClick={handleSendReply}
+                      disabled={!replyContent.trim() || replyMutation.isPending}
+                      size="sm"
+                    >
+                      {replyMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Отправить"}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => setReplyingTo(null)}
+                      size="sm"
+                    >
+                      Отмена
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </Card>
+          ))
+        )}
+      </div>
+
+      {/* Диалог предупреждения */}
+      <AlertDialog open={showWarningDialog} onOpenChange={setShowWarningDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Отправить предупреждение</AlertDialogTitle>
+            <AlertDialogDescription>
+              Предупреждение будет отображено красным жирным шрифтом и видно всем участникам клуба.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <Textarea
+            value={warningMessage}
+            onChange={(e) => setWarningMessage(e.target.value)}
+            placeholder="Текст предупреждения..."
+            rows={3}
+          />
+          <AlertDialogFooter>
+            <AlertDialogCancel>Отмена</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleSendWarning}
+              disabled={!warningMessage.trim() || warnMutation.isPending}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              {warnMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Отправить предупреждение"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Диалог удаления */}
+      <AlertDialog open={!!messageToDelete} onOpenChange={(open) => !open && setMessageToDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Удалить сообщение?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Это действие нельзя отменить. Сообщение будет удалено вместе со всеми ответами.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Отмена</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmDelete}
+              disabled={deleteMutation.isPending}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              {deleteMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Удалить"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}

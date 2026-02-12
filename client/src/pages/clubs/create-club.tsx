@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { ErrorDialog } from "@/components/ui/error-dialog";
 import { useCreateClub } from "@/hooks/use-clubs";
 import { useToast } from "@/hooks/use-toast";
 import { ArrowLeft, Loader2, Users } from "lucide-react";
@@ -24,14 +25,20 @@ export default function CreateClub() {
     type: "standard" as const,
   });
 
+  const [errorDialog, setErrorDialog] = useState<{
+    open: boolean;
+    title: string;
+    description: string;
+  }>({ open: false, title: "", description: "" });
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!formData.title.trim()) {
-      toast({
-        title: "Ошибка",
-        description: "Введите название клуба",
-        variant: "destructive",
+      setErrorDialog({
+        open: true,
+        title: "Название клуба обязательно",
+        description: "Пожалуйста, введите название для вашего клуба.",
       });
       return;
     }
@@ -45,10 +52,10 @@ export default function CreateClub() {
       setLocation(`/clubs/${club.id}`);
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : "Не удалось создать клуб";
-      toast({
-        title: "Ошибка",
+      setErrorDialog({
+        open: true,
+        title: "Ошибка создания клуба",
         description: errorMessage,
-        variant: "destructive",
       });
     }
   };
@@ -104,7 +111,7 @@ export default function CreateClub() {
                   min={2}
                   max={2000}
                   value={formData.maxMembers}
-                  onChange={(e) => setFormData({ ...formData, maxMembers: parseInt(e.target.value) })}
+                  onChange={(e) => setFormData({ ...formData, maxMembers: Number.parseInt(e.target.value, 10) })}
                 />
                 <p className="text-sm text-muted-foreground flex items-center gap-1">
                   <Users className="h-3 w-3" />
@@ -154,6 +161,13 @@ export default function CreateClub() {
           </CardContent>
         </Card>
       </div>
+
+      <ErrorDialog
+        open={errorDialog.open}
+        onOpenChange={(open) => setErrorDialog({ ...errorDialog, open })}
+        title={errorDialog.title}
+        description={errorDialog.description}
+      />
     </MainLayout>
   );
 }

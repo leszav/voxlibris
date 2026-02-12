@@ -29,7 +29,7 @@ export function useChat(options: UseChatOptions) {
   });
 
   const getToken = () => {
-    if (typeof window === "undefined") return "";
+    if (globalThis.window === undefined) return "";
     const token = getAccessToken();
     if (!token) {
       console.warn("[useChat] No authentication token found");
@@ -195,11 +195,13 @@ export function useChat(options: UseChatOptions) {
       if (data?.clubId !== clubId) return;
       const messageId: string | undefined = data.messageId;
       if (!messageId) return;
+      
+      const markMessageAsDeleted = (m: ChatMessageWithUser) => 
+        m.id === messageId ? { ...m, text: "[deleted]", deletedAt: new Date() } : m;
+      
       setState((prev) => ({
         ...prev,
-        messages: prev.messages.map((m) =>
-          m.id === messageId ? { ...m, text: "[deleted]", deletedAt: new Date() } : m,
-        ),
+        messages: prev.messages.map(markMessageAsDeleted),
       }));
     };
 

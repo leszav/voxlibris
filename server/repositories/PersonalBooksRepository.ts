@@ -136,7 +136,7 @@ export class PersonalBooksRepository extends BaseRepository {
 
         await tx
           .delete(bookAccessLogs)
-          .where(and(eq(bookAccessLogs.bookId, id), eq(bookAccessLogs.bookType, "PERSONAL")))
+          .where(and(eq(bookAccessLogs.bookId, id), eq(bookAccessLogs.bookType, "personal")))
           .catch((error: unknown) => {
             const pgError = error as { code?: string };
             if (pgError?.code === "42P01") return;
@@ -191,7 +191,7 @@ export class PersonalBooksRepository extends BaseRepository {
 
         await tx
           .delete(bookAccessLogs)
-          .where(and(eq(bookAccessLogs.bookId, id), eq(bookAccessLogs.bookType, "PERSONAL")))
+          .where(and(eq(bookAccessLogs.bookId, id), eq(bookAccessLogs.bookType, "personal")))
           .catch((error: unknown) => {
             const pgError = error as { code?: string };
             if (pgError?.code === "42P01") return;

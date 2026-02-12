@@ -10,6 +10,9 @@ import {
   users,
   books,
   clubs,
+  bookReadingStatus,
+  personalBooks,
+  clubBooks,
   type ReadingSession,
   type ReadingSessionWithDetails,
   type InsertReadingSession,
@@ -560,9 +563,11 @@ export class ReadingRepository extends BaseRepository {
         ))
         .limit(1);
 
+      let result: ReadingProgress;
+
       if (existing.length > 0) {
         // Обновляем существующую запись
-        const result = await this.db
+        const updated = await this.db
           .update(readingProgress)
           .set({
             currentChapter: progressData.currentChapter,
@@ -574,10 +579,10 @@ export class ReadingRepository extends BaseRepository {
           .where(eq(readingProgress.id, existing[0].id))
           .returning();
 
-        return result[0];
+        result = updated[0];
       } else {
         // Создаем новую запись
-        const result = await this.db
+        const inserted = await this.db
           .insert(readingProgress)
           .values({
             userId: progressData.userId,
@@ -589,11 +594,128 @@ export class ReadingRepository extends BaseRepository {
           })
           .returning();
 
-        return result[0];
+        result = inserted[0];
       }
+
+      // Синхронизация с book_reading_status
+      await this.syncBookReadingStatus(progressData.userId, progressData.bookId, progressData.clubId, progressData.progress ?? 0);
+
+      return result;
     } catch (error) {
       this.logError('updateReadingProgress', error);
       throw new Error('Failed to update reading progress');
+    }
+  }
+
+  /**
+   * Проверка существования книги
+   */
+  private async bookExists(bookId: string, isClubBook: boolean): Promise<boolean> {
+    if (isClubBook) {
+      const [book] = await this.db
+        .select()
+        .from(clubBooks)
+        .where(eq(clubBooks.id, bookId))
+        .limit(1);
+      return !!book;
+    }
+    
+    const [book] = await this.db
+      .select()
+      .from(personalBooks)
+      .where(eq(personalBooks.id, bookId))
+      .limit(1);
+    return !!book;
+  }
+
+  /**
+   * Определение статуса и даты завершения на основе прогресса
+   */
+  private getStatusFromProgress(progress: number): { status: 'reading' | 'completed'; completedAt: Date | null } {
+    if (progress >= 100) {
+      return { status: 'completed', completedAt: new Date() };
+    }
+    return { status: 'reading', completedAt: null };
+  }
+
+  /**
+   * Подготовка данных для обновления существующего статуса
+   */
+  private prepareUpdateData(status: 'reading' | 'completed', progress: number, existingStatus: any, completedAt: Date | null) {
+    const updateData: any = {
+      status,
+      progress,
+      updatedAt: new Date()
+    };
+
+    if (status === 'completed' && existingStatus.status !== 'completed') {
+      updateData.completedAt = completedAt;
+    }
+
+    return updateData;
+  }
+
+  /**
+   * Подготовка данных для создания нового статуса
+   */
+  private prepareInsertStatusData(userId: string, bookId: string, bookType: string, status: 'reading' | 'completed', progress: number, completedAt: Date | null) {
+    const insertData: any = {
+      userId,
+      bookId,
+      bookType,
+      status,
+      progress,
+      startedAt: new Date()
+    };
+
+    if (status === 'completed') {
+      insertData.completedAt = completedAt;
+    }
+
+    return insertData;
+  }
+
+  /**
+   * Синхронизация book_reading_status при обновлении прогресса
+   */
+  private async syncBookReadingStatus(userId: string, bookId: string, clubId: string | null | undefined, progress: number): Promise<void> {
+    try {
+      const isClubBook = !!clubId;
+      const bookType = isClubBook ? 'club' : 'personal';
+
+      // Проверяем существование книги
+      const exists = await this.bookExists(bookId, isClubBook);
+      if (!exists) return;
+
+      // Определяем статус
+      const { status, completedAt } = this.getStatusFromProgress(progress);
+
+      // Проверяем существующую запись
+      const [existingStatus] = await this.db
+        .select()
+        .from(bookReadingStatus)
+        .where(and(
+          eq(bookReadingStatus.userId, userId),
+          eq(bookReadingStatus.bookId, bookId),
+          eq(bookReadingStatus.bookType, bookType)
+        ))
+        .limit(1);
+
+      if (existingStatus) {
+        const updateData = this.prepareUpdateData(status, progress, existingStatus, completedAt);
+        await this.db
+          .update(bookReadingStatus)
+          .set(updateData)
+          .where(eq(bookReadingStatus.id, existingStatus.id));
+      } else {
+        const insertData = this.prepareInsertStatusData(userId, bookId, bookType, status, progress, completedAt);
+        await this.db
+          .insert(bookReadingStatus)
+          .values(insertData);
+      }
+    } catch (error) {
+      this.logError('syncBookReadingStatus', error);
+      // Не пробрасываем ошибку, чтобы не блокировать обновление прогресса
     }
   }
 

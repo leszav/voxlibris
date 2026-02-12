@@ -167,7 +167,10 @@ export class AuthService {
       const decoded = jwt.verify(token, this.JWT_SECRET) as JWTPayload;
       return decoded;
     } catch (error) {
-      console.error('Failed to verify access token:', error);
+      // Тихо логируем ошибки верификации токена
+      if (error instanceof Error) {
+        logger.debug(`Token verification failed: ${error.message}`);
+      }
       return null;
     }
   }
@@ -579,9 +582,7 @@ async requestPasswordReset(
     
     // Безопасно пытаемся найти пользователя по email или username
     let user = await storage.getUserByEmail(emailOrUsername);
-    if (!user) {
-      user = await storage.getUserByUsername(emailOrUsername);
-    }
+    user ??= await storage.getUserByUsername(emailOrUsername);
 
     // Не раскрываем существование пользователя
     if (!user || user.status === 'deleted') {

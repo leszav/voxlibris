@@ -21,7 +21,8 @@ export type ClubMemberRole = typeof clubMemberRoles[number];
 export const bookStatuses = ["active", "blocked", "deleted"] as const;
 export type BookStatus = typeof bookStatuses[number];
 
-export const users = pgTable(
+// Using pgTable with extraConfig for foreign keys is the correct Drizzle ORM pattern
+export const users = pgTable( // NOSONAR typescript:S1874
   "users",
   {
     id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -476,7 +477,7 @@ export type SessionListener = typeof sessionListeners.$inferSelect;
 export const bookFormats = ["FB2", "EPUB"] as const;
 export type BookFormat = typeof bookFormats[number];
 
-export const bookTypes = ["PERSONAL", "CLUB"] as const;
+export const bookTypes = ["personal", "club"] as const;
 export type BookType = typeof bookTypes[number];
 
 export const accessActions = ["READ_OPENED", "READ_SESSION_END", "READ_DELETED"] as const;
@@ -671,6 +672,34 @@ export const systemSettings = pgTable("system_settings", {
   updatedAt: timestamp("updated_at").notNull().default(sql`now()`),
 });
 
+// Reading status tracking
+export const bookReadingStatuses = ["reading", "completed", "planned", "abandoned"] as const;
+export type BookReadingStatus = typeof bookReadingStatuses[number];
+
+export const bookReadingStatus = pgTable("book_reading_status", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  bookId: varchar("book_id").notNull(),
+  bookType: text("book_type").notNull().$type<BookType>(),
+  status: text("status").notNull().$type<BookReadingStatus>(),
+  progress: integer("progress").default(0),
+  startedAt: timestamp("started_at"),
+  completedAt: timestamp("completed_at"),
+  notes: text("notes"),
+  rating: integer("rating"),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+  updatedAt: timestamp("updated_at").notNull().default(sql`now()`),
+});
+
+export const userReadingGoals = pgTable("user_reading_goals", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  year: integer("year").notNull(),
+  goalBooks: integer("goal_books").notNull().default(12),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+  updatedAt: timestamp("updated_at").notNull().default(sql`now()`),
+});
+
 // Admin schemas for validation
 export const insertModerationReportSchema = createInsertSchema(moderationReports).pick({
   type: true,
@@ -710,6 +739,13 @@ export type AdminAction = typeof adminActions.$inferSelect;
 
 export type InsertSystemSetting = z.infer<typeof insertSystemSettingSchema>;
 export type SystemSetting = typeof systemSettings.$inferSelect;
+
+// Reading status types
+export type BookReadingStatusRecord = typeof bookReadingStatus.$inferSelect;
+export type InsertBookReadingStatus = typeof bookReadingStatus.$inferInsert;
+
+export type UserReadingGoal = typeof userReadingGoals.$inferSelect;
+export type InsertUserReadingGoal = typeof userReadingGoals.$inferInsert;
 
 // Extended types for frontend
 export interface ClubWithDetails extends Club {
@@ -973,6 +1009,19 @@ export const clubBookmarks = pgTable("club_bookmarks", {
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
 });
 
+// Обсуждения клуба (доска обсуждений)
+export const clubDiscussions: any = pgTable("club_discussions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  clubId: varchar("club_id").notNull().references(() => clubs.id, { onDelete: "cascade" }),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  content: text("content").notNull(),
+  parentId: varchar("parent_id").references((): any => clubDiscussions.id, { onDelete: "cascade" }), // для ответов
+  quotedContent: text("quoted_content"), // цитируемое сообщение для ответов
+  isWarning: boolean("is_warning").notNull().default(false), // предупреждение от владельца
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+  updatedAt: timestamp("updated_at").notNull().default(sql`now()`),
+});
+
 // Комментарии к тексту (клубные)
 export const comments = pgTable("comments", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -1135,6 +1184,17 @@ export type ClubReadingPlanProgress = typeof clubReadingPlanProgress.$inferSelec
 
 export type InsertClubBookmark = z.infer<typeof insertClubBookmarkSchema>;
 export type ClubBookmark = typeof clubBookmarks.$inferSelect;
+
+export type ClubDiscussion = typeof clubDiscussions.$inferSelect;
+export type InsertClubDiscussion = typeof clubDiscussions.$inferInsert;
+
+export const insertClubDiscussionSchema = createInsertSchema(clubDiscussions).pick({
+  clubId: true,
+  content: true,
+  parentId: true,
+  quotedContent: true,
+  isWarning: true,
+});
 
 export type InsertComment = z.infer<typeof insertCommentSchema>;
 export type Comment = typeof comments.$inferSelect;

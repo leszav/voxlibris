@@ -60,11 +60,27 @@ function createAuthHeaders(additionalHeaders: Record<string, string> = {}): Reco
     ...additionalHeaders,
   };
 
-  if (token) {
+  // Только если токен существует и не null
+  if (token && token !== 'null') {
     headers['Authorization'] = `Bearer ${token}`;
   }
 
   return headers;
+}
+
+/**
+ * Authenticated fetch helper
+ * Автоматически добавляет Authorization header, если токен доступен
+ */
+export async function authFetch(url: string, options: RequestInit = {}): Promise<Response> {
+  const headers = createAuthHeaders(
+    options.headers as Record<string, string> || {}
+  );
+  
+  return fetch(url, {
+    ...options,
+    headers,
+  });
 }
 
 // Обработка ошибок 403 с различными кодами
@@ -126,7 +142,20 @@ async function handleErrorResponse(res: Response, url?: string): Promise<never> 
     return handle403Error(res, text);
   }
   
-  throw new Error(`${res.status}: ${text}`);
+  // Пытаемся извлечь message из JSON для всех остальных ошибок
+  try {
+    const errorData = JSON.parse(text);
+    if (errorData.message) {
+      throw new Error(errorData.message);
+    }
+  } catch (parseError) {
+    // Если не JSON или нет message, используем text как есть
+    if (!(parseError instanceof SyntaxError)) {
+      throw parseError;
+    }
+  }
+  
+  throw new Error(text || res.statusText);
 }
 
 // Попытка обновить токен перед запросом

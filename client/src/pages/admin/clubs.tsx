@@ -18,7 +18,8 @@ import {
   Calendar,
   User,
   Archive,
-  Settings
+  Settings,
+  UserCog
 } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -31,7 +32,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { getAccessToken } from "@/lib/token-store";
+import { useToast } from "@/hooks/use-toast";
 
 interface Club {
   id: string;
@@ -145,6 +149,53 @@ async function updateClubMaxMembers(clubId: string, maxMembers: number): Promise
   }
 }
 
+interface ClubMember {
+  id: string;
+  username: string;
+  role: 'owner' | 'moderator' | 'member';
+  joinedAt: Date;
+  status: string;
+  emailConfirmed: boolean;
+  createdAt: Date;
+}
+
+async function fetchClubMembers(clubId: string): Promise<ClubMember[]> {
+  const token = getAccessToken();
+  if (!token) throw new Error('No auth token');
+
+  const response = await fetch(`/api/clubs/${clubId}/members`, {
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to fetch club members');
+  }
+
+  return response.json();
+}
+
+async function transferClubOwnership(clubId: string, newOwnerId: string): Promise<void> {
+  const token = getAccessToken();
+  if (!token) throw new Error('No auth token');
+
+  const response = await fetch(`/api/clubs/${clubId}/transfer-ownership`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ newOwnerId }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.message || 'Failed to transfer ownership');
+  }
+}
+
 function ClubStatusBadge({ status }: Readonly<{ status: Club['status'] }>) {
   switch (status) {
     case 'recruiting':
@@ -180,7 +231,15 @@ function ClubStatusBadge({ status }: Readonly<{ status: Club['status'] }>) {
   }
 }
 
-function ClubActionsMenu({ club, onEditMaxMembers }: Readonly<{ club: Club; onEditMaxMembers: (club: Club) => void }>) {
+function ClubActionsMenu({ 
+  club, 
+  onEditMaxMembers, 
+  onTransferOwnership 
+}: Readonly<{ 
+  club: Club; 
+  onEditMaxMembers: (club: Club) => void;
+  onTransferOwnership: (club: Club) => void;
+}>) {
   const queryClient = useQueryClient();
 
   const deleteClubMutation = useMutation({
@@ -213,6 +272,10 @@ function ClubActionsMenu({ club, onEditMaxMembers }: Readonly<{ club: Club; onEd
         <DropdownMenuItem onClick={() => onEditMaxMembers(club)}>
           <Settings className="w-4 h-4 mr-2" />
           Изменить лимит участников
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => onTransferOwnership(club)}>
+          <UserCog className="w-4 h-4 mr-2" />
+          Передать владельца
         </DropdownMenuItem>
         {club.status === 'recruiting' && (
           <DropdownMenuItem
@@ -265,7 +328,15 @@ function ClubActionsMenu({ club, onEditMaxMembers }: Readonly<{ club: Club; onEd
   );
 }
 
-function ClubsTable({ clubs, onEditMaxMembers }: Readonly<{ clubs: Club[]; onEditMaxMembers: (club: Club) => void }>) {
+function ClubsTable({ 
+  clubs, 
+  onEditMaxMembers, 
+  onTransferOwnership 
+}: Readonly<{ 
+  clubs: Club[]; 
+  onEditMaxMembers: (club: Club) => void;
+  onTransferOwnership: (club: Club) => void;
+}>) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full">
@@ -348,7 +419,11 @@ function ClubsTable({ clubs, onEditMaxMembers }: Readonly<{ clubs: Club[]; onEdi
                 </div>
               </td>
               <td className="p-4 text-right">
-                <ClubActionsMenu club={club} onEditMaxMembers={onEditMaxMembers} />
+                <ClubActionsMenu 
+                  club={club} 
+                  onEditMaxMembers={onEditMaxMembers}
+                  onTransferOwnership={onTransferOwnership}
+                />
               </td>
             </tr>
           ))}
@@ -422,6 +497,7 @@ function ClubsTableSkeleton() {
 
 export default function AdminClubs() {
   const queryClient = useQueryClient();
+  const { toast } = useToast();
   const [filters, setFilters] = useState<ClubsFilters>({
     search: '',
     status: 'all',
@@ -430,6 +506,9 @@ export default function AdminClubs() {
   });
   const [editingClub, setEditingClub] = useState<Club | null>(null);
   const [newMaxMembers, setNewMaxMembers] = useState<number>(50);
+  const [transferringClub, setTransferringClub] = useState<Club | null>(null);
+  const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
+  const [isTransferring, setIsTransferring] = useState(false);
 
   const { data, isLoading, error } = useQuery<ClubsResponse>({
     queryKey: ['admin-clubs', filters],
@@ -448,6 +527,61 @@ export default function AdminClubs() {
   const handleEditMaxMembers = (club: Club) => {
     setEditingClub(club);
     setNewMaxMembers(club.max_participants);
+  };
+
+  const handleTransferOwnership = (club: Club) => {
+    setTransferringClub(club);
+    setSelectedMemberId(null);
+  };
+
+  const { data: clubMembers } = useQuery<ClubMember[]>({
+    queryKey: ['club-members', transferringClub?.id],
+    queryFn: () => fetchClubMembers(transferringClub!.id),
+    enabled: !!transferringClub,
+  });
+
+  const transferOwnershipMutation = useMutation({
+    mutationFn: ({ clubId, newOwnerId }: { clubId: string; newOwnerId: string }) =>
+      transferClubOwnership(clubId, newOwnerId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin-clubs'] });
+      setTransferringClub(null);
+      setSelectedMemberId(null);
+      toast({
+        title: "Владелец передан",
+        description: "Права владельца клуба успешно переданы",
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "Ошибка",
+        description: error instanceof Error ? error.message : "Не удалось передать права",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleConfirmTransfer = async () => {
+    if (!transferringClub || !selectedMemberId) return;
+
+    const selectedMember = clubMembers?.find(m => m.id === selectedMemberId);
+    if (!selectedMember) return;
+
+    const confirmed = confirm(
+      `Вы уверены, что хотите передать права владельца клуба "${transferringClub.name}" пользователю ${selectedMember.username}?\n\nЭто действие нельзя отменить. Текущий владелец станет обычным участником.`
+    );
+
+    if (!confirmed) return;
+
+    setIsTransferring(true);
+    try {
+      await transferOwnershipMutation.mutateAsync({
+        clubId: transferringClub.id,
+        newOwnerId: selectedMemberId,
+      });
+    } finally {
+      setIsTransferring(false);
+    }
   };
 
   const handleSaveMaxMembers = () => {
@@ -604,7 +738,13 @@ export default function AdminClubs() {
               }
               
               if (data && data.clubs.length > 0) {
-                return <ClubsTable clubs={data.clubs} onEditMaxMembers={handleEditMaxMembers} />;
+                return (
+                  <ClubsTable 
+                    clubs={data.clubs} 
+                    onEditMaxMembers={handleEditMaxMembers}
+                    onTransferOwnership={handleTransferOwnership}
+                  />
+                );
               }
               
               return (
@@ -682,6 +822,101 @@ export default function AdminClubs() {
                 disabled={updateMaxMembersMutation.isPending}
               >
                 {updateMaxMembersMutation.isPending ? 'Сохранение...' : 'Сохранить'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Modal for transferring ownership */}
+        <Dialog open={!!transferringClub} onOpenChange={(open) => !open && setTransferringClub(null)}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Передать права владельца</DialogTitle>
+              <DialogDescription>
+                Клуб: {transferringClub?.name}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              {/* Предупреждение */}
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+                <div className="flex gap-2">
+                  <AlertTriangle className="w-5 h-5 text-yellow-600 flex-shrink-0 mt-0.5" />
+                  <div className="text-sm text-yellow-800">
+                    <p className="font-medium">Внимание!</p>
+                    <p className="mt-1">
+                      После передачи прав текущий владелец станет обычным участником клуба.
+                      Это действие нельзя отменить.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Список участников */}
+              <div className="space-y-2">
+                <span className="text-sm font-medium">
+                  Выберите нового владельца:
+                </span>
+                {(() => {
+                  if (!clubMembers) {
+                    return (
+                      <div className="text-center py-8 text-muted-foreground">
+                        Загрузка участников...
+                      </div>
+                    );
+                  }
+
+                  const eligibleMembers = clubMembers.filter(m => m.role !== 'owner');
+                  if (eligibleMembers.length === 0) {
+                    return (
+                      <div className="text-center py-8 text-muted-foreground text-sm">
+                        В клубе нет других участников для передачи прав
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <ScrollArea className="h-[300px] border rounded-lg">
+                      <div className="p-2 space-y-2">
+                        {eligibleMembers.map((member) => (
+                          <button
+                            key={member.id}
+                            onClick={() => setSelectedMemberId(member.id)}
+                            className={`w-full flex items-center gap-3 p-3 rounded-lg transition-colors ${
+                              selectedMemberId === member.id
+                                ? 'bg-primary/10 border-2 border-primary'
+                                : 'hover:bg-muted border-2 border-transparent'
+                            }`}
+                          >
+                            <Avatar className="h-10 w-10">
+                              <AvatarFallback>
+                                {member.username[0].toUpperCase()}
+                              </AvatarFallback>
+                            </Avatar>
+                            <div className="flex-1 text-left">
+                              <p className="font-medium">{member.username}</p>
+                              <div className="flex items-center gap-2 mt-1">
+                                <Badge variant="outline" className="text-xs">
+                                  {member.role === 'moderator' ? 'Модератор' : 'Участник'}
+                                </Badge>
+                              </div>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </ScrollArea>
+                  );
+                })()}
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setTransferringClub(null)}>
+                Отмена
+              </Button>
+              <Button 
+                onClick={handleConfirmTransfer}
+                disabled={!selectedMemberId || isTransferring}
+              >
+                {isTransferring ? 'Передача...' : 'Передать права'}
               </Button>
             </DialogFooter>
           </DialogContent>

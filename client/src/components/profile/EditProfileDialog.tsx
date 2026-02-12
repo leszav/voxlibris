@@ -11,6 +11,7 @@ import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { X, Plus, Upload, Trash2, Image as ImageIcon } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { ImageCropDialog } from "@/components/ui/image-crop-dialog";
 
 const profileEditSchema = z.object({
   displayName: z.string().min(1, "Имя обязательно"),
@@ -49,6 +50,13 @@ export function EditProfileDialog({ profile, children, onSave, isLoading }: Edit
   const [newGenre, setNewGenre] = React.useState("");
   const [avatarPreview, setAvatarPreview] = React.useState(profile.avatar || "");
   const [coverPreview, setCoverPreview] = React.useState(profile.coverImage || "");
+  
+  // Состояния для crop диалогов
+  const [showAvatarCrop, setShowAvatarCrop] = React.useState(false);
+  const [showCoverCrop, setShowCoverCrop] = React.useState(false);
+  const [tempAvatarImage, setTempAvatarImage] = React.useState("");
+  const [tempCoverImage, setTempCoverImage] = React.useState("");
+  
   const { toast } = useToast();
   
   const form = useForm<ProfileEditForm>({
@@ -89,10 +97,10 @@ export function EditProfileDialog({ profile, children, onSave, isLoading }: Edit
       return;
     }
 
-    if (file.size > 5 * 1024 * 1024) {
+    if (file.size > 10 * 1024 * 1024) {
       toast({
         title: "Ошибка",
-        description: "Размер файла не должен превышать 5 МБ",
+        description: "Размер файла не должен превышать 10 МБ",
         variant: "destructive",
       });
       return;
@@ -101,12 +109,8 @@ export function EditProfileDialog({ profile, children, onSave, isLoading }: Edit
     const reader = new FileReader();
     reader.onloadend = () => {
       const base64 = reader.result as string;
-      setAvatarPreview(base64);
-      form.setValue("avatar", base64);
-      toast({
-        title: "Аватар загружен",
-        description: "Изображение будет сохранено при нажатии 'Сохранить'",
-      });
+      setTempAvatarImage(base64);
+      setShowAvatarCrop(true);
     };
     reader.readAsDataURL(file);
   };
@@ -124,10 +128,10 @@ export function EditProfileDialog({ profile, children, onSave, isLoading }: Edit
       return;
     }
 
-    if (file.size > 5 * 1024 * 1024) {
+    if (file.size > 10 * 1024 * 1024) {
       toast({
         title: "Ошибка",
-        description: "Размер файла не должен превышать 5 МБ",
+        description: "Размер файла не должен превышать 10 МБ",
         variant: "destructive",
       });
       return;
@@ -136,14 +140,28 @@ export function EditProfileDialog({ profile, children, onSave, isLoading }: Edit
     const reader = new FileReader();
     reader.onloadend = () => {
       const base64 = reader.result as string;
-      setCoverPreview(base64);
-      form.setValue("coverImage", base64);
-      toast({
-        title: "Обложка загружена",
-        description: "Изображение будет сохранено при нажатии 'Сохранить'",
-      });
+      setTempCoverImage(base64);
+      setShowCoverCrop(true);
     };
     reader.readAsDataURL(file);
+  };
+
+  const handleAvatarCropped = (croppedImage: string) => {
+    setAvatarPreview(croppedImage);
+    form.setValue("avatar", croppedImage);
+    toast({
+      title: "Аватар загружен",
+      description: "Изображение будет сохранено при нажатии 'Сохранить'",
+    });
+  };
+
+  const handleCoverCropped = (croppedImage: string) => {
+    setCoverPreview(croppedImage);
+    form.setValue("coverImage", croppedImage);
+    toast({
+      title: "Фон загружен",
+      description: "Изображение будет сохранено при нажатии 'Сохранить'",
+    });
   };
 
   const currentGenres = form.watch("favoriteGenres") 
@@ -176,10 +194,11 @@ export function EditProfileDialog({ profile, children, onSave, isLoading }: Edit
   };
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        {children}
-      </DialogTrigger>
+    <>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogTrigger asChild>
+          {children}
+        </DialogTrigger>
       <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Редактировать профиль</DialogTitle>
@@ -463,5 +482,30 @@ export function EditProfileDialog({ profile, children, onSave, isLoading }: Edit
         </Form>
       </DialogContent>
     </Dialog>
+
+    {/* Диалог обрезки аватара */}
+    <ImageCropDialog
+      open={showAvatarCrop}
+      onOpenChange={setShowAvatarCrop}
+      image={tempAvatarImage}
+      aspectRatio={1}
+      maxWidth={400}
+      maxHeight={400}
+      onCropComplete={handleAvatarCropped}
+      title="Настройка аватара"
+    />
+
+    {/* Диалог обрезки фона */}
+    <ImageCropDialog
+      open={showCoverCrop}
+      onOpenChange={setShowCoverCrop}
+      image={tempCoverImage}
+      aspectRatio={16 / 9}
+      maxWidth={1920}
+      maxHeight={1080}
+      onCropComplete={handleCoverCropped}
+      title="Настройка фонового изображения"
+    />
+    </>
   );
 }

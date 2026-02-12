@@ -116,6 +116,26 @@ export function ReadingPlan({ clubId, isOwner = false }: ReadingPlanProps) {
     },
   });
 
+  // Мутация для обновления статуса этапа
+  const updateStatusMutation = useMutation({
+    mutationFn: (data: { planId: string; status: 'not_started' | 'in_progress' | 'completed' }) =>
+      clubReaderApi.updatePlanStatus(clubId, data.planId, data.status),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["club", clubId, "reading-plan"] });
+      toast({
+        title: "Статус обновлен",
+        description: "Статус этапа успешно изменен",
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "Ошибка",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
   // Получение статуса этапа для пользователя
   const getPlanStageStatus = (planId: string) => {
     const progress = planData?.progress.find(p => p.planId === planId);
@@ -285,6 +305,35 @@ export function ReadingPlan({ clubId, isOwner = false }: ReadingPlanProps) {
                               {format(new Date(plan.targetDate), 'd MMMM', { locale: ru })}
                             </div>
                           )}
+                        </div>
+
+                        {/* Кнопки управления статусом для участников */}
+                        <div className="flex items-center gap-2 pt-2">
+                          <span className="text-sm text-muted-foreground">Ваш статус:</span>
+                          <Button
+                            variant={status === 'not_started' ? 'default' : 'outline'}
+                            size="sm"
+                            onClick={() => updateStatusMutation.mutate({ planId: plan.id, status: 'not_started' })}
+                            disabled={updateStatusMutation.isPending}
+                          >
+                            Не начато
+                          </Button>
+                          <Button
+                            variant={status === 'in_progress' ? 'default' : 'outline'}
+                            size="sm"
+                            onClick={() => updateStatusMutation.mutate({ planId: plan.id, status: 'in_progress' })}
+                            disabled={updateStatusMutation.isPending}
+                          >
+                            В процессе
+                          </Button>
+                          <Button
+                            variant={status === 'completed' ? 'default' : 'outline'}
+                            size="sm"
+                            onClick={() => updateStatusMutation.mutate({ planId: plan.id, status: 'completed' })}
+                            disabled={updateStatusMutation.isPending}
+                          >
+                            Завершено
+                          </Button>
                         </div>
                       </div>
 

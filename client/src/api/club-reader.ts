@@ -110,6 +110,14 @@ export const clubReaderApi = {
     });
   },
 
+  // Обновление статуса этапа плана для текущего пользователя
+  updatePlanStatus: async (clubId: string, planId: string, status: 'not_started' | 'in_progress' | 'completed'): Promise<{ success: boolean; status: string }> => {
+    return apiRequest(`/api/clubs/${clubId}/reading-plan/${planId}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
+    });
+  },
+
   // Обновление прогресса чтения участника
   updateProgress: async (clubId: string, data: {
     currentChapter: number;

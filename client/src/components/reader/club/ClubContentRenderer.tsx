@@ -2,10 +2,10 @@ import { useMemo } from "react";
 import DOMPurify from "dompurify";
 
 interface ClubContentRendererProps {
-  content: string;
+  readonly content: string;
 }
 
-export function ClubContentRenderer({ content }: ClubContentRendererProps) {
+export function ClubContentRenderer({ content }: Readonly<ClubContentRendererProps>) {
   // Санитизация контента
   const sanitizedContent = useMemo(() => {
     if (!content) return "";

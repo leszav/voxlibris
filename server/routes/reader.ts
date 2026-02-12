@@ -10,16 +10,109 @@ import {
   personalBooks,
   clubBooks,
   clubMembers,
+  bookReadingStatus,
+  analyticsEvents,
 } from "../../shared/schema.js";
 import { eq, and, desc } from "drizzle-orm";
 import { sanitizeBookContent } from "../content-sanitizer.js";
 import {
   generateShortLivedToken,
 } from "../encryption.js";
-import { analyticsEvents } from "../../shared/schema.js";
 import { logger } from "../lib/logger.js";
 
 const router = express.Router();
+
+// Helper functions для уменьшения когнитивной сложности
+async function updateBookReadingStatus(userId: string, bookId: string, progress: number, clubId?: string | null) {
+  try {
+    const bookType = clubId ? 'club' : 'personal';
+    const newStatus = progress === 100 ? 'completed' : 'reading';
+    const now = new Date();
+
+    await db
+      .insert(bookReadingStatus)
+      .values({
+        userId,
+        bookId,
+        bookType,
+        status: newStatus,
+        progress,
+        startedAt: now,
+        completedAt: progress === 100 ? now : null,
+      })
+      .onConflictDoUpdate({
+        target: [bookReadingStatus.userId, bookReadingStatus.bookId, bookReadingStatus.bookType],
+        set: {
+          status: newStatus,
+          progress,
+          completedAt: progress === 100 ? now : undefined,
+          updatedAt: now,
+        },
+      });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error({ error: errorMessage }, "[Reader API] Error updating book reading status");
+  }
+}
+
+async function addToReadingHistory(userId: string, bookId: string, clubId?: string | null) {
+  try {
+    const existingHistory = await db
+      .select()
+      .from(readingHistory)
+      .where(and(
+        eq(readingHistory.userId, userId),
+        eq(readingHistory.bookId, bookId)
+      ))
+      .limit(1);
+
+    if (existingHistory.length > 0) {
+      return;
+    }
+
+    const bookData = await db
+      .select({
+        title: personalBooks.title,
+        author: personalBooks.author,
+        coverUrl: personalBooks.coverUrl,
+      })
+      .from(personalBooks)
+      .where(eq(personalBooks.id, bookId))
+      .limit(1);
+
+    if (bookData.length === 0) {
+      return;
+    }
+
+    await db.insert(readingHistory).values({
+      userId,
+      bookId,
+      bookTitle: bookData[0].title,
+      bookAuthor: bookData[0].author,
+      bookCoverUrl: bookData[0].coverUrl || null,
+      completedAt: new Date(),
+    });
+    
+    logger.info(`[Reader API] Книга "${bookData[0].title}" добавлена в историю пользователя ${userId}`);
+
+    try {
+      const [analyticsEvent] = await db.insert(analyticsEvents).values({
+        eventType: 'book_complete',
+        userId,
+        bookId,
+        progress: 100,
+        clubId: clubId || null,
+      }).returning();
+      logger.info(`[Reader API] Analytics event recorded: ${analyticsEvent.id}`);
+    } catch (analyticsError) {
+      const errorMessage = analyticsError instanceof Error ? analyticsError.message : String(analyticsError);
+      logger.error({ error: errorMessage }, '[Reader API] Error recording analytics event');
+    }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error({ error: errorMessage }, "[Reader API] Error adding to history");
+  }
+}
 
 /**
  * GET /api/v1/books/:id/content
@@ -64,9 +157,13 @@ router.get("/:id/content", async (req: Request, res: Response) => {
       .from(bookContent)
       .where(and(
         eq(bookContent.bookId, bookId),
-        chapterNumber !== undefined ? eq(bookContent.chapterNumber, chapterNumber) : undefined
+        chapterNumber === undefined ? undefined : eq(bookContent.chapterNumber, chapterNumber)
       ))
       .orderBy(bookContent.chapterNumber);
+
+    if (chapters.length === 0) {
+      return res.status(404).json({ error: "Book content not found" });
+    }
 
     // Санитизация контента перед отправкой
     const sanitizedChapters = chapters.map((ch: typeof bookContent.$inferSelect) => ({
@@ -132,64 +229,10 @@ router.put("/:id/progress", async (req: Request, res: Response) => {
         },
       });
 
-    // Если прогресс достиг 100%, добавляем в историю
+    await updateBookReadingStatus(userId, bookId, progress, clubId);
+
     if (progress === 100) {
-      try {
-        // Проверяем, не добавлена ли уже книга в историю
-        const existingHistory = await db
-          .select()
-          .from(readingHistory)
-          .where(and(
-            eq(readingHistory.userId, userId),
-            eq(readingHistory.bookId, bookId)
-          ))
-          .limit(1);
-
-        if (existingHistory.length === 0) {
-          // Получаем данные о книге из personal_books
-          const bookData = await db
-            .select({
-              title: personalBooks.title,
-              author: personalBooks.author,
-              coverUrl: personalBooks.coverUrl,
-            })
-            .from(personalBooks)
-            .where(eq(personalBooks.id, bookId))
-            .limit(1);
-
-          if (bookData.length > 0) {
-            // Добавляем в историю
-            await db.insert(readingHistory).values({
-              userId,
-              bookId,
-              bookTitle: bookData[0].title,
-              bookAuthor: bookData[0].author,
-              bookCoverUrl: bookData[0].coverUrl || null,
-              completedAt: new Date(),
-            });
-            logger.info(`[Reader API] Книга "${bookData[0].title}" добавлена в историю пользователя ${userId}`);
-
-            // Записываем событие book_complete в аналитику
-            try {
-              const [analyticsEvent] = await db.insert(analyticsEvents).values({
-                eventType: 'book_complete',
-                userId,
-                bookId,
-                progress: 100,
-                clubId: clubId || null,
-              }).returning();
-              logger.info(`[Reader API] Analytics event recorded: ${analyticsEvent.id}`);
-            } catch (analyticsError) {
-              const errorMessage = analyticsError instanceof Error ? analyticsError.message : String(analyticsError);
-              logger.error({ error: errorMessage }, '[Reader API] Error recording analytics event');
-            }
-          }
-        }
-      } catch (historyError) {
-        const errorMessage = historyError instanceof Error ? historyError.message : String(historyError);
-        logger.error({ error: errorMessage }, "[Reader API] Error adding to history");
-        // Не прерываем основной запрос из-за ошибки истории
-      }
+      await addToReadingHistory(userId, bookId, clubId);
     }
 
     res.json({ success: true });

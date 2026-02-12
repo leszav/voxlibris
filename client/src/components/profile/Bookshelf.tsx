@@ -1,17 +1,38 @@
 import * as React from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Loader2, BookOpen } from "lucide-react";
-import { getAccessToken } from "@/lib/token-store";
+import { Loader2, BookOpen, Star } from "lucide-react";
+import { authFetch } from "@/lib/queryClient";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { useToast } from "@/hooks/use-toast";
 
-interface Book {
+interface BookWithStatus {
   id: string;
-  title: string;
-  author: string;
-  coverUrl?: string;
-  format: string;
+  userId: string;
+  bookId: string;
+  bookType: 'personal' | 'club';
+  status: 'reading' | 'completed' | 'planned' | 'abandoned';
+  progress: number;
+  startedAt: string | null;
+  completedAt: string | null;
+  notes: string | null;
+  rating: number | null;
+  createdAt: string;
+  updatedAt: string;
+  book: {
+    id: string;
+    title: string;
+    author: string;
+    coverUrl?: string;
+    format?: string;
+  } | null;
 }
 
 interface BookshelfProps {
@@ -27,19 +48,49 @@ const bookshelfStatuses = [
 
 export function Bookshelf({ userId }: BookshelfProps) {
   const [activeStatus, setActiveStatus] = React.useState("reading");
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
   
-  const { data: books = [], isLoading } = useQuery<Book[]>({
-    queryKey: ["user-books", userId, activeStatus],
+  const { data: booksWithStatus = [], isLoading } = useQuery<BookWithStatus[]>({
+    queryKey: ["reading-status", userId, activeStatus],
     queryFn: async () => {
-      const token = getAccessToken();
-      const response = await fetch(`/api/users/${userId}/books?status=${activeStatus}`, {
+      const response = await authFetch(`/api/reading-status?status=${activeStatus}`, {
         headers: {
-          'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         }
       });
       if (!response.ok) return [];
       return response.json();
+    },
+  });
+
+  const updateStatusMutation = useMutation({
+    mutationFn: async ({ bookId, bookType, newStatus }: { bookId: string; bookType: string; newStatus: string }) => {
+      const response = await authFetch('/api/reading-status', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          bookId,
+          bookType,
+          status: newStatus,
+        }),
+      });
+      if (!response.ok) throw new Error('Failed to update status');
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["reading-status"] });
+      queryClient.invalidateQueries({ queryKey: ["reading-stats"] });
+      queryClient.invalidateQueries({ queryKey: ["reading-goal"] });
+      toast({ title: "Статус обновлен" });
+    },
+    onError: () => {
+      toast({
+        title: "Ошибка при обновлении статуса",
+        variant: "destructive",
+      });
     },
   });
 
@@ -70,7 +121,7 @@ export function Bookshelf({ userId }: BookshelfProps) {
       </div>
 
       {/* Книги */}
-      {books.length === 0 ? (
+      {booksWithStatus.length === 0 ? (
         <Card>
           <CardContent className="p-8 text-center">
             <BookOpen className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
@@ -87,34 +138,86 @@ export function Bookshelf({ userId }: BookshelfProps) {
         </Card>
       ) : (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {books.map((book) => (
-            <Card key={book.id} className="hover:shadow-md transition-shadow">
-              <CardContent className="p-4">
-                <div className="flex gap-3">
-                  {book.coverUrl ? (
-                    <img 
-                      src={book.coverUrl} 
-                      alt={book.title}
-                      className="w-12 h-16 object-cover rounded"
-                    />
-                  ) : (
-                    <div className="w-12 h-16 bg-muted rounded flex items-center justify-center">
-                      <BookOpen className="h-6 w-6 text-muted-foreground" />
+          {booksWithStatus.map((item) => {
+            const book = item.book;
+            if (!book) return null;
+            
+            return (
+              <Card key={item.id} className="hover:shadow-md transition-shadow">
+                <CardContent className="p-4">
+                  <div className="flex gap-3">
+                    {book.coverUrl ? (
+                      <img 
+                        src={book.coverUrl} 
+                        alt={book.title}
+                        className="w-12 h-16 object-cover rounded"
+                      />
+                    ) : (
+                      <div className="w-12 h-16 bg-muted rounded flex items-center justify-center">
+                        <BookOpen className="h-6 w-6 text-muted-foreground" />
+                      </div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <h3 className="font-medium truncate">{book.title}</h3>
+                      <p className="text-sm text-muted-foreground truncate">
+                        {book.author}
+                      </p>
+                      <div className="flex items-center gap-2 mt-2">
+                        {book.format && (
+                          <Badge variant="secondary" className="text-xs">
+                            {book.format}
+                          </Badge>
+                        )}
+                        {item.rating && (
+                          <div className="flex items-center gap-1">
+                            <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" />
+                            <span className="text-xs">{item.rating}</span>
+                          </div>
+                        )}
+                      </div>
+                      {item.progress > 0 && item.status === 'reading' && (
+                        <div className="mt-2">
+                          <div className="w-full bg-gray-200 rounded-full h-1.5">
+                            <div 
+                              className="bg-primary h-1.5 rounded-full"
+                              style={{ width: `${item.progress}%` }}
+                            />
+                          </div>
+                          <p className="text-xs text-muted-foreground mt-1">{item.progress}%</p>
+                        </div>
+                      )}
+                      
+                      {/* Меню смены статуса */}
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="sm" className="mt-2 h-7 text-xs">
+                            Изменить статус
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent>
+                          {bookshelfStatuses
+                            .filter(s => s.id !== item.status)
+                            .map((status) => (
+                              <DropdownMenuItem
+                                key={status.id}
+                                onClick={() => updateStatusMutation.mutate({
+                                  bookId: item.bookId,
+                                  bookType: item.bookType,
+                                  newStatus: status.id,
+                                })}
+                              >
+                                <div className={`w-2 h-2 rounded-full ${status.color} mr-2`} />
+                                {status.label}
+                              </DropdownMenuItem>
+                            ))}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </div>
-                  )}
-                  <div className="flex-1 min-w-0">
-                    <h3 className="font-medium truncate">{book.title}</h3>
-                    <p className="text-sm text-muted-foreground truncate">
-                      {book.author}
-                    </p>
-                    <Badge variant="secondary" className="mt-2 text-xs">
-                      {book.format}
-                    </Badge>
                   </div>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+                </CardContent>
+              </Card>
+            );
+          })}
         </div>
       )}
     </div>

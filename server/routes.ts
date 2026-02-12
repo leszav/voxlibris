@@ -7,6 +7,7 @@ import { emailService } from "./services/email-service.js";
 import personalBooksRouter from "./personal-books-routes.js";
 import clubBooksRouter from "./club-books-routes.js";
 import accessRouter from "./access-routes.js";
+import clubDiscussionsRouter from "./club-discussions-routes.js";
 import scheduleRouter from "./routes/schedule.js";
 import notificationsRouter from "./routes/notifications.js";
 import recordingsRouter from "./routes/recordings.js";
@@ -146,6 +147,9 @@ export async function registerRoutes(
   app.use('/api/v1/user/books', personalBooksRouter);
   app.use('/api/v1', clubBooksRouter);
   app.use('/api/v1', accessRouter);
+  
+  // ===== CLUB DISCUSSIONS API =====
+  app.use('/api', clubDiscussionsRouter);
 
   // ===== SCHEDULE API (Phase 5) =====
   app.use('/api/schedule', jwtAuth, scheduleRouter);

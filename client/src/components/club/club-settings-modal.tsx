@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { RichTextEditor, type RichTextEditorRef } from "@/components/ui/rich-text-editor";
+import { ImageCropDialog } from "@/components/ui/image-crop-dialog";
 import { Settings, Image as ImageIcon, Loader2, Check, Trash2, Calendar, Clock, Type, Upload } from "lucide-react";
 import { useUpdateClub } from "@/hooks/use-clubs";
 import { useToast } from "@/hooks/use-toast";
@@ -37,6 +38,11 @@ export function ClubSettingsModal({ club }: ClubSettingsModalProps) {
 
   const [coverImage, setCoverImage] = useState(club.coverImage || "");
   const [coverPreview, setCoverPreview] = useState(club.coverImage || "");
+  
+  // Состояния для crop диалога
+  const [showCoverCrop, setShowCoverCrop] = useState(false);
+  const [tempCoverImage, setTempCoverImage] = useState("");
+  
   const [welcomeTitle, setWelcomeTitle] = useState("");
   const [welcomeHtml, setWelcomeHtml] = useState("");
   const [rulesHtml, setRulesHtml] = useState("");
@@ -88,10 +94,10 @@ export function ClubSettingsModal({ club }: ClubSettingsModalProps) {
       return;
     }
 
-    if (file.size > 5 * 1024 * 1024) {
+    if (file.size > 10 * 1024 * 1024) {
       toast({
         title: "Ошибка",
-        description: "Размер файла не должен превышать 5 МБ",
+        description: "Размер файла не должен превышать 10 МБ",
         variant: "destructive",
       });
       return;
@@ -100,14 +106,19 @@ export function ClubSettingsModal({ club }: ClubSettingsModalProps) {
     const reader = new FileReader();
     reader.onloadend = () => {
       const base64 = reader.result as string;
-      setCoverPreview(base64);
-      setCoverImage(base64);
-      toast({
-        title: "Изображение загружено",
-        description: "Нажмите 'Сохранить изменения' для применения",
-      });
+      setTempCoverImage(base64);
+      setShowCoverCrop(true);
     };
     reader.readAsDataURL(file);
+  };
+
+  const handleCoverCropped = (croppedImage: string) => {
+    setCoverPreview(croppedImage);
+    setCoverImage(croppedImage);
+    toast({
+      title: "Фон загружен",
+      description: "Нажмите 'Сохранить изменения' для применения",
+    });
   };
 
   const handleRemoveCover = () => {
@@ -191,6 +202,7 @@ export function ClubSettingsModal({ club }: ClubSettingsModalProps) {
   };
 
   return (
+    <>
     <Dialog open={isOpen} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>
         <Button
@@ -476,5 +488,18 @@ export function ClubSettingsModal({ club }: ClubSettingsModalProps) {
         </div>
       </DialogContent>
     </Dialog>
+
+    {/* Диалог обрезки фона */}
+    <ImageCropDialog
+      open={showCoverCrop}
+      onOpenChange={setShowCoverCrop}
+      image={tempCoverImage}
+      aspectRatio={16 / 9}
+      maxWidth={1920}
+      maxHeight={1080}
+      onCropComplete={handleCoverCropped}
+      title="Настройка фонового изображения клуба"
+    />
+    </>
   );
 }

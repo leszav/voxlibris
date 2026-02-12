@@ -10,6 +10,7 @@ import { CryptoService } from './crypto-service.js';
 import { fileStorage } from './file-storage.js';
 import { duplicateDetectionService } from './duplicate-detection-service.js';
 import { logger } from './lib/logger.js';
+import { optimizeImage } from './image-optimizer.js';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -181,13 +182,11 @@ async function processPersonalCoverImage(
     sessionId: string
 ): Promise<string | undefined> {
     let coverBuffer: Buffer | undefined;
-    let coverType: string = 'image/jpeg';
 
     if (metadata.coverImageData && typeof metadata.coverImageData === 'string') {
         try {
             const matches = metadata.coverImageData.match(/^data:([A-Za-z+/-]+);base64,(.+)$/);
             if (matches?.length === 3) {
-                coverType = matches[1];
                 coverBuffer = Buffer.from(matches[2], 'base64');
             } else {
                 coverBuffer = Buffer.from(metadata.coverImageData, 'base64');
@@ -199,17 +198,31 @@ async function processPersonalCoverImage(
         coverBuffer = undefined;
     } else if (session.parsedMetadata.coverImageData) {
         coverBuffer = session.parsedMetadata.coverImageData;
-        coverType = session.parsedMetadata.coverImageType || 'image/jpeg';
     }
 
     if (!coverBuffer) return undefined;
 
     try {
-        const coverPath = `covers/personal/${userId}/${sessionId}-cover.jpg`;
-        const coverResult = await fileStorage.uploadFile(coverBuffer, coverPath, coverType);
+        // Оптимизируем обложку перед загрузкой
+        const optimized = await optimizeImage(coverBuffer, 'cover');
+        const coverPath = `covers/personal/${userId}/${sessionId}-cover.webp`;
+        
+        logger.info({ 
+            coverPath,
+            originalSize: optimized.originalSize,
+            optimizedSize: optimized.optimizedSize,
+            compressionRatio: optimized.compressionRatio 
+        }, '[PersonalBooks] Uploading optimized cover');
+        
+        const coverResult = await fileStorage.uploadFile(
+            optimized.buffer,
+            coverPath,
+            optimized.mimeType
+        );
+        
         return `/api/storage/${coverResult.key}`;
     } catch (e) {
-        console.warn('[PersonalBooks] Failed to upload cover', e);
+        logger.error({ error: e }, '[PersonalBooks] Failed to upload cover');
         return undefined;
     }
 }
@@ -378,7 +391,7 @@ router.patch('/:id', jwtAuth, async (req, res) => {
     for (const key of allowedUpdates) {
         const value = updates[key];
         if (value !== undefined) {
-            filteredUpdates[key as AllowedUpdate] = value as never;
+            filteredUpdates[key] = value as never;
         }
     }
 

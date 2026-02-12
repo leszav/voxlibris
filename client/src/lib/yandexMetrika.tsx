@@ -20,8 +20,8 @@ declare global {
  */
 function ensureYandexMetrikaInitialized() {
   const globalWithYM = globalThis as typeof globalThis & { __ymInitialized?: boolean };
-  const win = typeof window !== "undefined" ? window : undefined;
-  const doc = typeof document !== "undefined" ? document : undefined;
+  const win = globalThis.window ?? undefined;
+  const doc = globalThis.document ?? undefined;
 
   if (!win || !doc) {
     return;
@@ -68,7 +68,7 @@ export function YandexMetrikaTracker() {
   useEffect(() => {
     ensureYandexMetrikaInitialized();
 
-    const win = typeof window !== "undefined" ? window : undefined;
+    const win = globalThis.window ?? undefined;
     if (!win || !win.ym) {
       return;
     }

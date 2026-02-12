@@ -194,6 +194,26 @@ export class ClubRepository extends BaseRepository {
   }
 
   /**
+   * Получение клуба по названию для проверки уникальности
+   */
+  async getClubByTitle(title: string): Promise<Club | undefined> {
+    this.validateRequired(title, 'title');
+    
+    try {
+      const result = await this.db
+        .select()
+        .from(clubs)
+        .where(eq(clubs.title, title))
+        .limit(1);
+      
+      return this.getFirstResult(result);
+    } catch (error) {
+      this.logError('getClubByTitle', error);
+      return undefined;
+    }
+  }
+
+  /**
    * Получение клубов пользователя через участие
    */
   async getClubsByUser(userId: string): Promise<ClubWithDetails[]> {

@@ -324,15 +324,60 @@ router.get('/:clubId/reading-plan', jwtAuth, async (req, res) => {
       .where(eq(clubReadingPlans.clubBookId, clubBook.id))
       .orderBy(asc(clubReadingPlans.orderIndex));
 
-    const progress = await db
+    // Получаем текущий прогресс чтения пользователя
+    const [userProgress] = await db
+      .select()
+      .from(readingProgress)
+      .where(and(eq(readingProgress.userId, userId), eq(readingProgress.bookId, clubBook.id)))
+      .limit(1);
+
+    const currentChapter = userProgress?.currentChapter || 0;
+
+    // Получаем сохраненные статусы
+    const savedProgress = await db
       .select()
       .from(clubReadingPlanProgress)
       .where(eq(clubReadingPlanProgress.userId, userId));
 
+    const savedProgressMap = new Map(savedProgress.map(p => [p.planId, p.status]));
+
+    // Автоматически определяем статусы на основе прогресса чтения
+    const progressWithStatus = plans.map(plan => {
+      const savedStatus = savedProgressMap.get(plan.id);
+      
+      // Если статус сохранен вручную, используем его
+      if (savedStatus) {
+        return {
+          planId: plan.id,
+          userId,
+          status: savedStatus,
+          updatedAt: new Date()
+        };
+      }
+
+      // Автоматическое определение статуса на основе глав
+      let autoStatus: 'not_started' | 'in_progress' | 'completed' = 'not_started';
+      
+      if (plan.startChapter !== null && plan.endChapter !== null && currentChapter > 0) {
+        if (currentChapter >= plan.endChapter) {
+          autoStatus = 'completed';
+        } else if (currentChapter >= plan.startChapter) {
+          autoStatus = 'in_progress';
+        }
+      }
+
+      return {
+        planId: plan.id,
+        userId,
+        status: autoStatus,
+        updatedAt: new Date()
+      };
+    });
+
     res.json({
       clubBook,
       plan: plans,
-      progress
+      progress: progressWithStatus
     });
   } catch (error: unknown) {
     console.error('[Club Reader] Get reading plan error:', error);
@@ -515,6 +560,83 @@ router.delete('/:clubId/reading-plan/:planId', jwtAuth, async (req, res) => {
   } catch (error: unknown) {
     console.error('[Club Reader] Delete reading plan error:', error);
     res.status(500).json({ message: 'Failed to delete reading plan' });
+  }
+});
+
+/**
+ * PATCH /api/clubs/:clubId/reading-plan/:planId/status
+ * Обновление статуса этапа плана для текущего пользователя
+ */
+router.patch('/:clubId/reading-plan/:planId/status', jwtAuth, async (req, res) => {
+  try {
+    const { clubId, planId } = req.params;
+    const userId = req.user?.id;
+    const { status } = req.body;
+
+    if (!userId) {
+      return res.status(401).json({ message: 'Unauthorized' });
+    }
+
+    if (!['not_started', 'in_progress', 'completed'].includes(status)) {
+      return res.status(400).json({ message: 'Invalid status value' });
+    }
+
+    // Проверяем что пользователь - участник клуба
+    const [member] = await db
+      .select()
+      .from(clubMembers)
+      .where(and(eq(clubMembers.clubId, clubId), eq(clubMembers.userId, userId)))
+      .limit(1);
+
+    if (!member) {
+      return res.status(403).json({ message: 'Not a member of this club' });
+    }
+
+    // Проверяем что план существует и принадлежит этому клубу
+    const [plan] = await db
+      .select()
+      .from(clubReadingPlans)
+      .innerJoin(clubBooks, eq(clubReadingPlans.clubBookId, clubBooks.id))
+      .where(and(
+        eq(clubReadingPlans.id, planId),
+        eq(clubBooks.clubId, clubId)
+      ))
+      .limit(1);
+
+    if (!plan) {
+      return res.status(404).json({ message: 'Reading plan not found' });
+    }
+
+    // Upsert статуса
+    const [existing] = await db
+      .select()
+      .from(clubReadingPlanProgress)
+      .where(and(
+        eq(clubReadingPlanProgress.planId, planId),
+        eq(clubReadingPlanProgress.userId, userId)
+      ))
+      .limit(1);
+
+    if (existing) {
+      await db
+        .update(clubReadingPlanProgress)
+        .set({ status, updatedAt: new Date() })
+        .where(eq(clubReadingPlanProgress.id, existing.id));
+    } else {
+      await db
+        .insert(clubReadingPlanProgress)
+        .values({
+          planId,
+          userId,
+          status,
+          updatedAt: new Date()
+        });
+    }
+
+    res.json({ success: true, status });
+  } catch (error: unknown) {
+    console.error('[Club Reader] Update plan status error:', error);
+    res.status(500).json({ message: 'Failed to update plan status' });
   }
 });
 

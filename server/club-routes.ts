@@ -96,15 +96,20 @@ router.post('/', jwtAuth, requireActiveUser, async (req, res) => {
       });
     }
 
+    // Проверяем уникальность названия клуба
+    const existingClub = await storage.getClubByTitle(clubData.title);
+    if (existingClub) {
+      return res.status(409).json({ 
+        message: 'Клуб с таким названием уже существует' 
+      });
+    }
+
     // Книга загружается отдельно через /api/clubs/:id/books/upload после создания клуба
     // bookId не используется при создании
     clubData.bookId = undefined;
 
-    // Создаем клуб
+    // Создаем клуб (владелец автоматически добавляется в createClub)
     const club = await storage.createClub(clubData);
-
-    // Автоматически добавляем создателя как владельца
-    await storage.joinClub(club.id, req.user.userId, 'owner');
 
     logger.info(`[Clubs] Club "${club.title}" created by user ${req.user.username}`);
 
@@ -978,6 +983,79 @@ router.post('/:clubId/invitations/:invitationId/resend', jwtAuth, async (req, re
   } catch (error) {
     console.error('Error resending invitation:', error);
     res.status(500).json({ message: 'Failed to resend invitation' });
+  }
+});
+
+/**
+ * POST /api/clubs/:clubId/transfer-ownership
+ * Передача прав владельца другому участнику
+ */
+router.post('/:clubId/transfer-ownership', jwtAuth, async (req, res) => {
+  try {
+    const { clubId } = req.params;
+    const { newOwnerId } = req.body;
+    const currentUserId = req.user?.id;
+
+    if (!currentUserId) {
+      return res.status(401).json({ message: 'Unauthorized' });
+    }
+
+    if (!newOwnerId) {
+      return res.status(400).json({ message: 'New owner ID is required' });
+    }
+
+    // Проверяем права текущего пользователя
+    const isAdmin = req.user?.role === 'admin';
+    
+    if (!isAdmin) {
+      // Если не админ, проверяем что пользователь - владелец клуба
+      const [currentMember] = await storage.getClubMembersWithRoles(clubId)
+        .then(members => members.filter(m => m.id === currentUserId));
+
+      if (!currentMember || currentMember.role !== 'owner') {
+        return res.status(403).json({ message: 'Only club owner or admin can transfer ownership' });
+      }
+    }
+
+    // Проверяем что новый владелец - участник клуба
+    const [newOwnerMember] = await storage.getClubMembersWithRoles(clubId)
+      .then(members => members.filter(m => m.id === newOwnerId));
+
+    if (!newOwnerMember) {
+      return res.status(404).json({ message: 'New owner must be a club member' });
+    }
+
+    if (newOwnerMember.id === currentUserId && !isAdmin) {
+      return res.status(400).json({ message: 'Cannot transfer ownership to yourself' });
+    }
+
+    // Выполняем передачу прав
+    // 1. Старый владелец становится обычным участником
+    const oldOwners = await storage.getClubMembersWithRoles(clubId)
+      .then(members => members.filter(m => m.role === 'owner'));
+    
+    for (const oldOwner of oldOwners) {
+      await storage.updateMemberRole(clubId, oldOwner.id, 'member');
+    }
+
+    // 2. Новый участник становится владельцем
+    await storage.updateMemberRole(clubId, newOwnerId, 'owner');
+
+    const club = await storage.getClub(clubId);
+    
+    logger.info(
+      { clubId, oldOwnerId: currentUserId, newOwnerId, adminAction: isAdmin },
+      '[Clubs] Ownership transferred'
+    );
+
+    res.json({
+      message: 'Ownership transferred successfully',
+      club,
+      newOwnerId
+    });
+  } catch (error) {
+    console.error('Error transferring ownership:', error);
+    res.status(500).json({ message: 'Failed to transfer ownership' });
   }
 });
 
