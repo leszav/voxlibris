@@ -2,6 +2,15 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
+# Install build dependencies for mediasoup and other native modules
+RUN apk add --no-cache \
+    python3 \
+    py3-pip \
+    make \
+    g++ \
+    gcc \
+    linux-headers
+
 # Copy package files
 COPY package.json pnpm-lock.yaml ./
 
@@ -23,8 +32,11 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-# Create non-root user
-RUN addgroup -g 1001 -S nodejs && \
+# Install runtime dependencies and create non-root user
+RUN apk add --no-cache \
+    libstdc++ \
+    libc6-compat && \
+    addgroup -g 1001 -S nodejs && \
     adduser -S nodejs -u 1001
 
 # Copy package files and install ONLY production dependencies
@@ -32,6 +44,9 @@ COPY --from=builder /app/package.json ./
 COPY --from=builder /app/pnpm-lock.yaml ./
 RUN npm install -g pnpm@9 && \
     pnpm install --prod --frozen-lockfile --ignore-scripts
+
+# Copy fully built mediasoup from builder (includes compiled worker binary)
+COPY --from=builder /app/node_modules/mediasoup ./node_modules/mediasoup
 
 # Copy built application
 COPY --from=builder /app/dist ./dist
