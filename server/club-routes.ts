@@ -76,7 +76,7 @@ router.post('/', jwtAuth, requireActiveUser, async (req, res) => {
     }
 
     // Валидация данных
-    const clubData: InsertClub & { ownerId: string } = {
+    const clubData: InsertClub & { ownerId: string; status: Club['status'] } = {
       title: req.body.title,
       description: req.body.description,
       coverImage: req.body.coverImage,
@@ -87,6 +87,9 @@ router.post('/', jwtAuth, requireActiveUser, async (req, res) => {
       isPrivate: req.body.isPrivate || false,
       schedule: req.body.schedule,
       settings: req.body.settings,
+      // Обычные пользователи создают клубы со статусом pending (требуется модерация)
+      // Админы и модераторы создают клубы со статусом recruiting (без модерации)
+      status: (req.user.role === 'admin' || req.user.role === 'moderator') ? 'recruiting' : 'pending',
     };
 
     // Проверяем обязательное поле title
@@ -111,7 +114,40 @@ router.post('/', jwtAuth, requireActiveUser, async (req, res) => {
     // Создаем клуб (владелец автоматически добавляется в createClub)
     const club = await storage.createClub(clubData);
 
-    logger.info(`[Clubs] Club "${club.title}" created by user ${req.user.username}`);
+    if (club.status === 'pending') {
+      logger.info(`[Clubs] Club "${club.title}" created by user ${req.user.username} - pending moderation`);
+      
+      // Отправляем уведомление администраторам о новом клубе на модерации
+      try {
+        const admins = await storage.getUsersByRole('admin');
+        const adminEmails = admins
+          .filter(admin => admin.email && admin.emailConfirmed)
+          .map(admin => admin.email);
+        const creator = await storage.getUser(req.user.userId);
+        const creatorEmail = creator?.email ?? '';
+
+        if (adminEmails.length > 0) {
+          await emailService.sendClubModerationNotification({
+            adminEmails,
+            clubId: club.id,
+            clubTitle: club.title,
+            clubDescription: club.description || undefined,
+            clubType: club.type,
+            isPrivate: club.isPrivate,
+            creatorUsername: req.user.username,
+            creatorEmail,
+            createdAt: club.createdAt,
+          });
+        } else {
+          logger.warn('[Clubs] No admin emails available for moderation notification');
+        }
+      } catch (emailError) {
+        // Не прерываем создание клуба, если email не отправлен
+        logger.error({ error: emailError }, '[Clubs] Failed to send moderation notification to admins');
+      }
+    } else {
+      logger.info(`[Clubs] Club "${club.title}" created by ${req.user.role} ${req.user.username}`);
+    }
 
     res.status(201).json(club);
   } catch (error) {

@@ -970,6 +970,143 @@ router.delete('/clubs/:id', jwtAuth, requireAdmin, async (req, res) => {
   }
 });
 
+// ==== CLUB MODERATION ====
+
+// Получить клубы на модерации
+router.get('/clubs/pending', jwtAuth, requireAdmin, async (req, res) => {
+  try {
+    const pendingClubs = await storage.getClubsForModeration();
+    
+    const clubsFormatted = await Promise.all(pendingClubs.map(async (club) => {
+      return {
+        id: club.id,
+        title: club.title,
+        description: club.description,
+        coverImage: club.coverImage,
+        type: club.type,
+        isPrivate: club.isPrivate,
+        status: club.status,
+        owner: {
+          id: club.owner?.id,
+          username: club.owner?.username,
+          email: club.owner?.email,
+        },
+        memberCount: club.memberCount,
+        maxMembers: club.maxMembers,
+        createdAt: club.createdAt.toISOString(),
+      };
+    }));
+    
+    res.json({
+      clubs: clubsFormatted,
+      total: clubsFormatted.length
+    });
+  } catch (error) {
+    console.error('Error fetching pending clubs:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+// Одобрить клуб
+router.put('/clubs/:id/approve', jwtAuth, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const club = await storage.getClub(id);
+    if (!club) {
+      return res.status(404).json({ message: 'Club not found' });
+    }
+    
+    if (club.status !== 'pending') {
+      return res.status(400).json({ 
+        message: 'Only pending clubs can be approved',
+        currentStatus: club.status
+      });
+    }
+    
+    const approvedClub = await storage.approveClub(id);
+    
+    if (!approvedClub) {
+      return res.status(500).json({ message: 'Failed to approve club' });
+    }
+    
+    await logAction(
+      req,
+      'update_club',
+      'club',
+      id,
+      'Club approved by moderator',
+      'pending',
+      'recruiting'
+    );
+    
+    logger.info({
+      clubId: id,
+      clubTitle: approvedClub.title,
+      moderator: req.user?.username
+    }, 'Club approved');
+    
+    res.json({ 
+      message: 'Club approved successfully',
+      club: approvedClub
+    });
+  } catch (error) {
+    console.error('Error approving club:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+// Отклонить клуб
+router.put('/clubs/:id/reject', jwtAuth, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+    
+    const club = await storage.getClub(id);
+    if (!club) {
+      return res.status(404).json({ message: 'Club not found' });
+    }
+    
+    if (club.status !== 'pending') {
+      return res.status(400).json({ 
+        message: 'Only pending clubs can be rejected',
+        currentStatus: club.status
+      });
+    }
+    
+    const rejectedClub = await storage.rejectClub(id, reason);
+    
+    if (!rejectedClub) {
+      return res.status(500).json({ message: 'Failed to reject club' });
+    }
+    
+    await logAction(
+      req,
+      'update_club',
+      'club',
+      id,
+      reason || 'Club rejected by moderator',
+      'pending',
+      'archived'
+    );
+    
+    logger.info({
+      clubId: id,
+      clubTitle: rejectedClub.title,
+      reason,
+      moderator: req.user?.username
+    }, 'Club rejected');
+    
+    res.json({ 
+      message: 'Club rejected successfully',
+      club: rejectedClub
+    });
+  } catch (error) {
+    console.error('Error rejecting club:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
 // ==== STATISTICS ====
 
 // Получить общую статистику системы

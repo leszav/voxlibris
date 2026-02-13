@@ -358,6 +358,78 @@ class EmailService {
   }
 
   /**
+   * Отправка уведомления администраторам о новом клубе на модерации
+   */
+  async sendClubModerationNotification(params: {
+    adminEmails: string[];
+    clubId: string;
+    clubTitle: string;
+    clubDescription?: string;
+    clubType: string;
+    isPrivate: boolean;
+    creatorUsername: string;
+    creatorEmail: string;
+    createdAt: Date;
+    baseUrl?: string;
+  }): Promise<boolean> {
+    try {
+      const template = await this.loadTemplate('club-moderation-notification');
+      
+      const baseUrl = params.baseUrl || process.env.CLIENT_URL || 'http://localhost:3000';
+      const moderationUrl = `${baseUrl}/admin/clubs?status=pending`;
+      
+      const html = this.replaceVariables(template, {
+        clubTitle: params.clubTitle,
+        description: params.clubDescription || 'Описание не указано',
+        clubType: params.clubType === 'standard' ? 'Обычный' : params.clubType,
+        isPrivate: params.isPrivate ? 'Приватный' : 'Публичный',
+        creatorUsername: params.creatorUsername,
+        creatorEmail: params.creatorEmail,
+        createdAt: params.createdAt.toLocaleString('ru-RU', {
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit'
+        }),
+        moderationUrl,
+      });
+
+      // Отправляем всем администраторам
+      const results = await Promise.all(
+        params.adminEmails.map(email =>
+          this.sendEmail({
+            to: email,
+            subject: `🔔 Новый клуб на модерации: "${params.clubTitle}"`,
+            html,
+          })
+        )
+      );
+
+      const allSuccess = results.every(Boolean);
+      
+      if (allSuccess) {
+        logger.info({
+          clubId: params.clubId,
+          recipientCount: params.adminEmails.length
+        }, 'Club moderation notifications sent to admins');
+      } else {
+        logger.warn({
+          clubId: params.clubId,
+          successCount: results.filter(Boolean).length,
+          totalCount: params.adminEmails.length
+        }, 'Some club moderation notifications failed');
+      }
+
+      return allSuccess;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.error({ error: errorMessage }, '[EmailService] Error sending club moderation notification');
+      return false;
+    }
+  }
+
+  /**
    * Отправка тестового письма
    */
   async sendTestEmail(email: string): Promise<{ success: boolean; messageId?: string; error?: string }> {

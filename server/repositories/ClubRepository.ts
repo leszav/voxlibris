@@ -1,5 +1,5 @@
 import { BaseRepository } from './BaseRepository.js';
-import { eq, desc, and, count, sql } from 'drizzle-orm';
+import { eq, desc, and, count, sql, ne } from 'drizzle-orm';
 import { clubs, clubMembers, clubInvitations, users, clubBooks, tags, clubTags } from '../../shared/schema.js';
 import type {
   Club,
@@ -22,7 +22,9 @@ import { logger } from '../lib/logger.js';
 export class ClubRepository extends BaseRepository {
   
   /**
-   * Получение всех активных клубов с деталями участников
+   * Получение всех активных клубов для публичного каталога
+   * Фильтрует клубы на модерации (status = 'pending')
+   * Сортирует по популярности, затем по дате создания
    */
   async getClubs(): Promise<ClubWithDetails[]> {
     try {
@@ -40,6 +42,7 @@ export class ClubRepository extends BaseRepository {
           isActive: clubs.isActive,
           isLive: clubs.isLive,
           isFeatured: clubs.isFeatured,
+          popularityScore: clubs.popularityScore,
           schedule: clubs.schedule,
           settings: clubs.settings,
           archivedAt: clubs.archivedAt,
@@ -49,7 +52,8 @@ export class ClubRepository extends BaseRepository {
           updatedAt: clubs.updatedAt,
         })
         .from(clubs)
-        .orderBy(desc(clubs.createdAt));
+        .where(ne(clubs.status, 'pending')) // Исключаем клубы на модерации
+        .orderBy(desc(clubs.popularityScore), desc(clubs.createdAt)); // Сначала по популярности, потом по дате
 
       // Загружаем дополнительные данные для каждого клуба
       const clubsWithDetails = await Promise.all(
@@ -125,6 +129,7 @@ export class ClubRepository extends BaseRepository {
           isActive: clubs.isActive,
           isLive: clubs.isLive,
           isFeatured: clubs.isFeatured,
+          popularityScore: clubs.popularityScore,
           schedule: clubs.schedule,
           settings: clubs.settings,
           archivedAt: clubs.archivedAt,
@@ -234,6 +239,7 @@ export class ClubRepository extends BaseRepository {
           isActive: clubs.isActive,
           isLive: clubs.isLive,
           isFeatured: clubs.isFeatured,
+          popularityScore: clubs.popularityScore,
           schedule: clubs.schedule,
           settings: clubs.settings,
           archivedAt: clubs.archivedAt,
@@ -752,6 +758,162 @@ export class ClubRepository extends BaseRepository {
     } catch (error) {
       this.logError('deleteClubInvitationsByEmail', error);
       return 0;
+    }
+  }
+
+  // =================================================================
+  // Club Moderation - модерация клубов
+  // =================================================================
+
+  /**
+   * Получение клубов на модерации
+   * Возвращает клубы со статусом 'pending'
+   * Сортировка по дате создания (старые первыми)
+   */
+  async getClubsForModeration(): Promise<ClubWithDetails[]> {
+    try {
+      const clubsData = await this.db
+        .select({
+          id: clubs.id,
+          title: clubs.title,
+          description: clubs.description,
+          coverImage: clubs.coverImage,
+          bookId: clubs.bookId,
+          type: clubs.type,
+          status: clubs.status,
+          isPrivate: clubs.isPrivate,
+          maxMembers: clubs.maxMembers,
+          isActive: clubs.isActive,
+          isLive: clubs.isLive,
+          isFeatured: clubs.isFeatured,
+          popularityScore: clubs.popularityScore,
+          schedule: clubs.schedule,
+          settings: clubs.settings,
+          archivedAt: clubs.archivedAt,
+          archiveReason: clubs.archiveReason,
+          ownerId: clubs.ownerId,
+          createdAt: clubs.createdAt,
+          updatedAt: clubs.updatedAt,
+        })
+        .from(clubs)
+        .where(eq(clubs.status, 'pending'))
+        .orderBy(clubs.createdAt); // Старые первыми (приоритет модерации)
+
+      // Загружаем дополнительные данные для каждого клуба
+      const clubsWithDetails = await Promise.all(
+        clubsData.map(async (club) => {
+          // Владелец
+          const ownerResult = await this.db
+            .select()
+            .from(users)
+            .where(eq(users.id, club.ownerId))
+            .limit(1);
+
+          // Количество участников
+          const memberCountResult = await this.db
+            .select({ count: count() })
+            .from(clubMembers)
+            .where(eq(clubMembers.clubId, club.id));
+
+          return {
+            ...club,
+            book: null,
+            owner: ownerResult[0] || null,
+            memberCount: Number(memberCountResult[0]?.count || 0),
+            tags: [],
+          } as ClubWithDetails;
+        })
+      );
+
+      return clubsWithDetails;
+    } catch (error) {
+      this.logError('getClubsForModeration', error);
+      return [];
+    }
+  }
+
+  /**
+   * Одобрить клуб (изменить статус с pending на recruiting)
+   */
+  async approveClub(clubId: string): Promise<Club | undefined> {
+    this.validateRequired(clubId, 'clubId');
+    
+    try {
+      const result = await this.db
+        .update(clubs)
+        .set({ 
+          status: 'recruiting',
+          updatedAt: new Date()
+        })
+        .where(and(
+          eq(clubs.id, clubId),
+          eq(clubs.status, 'pending') // Можно одобрить только pending клубы
+        ))
+        .returning();
+      
+      const approved = this.getFirstResult(result);
+      if (approved) {
+        logger.info({ clubId, clubTitle: approved.title }, 'Club approved by moderator');
+      }
+      return approved;
+    } catch (error) {
+      this.logError('approveClub', error);
+      return undefined;
+    }
+  }
+
+  /**
+   * Отклонить клуб (изменить статус с pending на archived)
+   */
+  async rejectClub(clubId: string, reason?: string): Promise<Club | undefined> {
+    this.validateRequired(clubId, 'clubId');
+    
+    try {
+      const result = await this.db
+        .update(clubs)
+        .set({ 
+          status: 'archived',
+          archivedAt: new Date(),
+          archiveReason: reason || 'Отклонено модератором',
+          updatedAt: new Date()
+        })
+        .where(and(
+          eq(clubs.id, clubId),
+          eq(clubs.status, 'pending') // Можно отклонить только pending клубы
+        ))
+        .returning();
+      
+      const rejected = this.getFirstResult(result);
+      if (rejected) {
+        logger.info({ clubId, clubTitle: rejected.title, reason }, 'Club rejected by moderator');
+      }
+      return rejected;
+    } catch (error) {
+      this.logError('rejectClub', error);
+      return undefined;
+    }
+  }
+
+  /**
+   * Обновить popularity score клуба
+   */
+  async updateClubPopularityScore(clubId: string, score: number): Promise<boolean> {
+    this.validateRequired(clubId, 'clubId');
+    
+    try {
+      const result = await this.db
+        .update(clubs)
+        .set({ 
+          popularityScore: score,
+          updatedAt: new Date()
+        })
+        .where(eq(clubs.id, clubId))
+        .returning();
+      
+      return result.length > 0;
+    } catch (error) {
+      this.logError('updateClubPopularityScore', error);
+      return false;
     }
   }
 }

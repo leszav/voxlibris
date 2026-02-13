@@ -10,7 +10,15 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { ErrorDialog } from "@/components/ui/error-dialog";
 import { useCreateClub } from "@/hooks/use-clubs";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Loader2, Users } from "lucide-react";
+import { ArrowLeft, Loader2, Users, CheckCircle, Clock } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 export default function CreateClub() {
   const [, setLocation] = useLocation();
@@ -31,6 +39,12 @@ export default function CreateClub() {
     description: string;
   }>({ open: false, title: "", description: "" });
 
+  const [successDialog, setSuccessDialog] = useState<{
+    open: boolean;
+    isPending: boolean;
+    clubId: string;
+  }>({ open: false, isPending: false, clubId: "" });
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -45,11 +59,23 @@ export default function CreateClub() {
 
     try {
       const club = await createClubMutation.mutateAsync(formData);
-      toast({
-        title: "Успешно!",
-        description: "Клуб создан. Теперь загрузите книгу для чтения.",
+      
+      const isPending = club.status === 'pending';
+      
+      // Показываем соответствующее модальное окно
+      setSuccessDialog({
+        open: true,
+        isPending,
+        clubId: club.id,
       });
-      setLocation(`/clubs/${club.id}`);
+      
+      // Если не требуется модерация, показываем обычный toast
+      if (!isPending) {
+        toast({
+          title: "Успешно!",
+          description: "Клуб создан. Теперь загрузите книгу для чтения.",
+        });
+      }
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : "Не удалось создать клуб";
       setErrorDialog({
@@ -57,6 +83,18 @@ export default function CreateClub() {
         title: "Ошибка создания клуба",
         description: errorMessage,
       });
+    }
+  };
+
+  const handleSuccessDialogClose = () => {
+    setSuccessDialog({ open: false, isPending: false, clubId: "" });
+    
+    if (successDialog.isPending) {
+      // Если клуб на модерации, возвращаемся к списку клубов
+      setLocation("/clubs");
+    } else {
+      // Если клуб создан и активен, переходим на страницу клуба
+      setLocation(`/clubs/${successDialog.clubId}`);
     }
   };
 
@@ -168,6 +206,62 @@ export default function CreateClub() {
         title={errorDialog.title}
         description={errorDialog.description}
       />
+
+      {/* Success Dialog - разные сообщения для pending и одобренных клубов */}
+      <Dialog open={successDialog.open} onOpenChange={handleSuccessDialogClose}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <div className="flex items-center mb-2">
+              {successDialog.isPending ? (
+                <div className="w-12 h-12 rounded-full bg-amber-100 flex items-center justify-center mr-3">
+                  <Clock className="h-6 w-6 text-amber-600" />
+                </div>
+              ) : (
+                <div className="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center mr-3">
+                  <CheckCircle className="h-6 w-6 text-green-600" />
+                </div>
+              )}
+              <DialogTitle className="text-xl">
+                {successDialog.isPending ? "Клуб отправлен на модерацию" : "Клуб успешно создан!"}
+              </DialogTitle>
+            </div>
+            <DialogDescription className="text-base pt-2">
+              {successDialog.isPending ? (
+                <>
+                  <p className="mb-3">
+                    Ваш клуб <strong>"{formData.title}"</strong> был успешно создан и отправлен на проверку администраторам.
+                  </p>
+                  <p className="mb-3">
+                    После одобрения клуб станет доступен для других пользователей, и вы сможете:
+                  </p>
+                  <ul className="list-disc list-inside space-y-1 text-sm text-muted-foreground ml-2">
+                    <li>Загрузить книгу для совместного чтения</li>
+                    <li>Пригласить участников</li>
+                    <li>Начать сессии чтения</li>
+                  </ul>
+                  <p className="mt-3 text-sm text-muted-foreground">
+                    Мы уведомим вас по email о результате модерации.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p>
+                    Клуб <strong>"{formData.title}"</strong> создан и готов к использованию!
+                  </p>
+                  <p className="mt-2">
+                    Теперь вы можете загрузить книгу для чтения и пригласить участников.
+                  </p>
+                </>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button onClick={handleSuccessDialogClose} className="w-full">
+              {successDialog.isPending ? "Вернуться к клубам" : "Перейти к клубу"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </MainLayout>
   );
 }

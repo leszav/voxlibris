@@ -530,12 +530,28 @@ class StorageAdapter implements Partial<IStorage> {
     return this.repos.clubs.getClubByTitle(title);
   }
 
+  async getClubsForModeration() {
+    return this.repos.clubs.getClubsForModeration();
+  }
+
   async updateClub(id: string, updates: Parameters<ClubRepository['updateClub']>[1]) {
     return this.repos.clubs.updateClub(id, updates);
   }
 
   async deleteClub(id: string) {
     return this.repos.clubs.deleteClub(id);
+  }
+
+  async approveClub(clubId: string) {
+    return this.repos.clubs.approveClub(clubId);
+  }
+
+  async rejectClub(clubId: string, reason?: string) {
+    return this.repos.clubs.rejectClub(clubId, reason);
+  }
+
+  async updateClubPopularityScore(clubId: string, score: number) {
+    return this.repos.clubs.updateClubPopularityScore(clubId, score);
   }
 
   async joinClub(clubId: string, userId: string, role?: Parameters<ClubRepository['joinClub']>[2]) {
@@ -637,6 +653,10 @@ class StorageAdapter implements Partial<IStorage> {
 
   async getPendingUsers() {
     return this.repos.users.getPendingUsers();
+  }
+
+  async getUsersByRole(role: Parameters<UserRepository['getUsersByRole']>[0]) {
+    return this.repos.users.getUsersByRole(role);
   }
 
   // =================================================================

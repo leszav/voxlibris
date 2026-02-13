@@ -12,7 +12,7 @@ export type UserStatus = typeof userStatuses[number];
 export const clubTypes = ["standard", "premium", "reader-led", "reading_club"] as const;
 export type ClubType = typeof clubTypes[number];
 
-export const clubStatuses = ["recruiting", "active", "completed", "archived"] as const;
+export const clubStatuses = ["pending", "recruiting", "active", "completed", "archived"] as const;
 export type ClubStatus = typeof clubStatuses[number];
 
 export const clubMemberRoles = ["owner", "moderator", "member"] as const;
@@ -133,6 +133,7 @@ export const clubs = pgTable("clubs", {
   isActive: boolean("is_active").notNull().default(true),
   isLive: boolean("is_live").notNull().default(false),
   isFeatured: boolean("is_featured").notNull().default(false),
+  popularityScore: integer("popularity_score").notNull().default(0), // Оценка популярности для сортировки
   schedule: text("schedule"), // JSON string for reading schedule
   settings: text("settings"), // JSON строка с дополнительными настройками клуба
   archivedAt: timestamp("archived_at"),
@@ -749,8 +750,9 @@ export type InsertUserReadingGoal = typeof userReadingGoals.$inferInsert;
 
 // Extended types for frontend
 export interface ClubWithDetails extends Club {
-  book: ClubBook;
-  owner: User;
+  book: ClubBook | null;
+  books?: ClubBook[];
+  owner: User | null;
   tags: string[];
   memberCount: number;
   activeSessions?: ReadingSessionWithDetails[];

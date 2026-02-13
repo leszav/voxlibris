@@ -663,4 +663,27 @@ export class UserRepository extends BaseRepository {
       return [];
     }
   }
+
+  /**
+   * Получение пользователей по роли
+   */
+  async getUsersByRole(role: UserRole): Promise<User[]> {
+    this.validateRequired(role, 'role');
+    
+    try {
+      const result = await this.db
+        .select()
+        .from(users)
+        .where(and(
+          eq(users.role, role),
+          eq(users.status, 'active') // Только активные пользователи
+        ))
+        .orderBy(desc(users.createdAt));
+
+      return result;
+    } catch (error) {
+      this.logError('getUsersByRole', error);
+      return [];
+    }
+  }
 }

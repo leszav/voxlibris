@@ -1,6 +1,8 @@
 import { Server as SocketIOServer, Socket } from "socket.io";
 import { storage } from "./repositories/index.js";
 import { logger } from "./lib/logger.js";
+import { AudioBroadcaster } from "./audio/audio-broadcaster.js";
+import type { AudioChunk } from "./audio/types.js";
 import type { 
   SessionPositionUpdate, 
   ListenerUpdate 
@@ -43,6 +45,9 @@ async function leaveCurrentSession(socket: AuthenticatedSocket) {
 }
 
 export function setupWebSocketHandlers(io: SocketIOServer) {
+  // Получаем экземпляр AudioBroadcaster
+  const audioBroadcaster = AudioBroadcaster.getInstance();
+  
   // Authentication middleware for WebSocket connections
   io.use(async (socket: AuthenticatedSocket, next) => {
     try {
@@ -262,8 +267,158 @@ export function setupWebSocketHandlers(io: SocketIOServer) {
     });
 
     // Handle disconnect
+    // ========== AUDIO STREAMING HANDLERS ==========
+    
+    // Чтец начинает аудио-сессию
+    socket.on("audio:start_session", async (data: { sessionId: string; clubId: string; bookId: string; config?: any }) => {
+      try {
+        if (!socket.userId) {
+          socket.emit("error", { message: "User not authenticated" });
+          return;
+        }
+
+        const { sessionId, clubId, bookId, config } = data;
+        
+        // Проверяем права чтеца
+        const session = await storage.getReadingSession(sessionId);
+        if (session?.readerId !== socket.userId) {
+          socket.emit("error", { message: "Not authorized to start audio session" });
+          return;
+        }
+
+        // Создаем аудио-сессию
+        audioBroadcaster.startSession(sessionId, clubId, socket.userId, bookId, config);
+        
+        // Присоединяем чтеца к комнате
+        await socket.join(sessionId);
+        
+        socket.emit("audio:session_started", { sessionId });
+        logger.info(`Audio session started by reader ${socket.userId}: ${sessionId}`);
+        
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        logger.error({ error: errorMessage }, "Error starting audio session");
+        socket.emit("error", { message: "Failed to start audio session" });
+      }
+    });
+
+    // Слушатель присоединяется к аудио-сессии
+    socket.on("audio:join_session", async (sessionId: string) => {
+      try {
+        if (!socket.userId) {
+          socket.emit("error", { message: "User not authenticated" });
+          return;
+        }
+
+        // Проверяем существование сессии
+        const audioSession = audioBroadcaster.getSession(sessionId);
+        if (!audioSession?.isActive) {
+          socket.emit("error", { message: "Audio session not found or inactive" });
+          return;
+        }
+
+        // Добавляем слушателя
+        const success = audioBroadcaster.addListener(sessionId, socket.id);
+        if (!success) {
+          socket.emit("error", { message: "Failed to join audio session" });
+          return;
+        }
+
+        // Присоединяем к комнате
+        await socket.join(sessionId);
+        
+        const stats = audioBroadcaster.getSessionStats(sessionId);
+        socket.emit("audio:session_joined", { 
+          sessionId, 
+          listenerCount: stats?.listenerCount || 0 
+        });
+        
+        logger.info(`User ${socket.userId} joined audio session: ${sessionId}`);
+        
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        logger.error({ error: errorMessage }, "Error joining audio session");
+        socket.emit("error", { message: "Failed to join audio session" });
+      }
+    });
+
+    // Чтец отправляет аудио-chunk
+    socket.on("audio:chunk", async (chunkData: { sessionId: string; data: Buffer; timestamp: number; sequence: number }) => {
+      try {
+        if (!socket.userId) {
+          socket.emit("error", { message: "User not authenticated" });
+          return;
+        }
+
+        const { sessionId, data, timestamp, sequence } = chunkData;
+        
+        // Проверяем права чтеца
+        if (!audioBroadcaster.isReader(sessionId, socket.userId)) {
+          socket.emit("error", { message: "Not authorized to send audio" });
+          return;
+        }
+
+        const chunk: AudioChunk = {
+          sessionId,
+          data,
+          timestamp,
+          sequence
+        };
+
+        // Broadcast chunk всем слушателям
+        audioBroadcaster.broadcastChunk(io, chunk);
+        
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        logger.error({ error: errorMessage }, "Error broadcasting audio chunk");
+      }
+    });
+
+    // Завершение аудио-сессии
+    socket.on("audio:end_session", async (sessionId: string) => {
+      try {
+        if (!socket.userId) {
+          socket.emit("error", { message: "User not authenticated" });
+          return;
+        }
+
+        // Проверяем права чтеца
+        if (!audioBroadcaster.isReader(sessionId, socket.userId)) {
+          socket.emit("error", { message: "Not authorized to end audio session" });
+          return;
+        }
+
+        // Завершаем сессию
+        audioBroadcaster.endSession(sessionId);
+        
+        // Уведомляем всех в комнате
+        io.to(sessionId).emit("audio:session_ended", { sessionId });
+        
+        socket.emit("audio:session_ended", { sessionId });
+        logger.info(`Audio session ended by reader ${socket.userId}: ${sessionId}`);
+        
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        logger.error({ error: errorMessage }, "Error ending audio session");
+        socket.emit("error", { message: "Failed to end audio session" });
+      }
+    });
+
     socket.on("disconnect", async (reason) => {
       logger.info(`User ${socket.userId} disconnected: ${reason}`);
+      
+      // Удаляем из всех аудио-сессий
+      const activeSessions = audioBroadcaster.getActiveSessions();
+      for (const session of activeSessions) {
+        if (audioBroadcaster.isListener(session.id, socket.id)) {
+          audioBroadcaster.removeListener(session.id, socket.id);
+        }
+        // Если это чтец, завершаем сессию
+        if (session.readerId === socket.userId) {
+          audioBroadcaster.endSession(session.id);
+          io.to(session.id).emit("audio:session_ended", { sessionId: session.id, reason: "reader_disconnected" });
+        }
+      }
       
       if (socket.currentSession && socket.userId) {
         await leaveCurrentSession(socket);

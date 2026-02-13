@@ -525,7 +525,10 @@ function CurrentBookCard({ club, clubId, isOwner, isMember, handleDeleteBook, de
           <div className="flex flex-col gap-2 pt-2">
             {isMember && club.book && (
               <Button
-                onClick={() => setLocation(`/clubs/${clubId}/books/${club.book.id}/read`)}
+                onClick={() => {
+                  if (!club.book) return;
+                  setLocation(`/clubs/${clubId}/books/${club.book.id}/read`);
+                }}
                 className="w-full"
               >
                 <BookOpen className="w-4 h-4 mr-2" />

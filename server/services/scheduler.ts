@@ -1,6 +1,7 @@
 import cron from 'node-cron';
 import { repositories } from '../repositories/index.js';
 import { notificationService } from './notification-service.js';
+import { clubPopularityService } from './club-popularity-service.js';
 import { logger } from '../lib/logger.js';
 import type { ReadingSchedule } from '../../shared/schema.js';
 
@@ -33,6 +34,9 @@ class Scheduler {
 
     // Очистка старых данных каждый час
     this.scheduleTask('cleanup-old-data', '0 * * * *', this.cleanupOldData.bind(this));
+
+    // Пересчет популярности клубов каждый час
+    this.scheduleTask('update-club-popularity', '0 * * * *', this.updateClubPopularity.bind(this));
 
     this.isRunning = true;
     logger.info('Scheduler started successfully');
@@ -211,6 +215,21 @@ class Scheduler {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       logger.error({ error: errorMessage }, 'Error cleaning up old data');
+    }
+  }
+
+  /**
+   * Обновление популярности клубов
+   * Выполняется каждый час для пересчета popularity score
+   */
+  private async updateClubPopularity(): Promise<void> {
+    try {
+      logger.info('Starting club popularity update...');
+      const updatedCount = await clubPopularityService.updateAllClubsPopularity();
+      logger.info(`Club popularity update completed: ${updatedCount} clubs updated`);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.error({ error: errorMessage }, 'Error updating club popularity');
     }
   }
 
