@@ -190,6 +190,13 @@ export class AuthService {
       // Получаем пользователя
       const user = await storage.getUser(tokenRecord.userId);
       if (!user) {
+        await storage.revokeRefreshToken(refreshToken);
+        return null;
+      }
+
+      // Блокируем обновление токенов для неактивных/неподтвержденных аккаунтов
+      if (user.status !== 'active' || !user.emailConfirmed) {
+        await storage.revokeAllUserRefreshTokens(user.id);
         return null;
       }
 
@@ -571,26 +578,26 @@ async resendConfirmationEmail(userId: string): Promise<{ success: boolean; messa
 /**
  * Запрос на сброс пароля (публичный или админский)
  */
-async requestPasswordReset(
-  emailOrUsername: string,
+  async requestPasswordReset(
+    emailOrUsername: string,
   baseUrl?: string,
   requestedByAdminId?: string,
   requestedFromIp?: string
-): Promise<{ emailSent: boolean }> {
-  try {
-    logger.info({ emailOrUsername }, '[AuthService] Password reset requested');
+  ): Promise<{ emailSent: boolean }> {
+    try {
+      logger.info('[AuthService] Password reset requested');
     
     // Безопасно пытаемся найти пользователя по email или username
     let user = await storage.getUserByEmail(emailOrUsername);
     user ??= await storage.getUserByUsername(emailOrUsername);
 
     // Не раскрываем существование пользователя
-    if (!user || user.status === 'deleted') {
-      logger.info({ emailOrUsername }, '[AuthService] User not found or deleted');
-      return { emailSent: false };
-    }
+      if (!user || user.status === 'deleted') {
+        logger.info('[AuthService] User not found or deleted');
+        return { emailSent: false };
+      }
 
-    logger.info({ userId: user.id, email: user.email }, '[AuthService] User found');
+      logger.info({ userId: user.id }, '[AuthService] User found');
 
     // Инвалидируем предыдущие активные токены
     await storage.invalidatePasswordResetTokensForUser(user.id);
@@ -599,7 +606,7 @@ async requestPasswordReset(
     const token = randomBytes(32).toString('hex');
     const tokenHash = this.hashToken(token);
     const expiresAt = new Date(Date.now() + this.PASSWORD_RESET_EXPIRY_MINUTES * 60 * 1000);
-    logger.info({ tokenPrefix: token.substring(0, 8) }, '[AuthService] Generated reset token');
+      logger.info('[AuthService] Generated reset token');
 
     const tokenRecord = await storage.createPasswordResetToken({
       userId: user.id,
@@ -610,7 +617,7 @@ async requestPasswordReset(
     });
     logger.info({ tokenId: tokenRecord.id }, '[AuthService] Created token record');
 
-    logger.info({ email: user.email }, '[AuthService] Attempting to send email');
+    logger.info({ userId: user.id }, '[AuthService] Attempting to send reset email');
     const emailSent = await emailService.sendPasswordReset({
       email: user.email,
       username: user.username,

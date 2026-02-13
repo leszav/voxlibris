@@ -635,15 +635,7 @@ router.get('/club/:clubId/stats', async (req: Request, res: Response) => {
   try {
     const { clubId } = req.params;
 
-    const allSchedules = await repositories.readingSchedule.getClubSchedule(clubId);
-
-    const stats = {
-      total: allSchedules.length,
-      scheduled: allSchedules.filter(s => s.status === 'scheduled').length,
-      inProgress: allSchedules.filter(s => s.status === 'in_progress').length,
-      completed: allSchedules.filter(s => s.status === 'completed').length,
-      cancelled: allSchedules.filter(s => s.status === 'cancelled').length,
-    };
+    const stats = await repositories.readingSchedule.getClubScheduleStats(clubId);
 
     res.json({
       success: true,

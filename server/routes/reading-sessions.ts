@@ -324,34 +324,21 @@ router.put('/:sessionId/position', async (req: Request, res: Response) => {
 
 /**
  * PUT /api/reading-sessions/:sessionId/listeners
- * Обновить количество слушателей
+ * Deprecated: listener count is updated only by server-side websocket flows.
  */
 router.put('/:sessionId/listeners', async (req: Request, res: Response) => {
-  try {
-    const { sessionId } = req.params;
-    const { count } = req.body;
+  logger.warn(
+    {
+      userId: req.user?.id || req.user?.userId || null,
+      sessionId: req.params.sessionId,
+    },
+    'Blocked deprecated listeners update endpoint',
+  );
 
-    if (typeof count !== 'number' || count < 0) {
-      return res.status(400).json({
-        success: false,
-        error: 'Invalid listener count',
-      });
-    }
-
-    const updatedSession = await storage.readingSessions.updateListenerCount(sessionId, count);
-
-    res.json({
-      success: true,
-      session: updatedSession,
-    });
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    logger.error(`Error updating listener count: ${errorMessage}`);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to update listener count',
-    });
-  }
+  return res.status(410).json({
+    success: false,
+    error: 'Listener count updates are server-managed',
+  });
 });
 
 /**

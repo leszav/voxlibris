@@ -93,6 +93,7 @@ export function useMicrophoneCheck() {
   const recordingVolumeSamplesRef = useRef<number[]>([]);
   const recordingNoiseSamplesRef = useRef<number[]>([]);
   const isRecordingRef = useRef(false);
+  const recordingStopTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const applyGainLevel = useCallback((value: number) => {
     const normalized = clamp(value, MIN_GAIN, MAX_GAIN);
@@ -109,6 +110,11 @@ export function useMicrophoneCheck() {
   }, [applyGainLevel]);
 
   const cleanupMonitoring = useCallback(() => {
+    if (recordingStopTimeoutRef.current) {
+      clearTimeout(recordingStopTimeoutRef.current);
+      recordingStopTimeoutRef.current = null;
+    }
+
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
       animationFrameRef.current = null;
@@ -265,7 +271,9 @@ export function useMicrophoneCheck() {
       setIsInitialized(true);
       startLevelMonitoring();
 
-      console.log('[MicCheck] Microphone initialized');
+      if (import.meta.env.DEV) {
+        console.log('[MicCheck] Microphone initialized');
+      }
     } catch (err) {
       const message = mapMicError(err);
       setError(message);
@@ -343,12 +351,16 @@ export function useMicrophoneCheck() {
       };
 
       mediaRecorder.start();
-      setTimeout(() => {
+      recordingStopTimeoutRef.current = setTimeout(() => {
         if (mediaRecorder.state === 'recording') {
           mediaRecorder.stop();
         }
       }, durationMs);
     }).finally(() => {
+      if (recordingStopTimeoutRef.current) {
+        clearTimeout(recordingStopTimeoutRef.current);
+        recordingStopTimeoutRef.current = null;
+      }
       setIsRecording(false);
       isRecordingRef.current = false;
       mediaRecorderRef.current = null;
@@ -368,7 +380,9 @@ export function useMicrophoneCheck() {
       const analysisResult = analyzeCurrentRecording();
       setResult(analysisResult);
 
-      console.log('[MicCheck] Test completed:', analysisResult);
+      if (import.meta.env.DEV) {
+        console.log('[MicCheck] Test completed:', analysisResult);
+      }
 
       return { result: analysisResult, audioBlob };
     } catch (err) {

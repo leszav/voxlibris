@@ -1,7 +1,7 @@
 import { Server as HttpServer } from "node:http";
 import { Server, Socket } from "socket.io";
 import jwt, { type JwtPayload } from "jsonwebtoken";
-import { inArray } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import { db, eq, and, desc } from "./db.js";
 import {
   users,
@@ -42,6 +42,37 @@ interface LoadHistoryPayload {
 
 const DEFAULT_CHANNEL = "general";
 const MAX_MESSAGES_PER_CLUB = 1000;
+const CHAT_HISTORY_CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
+const CHAT_HISTORY_CLEANUP_BATCH_SIZE = 5000;
+const MAX_TRACKED_CHAT_ROOMS = 2000;
+const MAX_PARTICIPANTS_PER_ROOM = 1000;
+
+async function cleanupChatHistory(): Promise<void> {
+  try {
+    await db.execute(sql`
+      WITH ranked_messages AS (
+        SELECT
+          ${chatMessages.id} AS id,
+          ROW_NUMBER() OVER (
+            PARTITION BY ${chatMessages.clubId}, ${chatMessages.channel}
+            ORDER BY ${chatMessages.createdAt} DESC
+          ) AS row_num
+        FROM ${chatMessages}
+      ),
+      to_delete AS (
+        SELECT id
+        FROM ranked_messages
+        WHERE row_num > ${MAX_MESSAGES_PER_CLUB}
+        LIMIT ${CHAT_HISTORY_CLEANUP_BATCH_SIZE}
+      )
+      DELETE FROM ${chatMessages}
+      WHERE ${chatMessages.id} IN (SELECT id FROM to_delete)
+    `);
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error({ error: errorMessage }, "[WS Chat] history cleanup error");
+  }
+}
 
 async function authenticateSocket(socket: Socket, next: (err?: Error) => void) {
   try {
@@ -137,27 +168,56 @@ function buildRoomName(clubId: string, channel?: string): string {
 // In-memory tracking of participants per room
 // roomName -> Map<userId, { userId, username }>
 const roomParticipants = new Map<string, Map<string, { userId: string; username: string }>>();
+const roomTouchedAt = new Map<string, number>();
 
-function addParticipant(room: string, userId: string, username: string) {
+function markRoomTouched(room: string): void {
+  roomTouchedAt.set(room, Date.now());
+}
+
+function evictOldestRoomsIfNeeded(): void {
+  if (roomParticipants.size < MAX_TRACKED_CHAT_ROOMS) {
+    return;
+  }
+
+  const roomsByAge = Array.from(roomTouchedAt.entries()).sort((a, b) => a[1] - b[1]);
+  const overflow = roomParticipants.size - MAX_TRACKED_CHAT_ROOMS + 1;
+  for (const [room] of roomsByAge.slice(0, overflow)) {
+    roomParticipants.delete(room);
+    roomTouchedAt.delete(room);
+  }
+}
+
+function addParticipant(room: string, userId: string, username: string): boolean {
   let map = roomParticipants.get(room);
   if (!map) {
+    evictOldestRoomsIfNeeded();
     map = new Map();
     roomParticipants.set(room, map);
   }
+  if (!map.has(userId) && map.size >= MAX_PARTICIPANTS_PER_ROOM) {
+    return false;
+  }
   map.set(userId, { userId, username });
+  markRoomTouched(room);
+  return true;
 }
 
 function removeParticipant(room: string, userId: string) {
   const map = roomParticipants.get(room);
   if (!map) return;
   map.delete(userId);
+  markRoomTouched(room);
   if (map.size === 0) {
     roomParticipants.delete(room);
+    roomTouchedAt.delete(room);
   }
 }
 
 function getParticipants(room: string): Array<{ userId: string; username: string }> {
   const map = roomParticipants.get(room);
+  if (map) {
+    markRoomTouched(room);
+  }
   return map ? Array.from(map.values()) : [];
 }
 
@@ -176,6 +236,11 @@ export function initializeChatWebSocket(httpServer: HttpServer) {
   });
 
   io.use(authenticateSocket);
+
+  const historyCleanupInterval = setInterval(() => {
+    void cleanupChatHistory();
+  }, CHAT_HISTORY_CLEANUP_INTERVAL_MS);
+  historyCleanupInterval.unref();
 
   io.on("connection", (socket: Socket) => {
     const authSocket = socket as AuthenticatedSocket;
@@ -197,7 +262,12 @@ export function initializeChatWebSocket(httpServer: HttpServer) {
 
         const room = buildRoomName(clubId, channel);
         await socket.join(room);
-        addParticipant(room, authSocket.userId, authSocket.username);
+        const added = addParticipant(room, authSocket.userId, authSocket.username);
+        if (!added) {
+          await socket.leave(room);
+          socket.emit("error", { message: "Room is at participant capacity" });
+          return;
+        }
 
         logger.info(`[WS Chat] ${authSocket.username} joined room ${room}`);
 
@@ -243,30 +313,6 @@ export function initializeChatWebSocket(httpServer: HttpServer) {
             attachments: attachments && attachments.length > 0 ? JSON.stringify(attachments) : null,
           })
           .returning();
-
-        // Ограничиваем историю до MAX_MESSAGES_PER_CLUB на уровне комнаты (clubId + channel)
-        try {
-          const oldMessages = await db
-            .select({ id: chatMessages.id })
-            .from(chatMessages)
-            .where(
-              and(
-                eq(chatMessages.clubId, clubId),
-                eq(chatMessages.channel, channel || DEFAULT_CHANNEL),
-              ),
-            )
-            .orderBy(desc(chatMessages.createdAt))
-            .offset(MAX_MESSAGES_PER_CLUB)
-            .limit(1000);
-
-          const oldIds = oldMessages.map((m: { id: string }) => m.id);
-          if (oldIds.length > 0) {
-            await db.delete(chatMessages).where(inArray(chatMessages.id, oldIds));
-          }
-        } catch (cleanupError) {
-          const errorMessage = cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
-          logger.error({ error: errorMessage }, "[WS Chat] history cleanup error");
-        }
 
         // Получаем displayName из профиля пользователя
         const userProfile = await db
@@ -480,12 +526,13 @@ export function initializeChatWebSocket(httpServer: HttpServer) {
       const room = buildRoomName(clubId, channel);
       socket.leave(room);
       removeParticipant(room, authSocket.userId);
+      const participants = getParticipants(room);
 
       io.to(room).emit("participants", {
         room,
         clubId,
         channel: channel || DEFAULT_CHANNEL,
-        participants: getParticipants(room),
+        participants,
       });
 
       logger.info(`[WS Chat] ${authSocket.username} left room ${room}`);
@@ -497,6 +544,13 @@ export function initializeChatWebSocket(httpServer: HttpServer) {
       for (const [room, participants] of roomParticipants.entries()) {
         if (participants.has(authSocket.userId)) {
           participants.delete(authSocket.userId);
+
+          if (participants.size === 0) {
+            roomParticipants.delete(room);
+            roomTouchedAt.delete(room);
+            continue;
+          }
+
           io.to(room).emit("participants", {
             room,
             participants: Array.from(participants.values()),
@@ -507,5 +561,10 @@ export function initializeChatWebSocket(httpServer: HttpServer) {
   });
 
   logger.info("[WS Chat] WebSocket server initialized at /ws/chat");
+
+  httpServer.once("close", () => {
+    clearInterval(historyCleanupInterval);
+  });
+
   return io;
 }

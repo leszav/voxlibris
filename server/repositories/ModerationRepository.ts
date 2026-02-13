@@ -1,5 +1,6 @@
 import { BaseRepository } from './BaseRepository.js';
-import { eq, desc } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
+import type { SQL } from 'drizzle-orm';
 import { 
   adminActions,
   moderationReports,
@@ -19,6 +20,25 @@ import {
  * Управляет логированием действий администраторов и отчетами модерации
  */
 export class ModerationRepository extends BaseRepository {
+  private buildModerationReportsConditions(filters?: {
+    status?: string;
+    type?: string;
+    assignedTo?: string;
+  }): SQL<unknown>[] {
+    const conditions: SQL<unknown>[] = [];
+
+    if (filters?.status) {
+      conditions.push(eq(moderationReports.status, filters.status as ModerationReport['status']));
+    }
+    if (filters?.type) {
+      conditions.push(eq(moderationReports.type, filters.type as ModerationReportType));
+    }
+    if (filters?.assignedTo) {
+      conditions.push(eq(moderationReports.assignedTo, filters.assignedTo));
+    }
+
+    return conditions;
+  }
   
   // ============================================================
   // Admin Actions - Логирование действий администраторов
@@ -144,24 +164,74 @@ export class ModerationRepository extends BaseRepository {
    */
   async getModerationReports(filters?: { status?: string; type?: string; assignedTo?: string }): Promise<ModerationReport[]> {
     try {
-      let query = this.db.select().from(moderationReports);
+      const conditions = this.buildModerationReportsConditions(filters);
+      const whereClause =
+        conditions.length === 0
+          ? undefined
+          : conditions.length === 1
+            ? conditions[0]
+            : (and(...conditions) as SQL<unknown>);
 
-      if (filters?.status) {
-        const statusValue = filters.status as ModerationReport['status'];
-        query = query.where(eq(moderationReports.status, statusValue)) as typeof query;
-      }
-      if (filters?.type) {
-        query = query.where(eq(moderationReports.type, filters.type as ModerationReportType)) as typeof query;
-      }
-      if (filters?.assignedTo) {
-        query = query.where(eq(moderationReports.assignedTo, filters.assignedTo)) as typeof query;
-      }
+      const baseQuery = this.db.select().from(moderationReports);
+      const result = whereClause
+        ? await baseQuery.where(whereClause).orderBy(desc(moderationReports.createdAt))
+        : await baseQuery.orderBy(desc(moderationReports.createdAt));
 
-      const result = await query.orderBy(desc(moderationReports.createdAt));
       return result;
     } catch (error) {
       this.logError('getModerationReports', error);
       throw new Error('Failed to get moderation reports');
+    }
+  }
+
+  async getModerationReportsPage(params: {
+    filters?: { status?: string; type?: string; assignedTo?: string };
+    page?: number;
+    limit?: number;
+  }): Promise<{ reports: ModerationReport[]; total: number }> {
+    try {
+      const page = Math.max(1, Math.floor(params.page || 1));
+      const limit = Math.min(100, Math.max(1, Math.floor(params.limit || 20)));
+      const offset = (page - 1) * limit;
+
+      const conditions = this.buildModerationReportsConditions(params.filters);
+      const whereClause =
+        conditions.length === 0
+          ? undefined
+          : conditions.length === 1
+            ? conditions[0]
+            : (and(...conditions) as SQL<unknown>);
+
+      const countQuery = this.db
+        .select({ count: sql<number>`COUNT(*)::int` })
+        .from(moderationReports);
+
+      const reportsQuery = this.db.select().from(moderationReports);
+
+      const [countRows, reports] = whereClause
+        ? await Promise.all([
+            countQuery.where(whereClause),
+            reportsQuery
+              .where(whereClause)
+              .orderBy(desc(moderationReports.createdAt))
+              .limit(limit)
+              .offset(offset),
+          ])
+        : await Promise.all([
+            countQuery,
+            reportsQuery
+              .orderBy(desc(moderationReports.createdAt))
+              .limit(limit)
+              .offset(offset),
+          ]);
+
+      return {
+        reports,
+        total: Number(countRows[0]?.count || 0),
+      };
+    } catch (error) {
+      this.logError('getModerationReportsPage', error);
+      throw new Error('Failed to get moderation reports page');
     }
   }
 

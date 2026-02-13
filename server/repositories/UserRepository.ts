@@ -1,5 +1,5 @@
 import { BaseRepository } from './BaseRepository.js';
-import { eq, and, desc } from 'drizzle-orm';
+import { eq, and, desc, sql } from 'drizzle-orm';
 import { users, refreshTokens, passwordResetTokens } from '../../shared/schema.js';
 import type {
   User,
@@ -609,8 +609,6 @@ export class UserRepository extends BaseRepository {
    */
   async getAllUsers(includeDeleted: boolean = false): Promise<User[]> {
     try {
-      const { sql } = await import('drizzle-orm');
-      
       const query = this.db.select().from(users);
 
       if (!includeDeleted) {
@@ -683,6 +681,36 @@ export class UserRepository extends BaseRepository {
       return result;
     } catch (error) {
       this.logError('getUsersByRole', error);
+      return [];
+    }
+  }
+
+  /**
+   * Поиск пользователей для автокомплита приглашений
+   */
+  async searchUsers(query: string, limit: number = 20): Promise<Array<Pick<User, 'id' | 'username' | 'email' | 'status'>>> {
+    this.validateRequired(query, 'query');
+
+    try {
+      const searchTerm = `%${query.toLowerCase()}%`;
+      const safeLimit = Math.min(Math.max(Math.floor(limit), 1), 50);
+
+      return await this.db
+        .select({
+          id: users.id,
+          username: users.username,
+          email: users.email,
+          status: users.status,
+        })
+        .from(users)
+        .where(and(
+          sql`${users.status} != 'deleted'`,
+          sql`(LOWER(${users.username}) LIKE ${searchTerm} OR LOWER(${users.email}) LIKE ${searchTerm})`
+        ))
+        .orderBy(users.username)
+        .limit(safeLimit);
+    } catch (error) {
+      this.logError('searchUsers', error);
       return [];
     }
   }

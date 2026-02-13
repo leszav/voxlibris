@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, type Request, type Response, type NextFunction } from 'express';
 import multer from 'multer';
 import { storage } from './repositories/index.js';
 import { BookFormat } from '../shared/schema.js';
@@ -13,23 +13,68 @@ import { logger } from './lib/logger.js';
 import { optimizeImage } from './image-optimizer.js';
 
 const router = Router();
-const upload = multer({ storage: multer.memoryStorage() });
+
+function parsePositiveInt(value: string | undefined, fallback: number): number {
+    const parsed = Number.parseInt(value || '', 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function sanitizeUploadFileName(fileName: string): string {
+    return fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+}
+
+const MAX_BOOK_UPLOAD_BYTES = parsePositiveInt(process.env.MAX_BOOK_UPLOAD_MB, 50) * 1024 * 1024;
+const MAX_ACTIVE_UPLOAD_SESSIONS = parsePositiveInt(process.env.MAX_ACTIVE_UPLOAD_SESSIONS, 200);
+const MAX_ACTIVE_UPLOAD_SESSIONS_PER_USER = parsePositiveInt(process.env.MAX_ACTIVE_UPLOAD_SESSIONS_PER_USER, 5);
+const UPLOAD_SESSION_TTL_MS = parsePositiveInt(process.env.UPLOAD_SESSION_TTL_MINUTES, 20) * 60 * 1000;
+const UPLOAD_SESSION_CLEANUP_INTERVAL_MS = parsePositiveInt(process.env.UPLOAD_SESSION_CLEANUP_INTERVAL_MINUTES, 5) * 60 * 1000;
+const MAX_METADATA_COVER_BYTES = parsePositiveInt(process.env.MAX_METADATA_COVER_MB, 1) * 1024 * 1024;
+
+const upload = multer({
+    storage: multer.memoryStorage(),
+    limits: {
+        fileSize: MAX_BOOK_UPLOAD_BYTES,
+        files: 1,
+        fields: 20,
+        fieldSize: 2 * 1024 * 1024,
+        parts: 25,
+    },
+});
 
 // In-memory session store
 interface UploadSession {
     userId: string;
     clubId: string;
-    fileBuffer: Buffer;
+    tempStorageKey: string;
+    fileSize: number;
     originalName: string;
     mimeType: string;
     parsedMetadata: UploadMetadata;
     createdAt: Date;
 }
 
-type UploadMetadata = Partial<BookMetadata> & {
+type UploadMetadata = Omit<Partial<BookMetadata>, 'coverImageData' | 'coverImageType'> & {
     coverImageData?: Buffer | string | null;
     coverImageType?: string | null;
 };
+
+function normalizeUploadMetadata(metadata: UploadMetadata): UploadMetadata {
+    const normalized: UploadMetadata = { ...metadata };
+
+    if (Buffer.isBuffer(metadata.coverImageData)) {
+        if (metadata.coverImageData.length > MAX_METADATA_COVER_BYTES) {
+            normalized.coverImageData = undefined;
+            normalized.coverImageType = undefined;
+            return normalized;
+        }
+
+        const coverType = metadata.coverImageType || 'image/jpeg';
+        normalized.coverImageData = `data:${coverType};base64,${metadata.coverImageData.toString('base64')}`;
+        normalized.coverImageType = coverType;
+    }
+
+    return normalized;
+}
 
 const uploadSessions = new Map<string, UploadSession>();
 
@@ -55,7 +100,18 @@ async function processCoverImage(
         }
     } else if (metadata.coverImageData === null) {
         coverBuffer = undefined;
-    } else if (session.parsedMetadata.coverImageData) {
+    } else if (typeof session.parsedMetadata.coverImageData === 'string') {
+        try {
+            const matches = session.parsedMetadata.coverImageData.match(/^data:([A-Za-z-+/]+);base64,(.+)$/);
+            if (matches?.length === 3) {
+                coverBuffer = Buffer.from(matches[2], 'base64');
+            } else {
+                coverBuffer = Buffer.from(session.parsedMetadata.coverImageData, 'base64');
+            }
+        } catch (e) {
+            console.warn('Failed to parse cached cover image', e);
+        }
+    } else if (Buffer.isBuffer(session.parsedMetadata.coverImageData)) {
         coverBuffer = session.parsedMetadata.coverImageData;
     }
 
@@ -104,14 +160,19 @@ async function encryptAndUploadBookFile(
 }
 
 // Clean up old sessions periodically
-setInterval(() => {
+setInterval(async () => {
     const now = new Date();
     for (const [id, session] of Array.from(uploadSessions.entries())) {
-        if (now.getTime() - session.createdAt.getTime() > 3600000) { // 1 hour
+        if (now.getTime() - session.createdAt.getTime() > UPLOAD_SESSION_TTL_MS) {
+            try {
+                await fileStorage.deleteFile(session.tempStorageKey);
+            } catch (error) {
+                logger.warn({ error, key: session.tempStorageKey }, '[ClubBooks] Failed to delete expired temp upload file');
+            }
             uploadSessions.delete(id);
         }
     }
-}, 3600000);
+}, UPLOAD_SESSION_CLEANUP_INTERVAL_MS);
 
 // 1. Initiate Club Upload
 router.post('/clubs/:clubId/books/upload', jwtAuth, requireActiveUser, upload.single('file'), async (req, res) => {
@@ -121,6 +182,18 @@ router.post('/clubs/:clubId/books/upload', jwtAuth, requireActiveUser, upload.si
 
         const { clubId } = req.params;
 
+        if (uploadSessions.size >= MAX_ACTIVE_UPLOAD_SESSIONS) {
+            return res.status(429).json({ error: 'Too many active upload sessions. Please try again later.' });
+        }
+
+        const activeSessionsForUser = Array.from(uploadSessions.values()).filter(
+            (session) => session.userId === req.user?.id,
+        ).length;
+
+        if (activeSessionsForUser >= MAX_ACTIVE_UPLOAD_SESSIONS_PER_USER) {
+            return res.status(429).json({ error: 'Too many active uploads for this user. Complete or wait for previous uploads to expire.' });
+        }
+
         // Check if user is owner of the club (Moderator rights)
         const club = await storage.getClub(clubId);
         if (!club) return res.status(404).json({ error: 'Club not found' });
@@ -129,9 +202,9 @@ router.post('/clubs/:clubId/books/upload', jwtAuth, requireActiveUser, upload.si
             return res.status(403).json({ error: 'Only club owner can upload books' });
         }
 
-        const fileType = BookParserFactory.detectFileType(req.file.originalname);
+        const fileType = await BookParserFactory.detectFileTypeFromBuffer(req.file.buffer, req.file.originalname);
         if (!fileType) {
-            return res.status(400).json({ error: 'Unsupported file type. Only EPUB and FB2 are supported.' });
+            return res.status(400).json({ error: 'Unsupported or invalid file type. Only valid EPUB and FB2 are supported.' });
         }
 
         const parser = BookParserFactory.createParser(fileType);
@@ -143,6 +216,8 @@ router.post('/clubs/:clubId/books/upload', jwtAuth, requireActiveUser, upload.si
         } catch (e) {
             console.warn('Failed to parse metadata', e);
         }
+
+        metadata = normalizeUploadMetadata(metadata);
 
         // Проверка дубликатов в клубной библиотеке
         const title = metadata.title || req.file.originalname;
@@ -156,10 +231,15 @@ router.post('/clubs/:clubId/books/upload', jwtAuth, requireActiveUser, upload.si
         );
 
         const sessionId = crypto.randomUUID();
+        const safeOriginalName = sanitizeUploadFileName(req.file.originalname);
+        const tempStorageKey = `temp/club-uploads/${sessionId}/${safeOriginalName}`;
+        await fileStorage.uploadFile(req.file.buffer, tempStorageKey, req.file.mimetype);
+
         uploadSessions.set(sessionId, {
             userId: req.user.id,
             clubId,
-            fileBuffer: req.file.buffer,
+            tempStorageKey,
+            fileSize: req.file.buffer.length,
             originalName: req.file.originalname,
             mimeType: req.file.mimetype,
             parsedMetadata: metadata,
@@ -168,10 +248,11 @@ router.post('/clubs/:clubId/books/upload', jwtAuth, requireActiveUser, upload.si
 
         // Convert cover image buffer to base64 string for preview
         let coverPreview: string | undefined;
-        if (metadata.coverImageData && Buffer.isBuffer(metadata.coverImageData)) {
-            const buffer = metadata.coverImageData;
+        if (typeof metadata.coverImageData === 'string') {
+            coverPreview = metadata.coverImageData;
+        } else if (metadata.coverImageData && Buffer.isBuffer(metadata.coverImageData)) {
             const type = metadata.coverImageType || 'image/jpeg';
-            coverPreview = `data:${type};base64,${buffer.toString('base64')}`;
+            coverPreview = `data:${type};base64,${metadata.coverImageData.toString('base64')}`;
         }
 
         // Remove raw buffer from metadata
@@ -212,16 +293,17 @@ router.post('/clubs/:clubId/books/upload/:sessionId/confirm', jwtAuth, requireAc
         if (session.userId !== req.user?.id) return res.status(403).json({ error: 'Forbidden' });
         if (session.clubId !== clubId) return res.status(400).json({ error: 'Session mismatch' });
 
-        const fileHash = crypto.createHash('sha256').update(session.fileBuffer).digest('hex');
-        const fileType = BookParserFactory.detectFileType(session.originalName);
+        const fileBuffer = await fileStorage.getFile(session.tempStorageKey);
+        const fileHash = crypto.createHash('sha256').update(fileBuffer).digest('hex');
+        const fileType = await BookParserFactory.detectFileTypeFromBuffer(fileBuffer, session.originalName);
         if (!fileType) {
-            return res.status(400).json({ error: 'Invalid file type' });
+            return res.status(400).json({ error: 'Invalid or unsupported file type' });
         }
         const format = fileType.toUpperCase() as BookFormat;
 
         // Encrypt and upload book file
         const { storagePath, encryptedKey } = await encryptAndUploadBookFile(
-            session.fileBuffer,
+            fileBuffer,
             clubId,
             sessionId
         );
@@ -237,7 +319,7 @@ router.post('/clubs/:clubId/books/upload/:sessionId/confirm', jwtAuth, requireAc
             description: metadata.description,
             format: format,
             fileHash,
-            fileSizeBytes: session.fileBuffer.length,
+            fileSizeBytes: session.fileSize,
             language: metadata.language,
             publicationYear: metadata.publicationYear ? Number.parseInt(metadata.publicationYear) : undefined,
             genre: metadata.genre,
@@ -248,6 +330,11 @@ router.post('/clubs/:clubId/books/upload/:sessionId/confirm', jwtAuth, requireAc
         });
 
         await storage.updateClub(clubId, { bookId: book.id });
+        try {
+            await fileStorage.deleteFile(session.tempStorageKey);
+        } catch (error) {
+            logger.warn({ error, key: session.tempStorageKey }, '[ClubBooks] Failed to delete temp upload file after confirm');
+        }
         uploadSessions.delete(sessionId);
         res.json(book);
     } catch (error) {
@@ -385,6 +472,16 @@ router.patch('/clubs/:clubId/books/:bookId', jwtAuth, requireActiveUser, async (
         console.error('Update club book error:', error);
         res.status(500).json({ error: 'Internal server error' });
     }
+});
+
+router.use((err: unknown, _req: Request, res: Response, next: NextFunction) => {
+    if (err instanceof multer.MulterError) {
+        if (err.code === 'LIMIT_FILE_SIZE') {
+            return res.status(413).json({ error: `File is too large. Maximum allowed size is ${Math.round(MAX_BOOK_UPLOAD_BYTES / 1024 / 1024)} MB.` });
+        }
+        return res.status(400).json({ error: err.message });
+    }
+    return next(err);
 });
 
 export default router;

@@ -5,6 +5,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { logger } from '../lib/logger.js';
+import { resolveTrustedBaseUrl } from '../lib/public-base-url.js';
 
 /**
  * Email Service для VoxLibris
@@ -230,8 +231,7 @@ class EmailService {
     try {
       const template = await this.loadTemplate('club-invitation');
       
-      // Используем переданный baseUrl или fallback к CLIENT_URL
-      const baseUrl = params.baseUrl || process.env.CLIENT_URL || 'http://localhost:3000';
+      const baseUrl = await resolveTrustedBaseUrl(params.baseUrl);
       const inviteUrl = `${baseUrl}/invite/${params.inviteToken}`;
       const expiresIn = Math.ceil((params.expiresAt.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
 
@@ -267,8 +267,7 @@ class EmailService {
     try {
       const template = await this.loadTemplate('registration-confirmation');
       
-      // Используем переданный baseUrl или fallback к CLIENT_URL
-      const baseUrl = params.baseUrl || process.env.CLIENT_URL || 'http://localhost:3000';
+      const baseUrl = await resolveTrustedBaseUrl(params.baseUrl);
       const confirmUrl = `${baseUrl}/confirm-email/${params.confirmationToken}`;
 
       const html = this.replaceVariables(template, {
@@ -301,8 +300,7 @@ class EmailService {
     try {
       const template = await this.loadTemplate('password-reset');
 
-      // Используем переданный baseUrl или fallback к CLIENT_URL
-      const baseUrl = params.baseUrl || process.env.CLIENT_URL || 'http://localhost:3000';
+      const baseUrl = await resolveTrustedBaseUrl(params.baseUrl);
       const resetUrl = `${baseUrl}/auth/reset-password/${params.resetToken}`;
 
       const html = this.replaceVariables(template, {
@@ -335,8 +333,7 @@ class EmailService {
     try {
       const template = await this.loadTemplate('invitation-accepted');
 
-      // Используем переданный baseUrl или fallback к CLIENT_URL
-      const baseUrl = params.baseUrl || process.env.CLIENT_URL || 'http://localhost:3000';
+      const baseUrl = await resolveTrustedBaseUrl(params.baseUrl);
       const clubUrl = `${baseUrl}/clubs`;
 
       const html = this.replaceVariables(template, {
@@ -375,7 +372,7 @@ class EmailService {
     try {
       const template = await this.loadTemplate('club-moderation-notification');
       
-      const baseUrl = params.baseUrl || process.env.CLIENT_URL || 'http://localhost:3000';
+      const baseUrl = await resolveTrustedBaseUrl(params.baseUrl);
       const moderationUrl = `${baseUrl}/admin/clubs?status=pending`;
       
       const html = this.replaceVariables(template, {

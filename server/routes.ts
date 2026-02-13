@@ -15,6 +15,7 @@ import sessionAnalyticsRouter from "./routes/session-analytics.js";
 import readerQualityRouter from "./routes/reader-quality.js";
 import { jwtAuth, requireActiveUser } from "./jwt-middleware.js";
 import { logger } from "./lib/logger.js";
+import { getPublicBaseUrl } from "./lib/public-base-url.js";
 import {
   insertClubSchema,
   insertBookSchema,
@@ -283,7 +284,7 @@ export async function registerRoutes(
       // Отправляем уведомление владельцу клуба
       const inviter = await storage.getUser(invitation.invitedBy);
       if (inviter) {
-        const baseUrl = `${req.protocol}://${req.get('host')}`;
+        const baseUrl = await getPublicBaseUrl();
         await emailService.sendInvitationAccepted({
           email: inviter.username, // assuming username is email
           clubName: club.title,
@@ -450,10 +451,8 @@ export async function registerRoutes(
         return res.status(401).json({ message: "Пользователь не аутентифицирован" });
       }
       const userId = user.id;
-      const books = await storage.getBooks();
-      // Фильтруем книги пользователя
-      const filteredBooks = books.filter(book => book.uploadedBy === userId);
-      res.json({ books: filteredBooks });
+      const books = await storage.getBooksByUser(userId);
+      res.json({ books });
     } catch (error) {
       console.error("Get user books error:", error);
       res.status(500).json({ message: "Внутренняя ошибка сервера" });
@@ -1121,22 +1120,7 @@ export async function registerRoutes(
         return res.json([]);
       }
 
-      const allUsers = await storage.getAllUsers();
-      const searchLower = q.toLowerCase();
-      
-      // Ищем по username или email
-      const results = allUsers
-        .filter(user => 
-          user.username.toLowerCase().includes(searchLower) ||
-          user.email.toLowerCase().includes(searchLower)
-        )
-        .slice(0, 20)
-        .map(user => ({
-          id: user.id,
-          username: user.username,
-          email: user.email,
-          status: user.status,
-        }));
+      const results = await storage.searchUsers(q, 20);
 
       res.json(results);
     } catch (error) {

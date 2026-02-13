@@ -60,6 +60,10 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
   const [lastSyncTime, setLastSyncTime] = useState<number | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
   const progressTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const chapterScrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const bookmarkScrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const restorePositionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const syncErrorTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -217,7 +221,10 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
       }
       
       setCurrentChapter(newChapter);
-      setTimeout(() => {
+      if (chapterScrollTimeoutRef.current) {
+        clearTimeout(chapterScrollTimeoutRef.current);
+      }
+      chapterScrollTimeoutRef.current = setTimeout(() => {
         if (scrollContainerRef.current) {
           scrollContainerRef.current.scrollTop = 0;
         }
@@ -231,7 +238,10 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
       const position = JSON.parse(bookmark.position);
       if (position.chapter) {
         setCurrentChapter(position.chapter);
-        setTimeout(() => {
+        if (bookmarkScrollTimeoutRef.current) {
+          clearTimeout(bookmarkScrollTimeoutRef.current);
+        }
+        bookmarkScrollTimeoutRef.current = setTimeout(() => {
           if (scrollContainerRef.current && position.scrollTop) {
             scrollContainerRef.current.scrollTop = position.scrollTop;
           }
@@ -313,6 +323,29 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
     },
   ]);
 
+  useEffect(() => {
+    return () => {
+      if (progressTimeoutRef.current) {
+        clearTimeout(progressTimeoutRef.current);
+      }
+      if (chapterScrollTimeoutRef.current) {
+        clearTimeout(chapterScrollTimeoutRef.current);
+      }
+      if (bookmarkScrollTimeoutRef.current) {
+        clearTimeout(bookmarkScrollTimeoutRef.current);
+      }
+      if (restorePositionTimeoutRef.current) {
+        clearTimeout(restorePositionTimeoutRef.current);
+      }
+      if (syncErrorTimeoutRef.current) {
+        clearTimeout(syncErrorTimeoutRef.current);
+      }
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current);
+      }
+    };
+  }, []);
+
   // Восстановление сохраненной позиции
   useEffect(() => {
     if (!progressLoading && progress && currentChapter === null) {
@@ -320,7 +353,10 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
       setCurrentChapter(savedChapter);
       
       // Восстанавливаем позицию в главе после загрузки контента
-      setTimeout(() => {
+      if (restorePositionTimeoutRef.current) {
+        clearTimeout(restorePositionTimeoutRef.current);
+      }
+      restorePositionTimeoutRef.current = setTimeout(() => {
         if (progress.userProgress?.currentPosition) {
           try {
             const position = JSON.parse(progress.userProgress.currentPosition);
@@ -337,6 +373,12 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
     } else if (!progressLoading && !progress && currentChapter === null) {
       setCurrentChapter(1);
     }
+
+    return () => {
+      if (restorePositionTimeoutRef.current) {
+        clearTimeout(restorePositionTimeoutRef.current);
+      }
+    };
   }, [progress, progressLoading, currentChapter]);
 
   // Автоскрытие панели прогресса
@@ -395,7 +437,10 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
       onError: (error) => {
         setIsSyncing(false);
         setSyncError(error instanceof Error ? error.message : "Ошибка сохранения прогресса");
-        setTimeout(() => setSyncError(null), 3000);
+        if (syncErrorTimeoutRef.current) {
+          clearTimeout(syncErrorTimeoutRef.current);
+        }
+        syncErrorTimeoutRef.current = setTimeout(() => setSyncError(null), 3000);
       }
     });
   };
@@ -661,6 +706,9 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
             }
           }}
           onMouseLeave={() => {
+            if (progressTimeoutRef.current) {
+              clearTimeout(progressTimeoutRef.current);
+            }
             progressTimeoutRef.current = setTimeout(() => {
               setProgressVisible(false);
             }, 2000);

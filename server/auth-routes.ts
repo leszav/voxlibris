@@ -4,6 +4,7 @@ import cookieParser from "cookie-parser";
 import { authService } from "./auth-service.js";
 import { storage } from "./repositories/index.js";
 import { jwtAuth } from "./jwt-middleware.js";
+import { getPublicBaseUrl } from "./lib/public-base-url.js";
 import { insertUserSchema } from "../shared/schema.js";
 
 // Password validation schema
@@ -122,8 +123,8 @@ export function setupAuthRoutes(app: Express): void {
 
       const { invitedBy, invitedToClub } = inviteValidation;
 
-      // Извлекаем базовый URL из запроса
-      const baseUrl = `${req.protocol}://${req.get('host')}`;
+      // Используем только доверенный URL приложения из конфигурации
+      const baseUrl = await getPublicBaseUrl();
 
       const authResult = await authService.register(
         username,
@@ -160,7 +161,6 @@ export function setupAuthRoutes(app: Express): void {
       res.status(201).json({
         message: "Пользователь успешно зарегистрирован",
         user: authResult.user,
-        accessToken: authResult.tokens.accessToken,
         sessionType: authResult.sessionType
       });
     } catch (error) {
@@ -222,7 +222,6 @@ export function setupAuthRoutes(app: Express): void {
       res.json({
         message: "Успешный вход в систему",
         user: authResult.user,
-        accessToken: authResult.tokens.accessToken,
         sessionType: authResult.sessionType
       });
     } catch (error) {
@@ -258,7 +257,7 @@ export function setupAuthRoutes(app: Express): void {
       const { email, username } = validation.data;
       const emailOrUsername = email || username;
 
-      const baseUrl = `${req.protocol}://${req.get('host')}`;
+      const baseUrl = await getPublicBaseUrl();
       await authService.requestPasswordReset(
         emailOrUsername!,
         baseUrl,
@@ -351,7 +350,8 @@ export function setupAuthRoutes(app: Express): void {
       });
 
       res.json({
-        accessToken: result.newTokens.accessToken
+        success: true,
+        sessionType: result.sessionType
       });
     } catch (error) {
       console.error("Refresh token error:", error);

@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, type Request, type Response, type NextFunction } from 'express';
 import multer from 'multer';
 import { storage } from './repositories/index.js';
 import { BookFormat } from '../shared/schema.js';
@@ -13,7 +13,32 @@ import { logger } from './lib/logger.js';
 import { optimizeImage } from './image-optimizer.js';
 
 const router = Router();
-const upload = multer({ storage: multer.memoryStorage() });
+
+function parsePositiveInt(value: string | undefined, fallback: number): number {
+    const parsed = Number.parseInt(value || '', 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function sanitizeUploadFileName(fileName: string): string {
+    return fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+}
+
+const MAX_BOOK_UPLOAD_BYTES = parsePositiveInt(process.env.MAX_BOOK_UPLOAD_MB, 50) * 1024 * 1024;
+const MAX_ACTIVE_UPLOAD_SESSIONS = parsePositiveInt(process.env.MAX_ACTIVE_UPLOAD_SESSIONS, 200);
+const MAX_ACTIVE_UPLOAD_SESSIONS_PER_USER = parsePositiveInt(process.env.MAX_ACTIVE_UPLOAD_SESSIONS_PER_USER, 5);
+const UPLOAD_SESSION_TTL_MS = parsePositiveInt(process.env.UPLOAD_SESSION_TTL_MINUTES, 20) * 60 * 1000;
+const UPLOAD_SESSION_CLEANUP_INTERVAL_MS = parsePositiveInt(process.env.UPLOAD_SESSION_CLEANUP_INTERVAL_MINUTES, 5) * 60 * 1000;
+const MAX_METADATA_COVER_BYTES = parsePositiveInt(process.env.MAX_METADATA_COVER_MB, 1) * 1024 * 1024;
+const upload = multer({
+    storage: multer.memoryStorage(),
+    limits: {
+        fileSize: MAX_BOOK_UPLOAD_BYTES,
+        files: 1,
+        fields: 20,
+        fieldSize: 2 * 1024 * 1024,
+        parts: 25,
+    },
+});
 
 // Upload session metadata (file buffer stored in MinIO temp storage, not in RAM)
 interface UploadSession {
@@ -26,10 +51,28 @@ interface UploadSession {
     createdAt: Date;
 }
 
-type UploadMetadata = Partial<BookMetadata> & {
+type UploadMetadata = Omit<Partial<BookMetadata>, 'coverImageData' | 'coverImageType'> & {
     coverImageData?: Buffer | string | null;
     coverImageType?: string | null;
 };
+
+function normalizeUploadMetadata(metadata: UploadMetadata): UploadMetadata {
+    const normalized: UploadMetadata = { ...metadata };
+
+    if (Buffer.isBuffer(metadata.coverImageData)) {
+        if (metadata.coverImageData.length > MAX_METADATA_COVER_BYTES) {
+            normalized.coverImageData = undefined;
+            normalized.coverImageType = undefined;
+            return normalized;
+        }
+
+        const coverType = metadata.coverImageType || 'image/jpeg';
+        normalized.coverImageData = `data:${coverType};base64,${metadata.coverImageData.toString('base64')}`;
+        normalized.coverImageType = coverType;
+    }
+
+    return normalized;
+}
 
 // Cache for parsed books (to avoid re-parsing on every request)
 interface ParsedBookCache {
@@ -71,7 +114,7 @@ setInterval(async () => {
     
     // Clean up old upload sessions + their temp files in MinIO
     for (const [id, session] of Array.from(uploadSessions.entries())) {
-        if (now.getTime() - session.createdAt.getTime() > 3600000) { // 1 hour
+        if (now.getTime() - session.createdAt.getTime() > UPLOAD_SESSION_TTL_MS) {
             try {
                 await fileStorage.deleteFile(session.tempStorageKey);
             } catch (e) {
@@ -89,7 +132,7 @@ setInterval(async () => {
             logger.info({ bookId }, '[Cache] Removed expired cache');
         }
     }
-}, 3600000);
+}, UPLOAD_SESSION_CLEANUP_INTERVAL_MS);
 
 // 1. Initiate Upload
 router.post('/upload', jwtAuth, requireActiveUser, upload.single('file'), async (req, res) => {
@@ -97,9 +140,21 @@ router.post('/upload', jwtAuth, requireActiveUser, upload.single('file'), async 
         if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
         if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
 
-        const fileType = BookParserFactory.detectFileType(req.file.originalname);
+        if (uploadSessions.size >= MAX_ACTIVE_UPLOAD_SESSIONS) {
+            return res.status(429).json({ error: 'Too many active upload sessions. Please try again later.' });
+        }
+
+        const activeSessionsForUser = Array.from(uploadSessions.values()).filter(
+            (session) => session.userId === req.user?.id,
+        ).length;
+
+        if (activeSessionsForUser >= MAX_ACTIVE_UPLOAD_SESSIONS_PER_USER) {
+            return res.status(429).json({ error: 'Too many active uploads for this user. Complete or wait for previous uploads to expire.' });
+        }
+
+        const fileType = await BookParserFactory.detectFileTypeFromBuffer(req.file.buffer, req.file.originalname);
         if (!fileType) {
-            return res.status(400).json({ error: 'Unsupported file type. Only EPUB and FB2 are supported.' });
+            return res.status(400).json({ error: 'Unsupported or invalid file type. Only valid EPUB and FB2 are supported.' });
         }
 
         const parser = BookParserFactory.createParser(fileType);
@@ -111,6 +166,8 @@ router.post('/upload', jwtAuth, requireActiveUser, upload.single('file'), async 
         } catch (e) {
             console.warn('Failed to parse book', e);
         }
+
+        metadata = normalizeUploadMetadata(metadata);
 
         // Проверка дубликатов
         const title = metadata.title || req.file.originalname;
@@ -126,7 +183,8 @@ router.post('/upload', jwtAuth, requireActiveUser, upload.single('file'), async 
         const sessionId = crypto.randomUUID();
 
         // Store raw file in MinIO temp storage instead of RAM
-        const tempKey = `temp/uploads/${sessionId}/${req.file.originalname}`;
+        const safeOriginalName = sanitizeUploadFileName(req.file.originalname);
+        const tempKey = `temp/uploads/${sessionId}/${safeOriginalName}`;
         await fileStorage.uploadFile(req.file.buffer, tempKey, req.file.mimetype);
 
         uploadSessions.set(sessionId, {
@@ -141,10 +199,11 @@ router.post('/upload', jwtAuth, requireActiveUser, upload.single('file'), async 
 
         // Convert cover image buffer to base64 string for preview
         let coverPreview: string | undefined;
-        if (metadata.coverImageData && Buffer.isBuffer(metadata.coverImageData)) {
-            const buffer = metadata.coverImageData;
+        if (typeof metadata.coverImageData === 'string') {
+            coverPreview = metadata.coverImageData;
+        } else if (metadata.coverImageData && Buffer.isBuffer(metadata.coverImageData)) {
             const type = metadata.coverImageType || 'image/jpeg';
-            coverPreview = `data:${type};base64,${buffer.toString('base64')}`;
+            coverPreview = `data:${type};base64,${metadata.coverImageData.toString('base64')}`;
         }
 
         // Remove raw buffer from metadata to avoid huge JSON and client issues
@@ -196,7 +255,18 @@ async function processPersonalCoverImage(
         }
     } else if (metadata.coverImageData === null) {
         coverBuffer = undefined;
-    } else if (session.parsedMetadata.coverImageData) {
+    } else if (typeof session.parsedMetadata.coverImageData === 'string') {
+        try {
+            const matches = session.parsedMetadata.coverImageData.match(/^data:([A-Za-z+/-]+);base64,(.+)$/);
+            if (matches?.length === 3) {
+                coverBuffer = Buffer.from(matches[2], 'base64');
+            } else {
+                coverBuffer = Buffer.from(session.parsedMetadata.coverImageData, 'base64');
+            }
+        } catch (e) {
+            console.warn('[PersonalBooks] Failed to parse cached cover image', e);
+        }
+    } else if (Buffer.isBuffer(session.parsedMetadata.coverImageData)) {
         coverBuffer = session.parsedMetadata.coverImageData;
     }
 
@@ -253,15 +323,14 @@ router.post('/upload/:sessionId/confirm', jwtAuth, requireActiveUser, async (req
         if (!session) return res.status(404).json({ error: 'Session not found or expired' });
         if (session.userId !== req.user?.id) return res.status(403).json({ error: 'Forbidden' });
 
-        // Determine format
-        const fileType = BookParserFactory.detectFileType(session.originalName);
-        if (!fileType) {
-            return res.status(400).json({ error: 'Invalid file type' });
-        }
-        const format = fileType.toUpperCase() as BookFormat;
-
         // Download raw file from MinIO temp storage
         const fileBuffer = await fileStorage.getFile(session.tempStorageKey);
+
+        const fileType = await BookParserFactory.detectFileTypeFromBuffer(fileBuffer, session.originalName);
+        if (!fileType) {
+            return res.status(400).json({ error: 'Invalid or unsupported file type' });
+        }
+        const format = fileType.toUpperCase() as BookFormat;
 
         // Calculate hash and encrypt
         const fileHash = crypto.createHash('sha256').update(fileBuffer).digest('hex');
@@ -516,6 +585,16 @@ router.get('/:id/content', jwtAuth, async (req, res) => {
         console.error('Get book content error:', error);
         res.status(500).json({ error: 'Failed to get book content' });
     }
+});
+
+router.use((err: unknown, _req: Request, res: Response, next: NextFunction) => {
+    if (err instanceof multer.MulterError) {
+        if (err.code === 'LIMIT_FILE_SIZE') {
+            return res.status(413).json({ error: `File is too large. Maximum allowed size is ${Math.round(MAX_BOOK_UPLOAD_BYTES / 1024 / 1024)} MB.` });
+        }
+        return res.status(400).json({ error: err.message });
+    }
+    return next(err);
 });
 
 export default router;

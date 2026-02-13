@@ -1,5 +1,6 @@
 import { BaseRepository } from './BaseRepository.js';
 import { eq, asc } from 'drizzle-orm';
+import { CryptoService } from '../crypto-service.js';
 import { 
   systemSettings,
   settings,
@@ -13,6 +14,79 @@ import {
  * Управляет конфигурацией приложения и системными параметрами
  */
 export class SystemRepository extends BaseRepository {
+  private readonly encryptedValuePrefix = 'enc:v1:';
+
+  private isLegacyPlaintextEncryptedSetting(setting: Setting): boolean {
+    return Boolean(
+      setting.isEncrypted &&
+      setting.value &&
+      !setting.value.startsWith(this.encryptedValuePrefix),
+    );
+  }
+
+  private async migrateLegacyEncryptedSetting(setting: Setting): Promise<Setting> {
+    const encryptedValue = this.encryptSensitiveSettingValue(setting.value ?? null);
+    if (!encryptedValue) {
+      return setting;
+    }
+
+    const result = await this.db
+      .update(settings)
+      .set({
+        value: encryptedValue,
+        updatedAt: new Date(),
+      })
+      .where(eq(settings.key, setting.key))
+      .returning();
+
+    return result[0] ?? {
+      ...setting,
+      value: encryptedValue,
+    };
+  }
+
+  private encryptSensitiveSettingValue(value: string | null | undefined): string | null {
+    if (value === null || value === undefined) {
+      return null;
+    }
+
+    if (value === '' || value.startsWith(this.encryptedValuePrefix)) {
+      return value;
+    }
+
+    const encrypted = CryptoService.encryptKey(Buffer.from(value, 'utf8'));
+    return `${this.encryptedValuePrefix}${encrypted}`;
+  }
+
+  private decryptSensitiveSettingValue(value: string | null | undefined): string | null {
+    if (value === null || value === undefined || value === '') {
+      return null;
+    }
+
+    if (!value.startsWith(this.encryptedValuePrefix)) {
+      // Backward compatibility for legacy plaintext values.
+      return value;
+    }
+
+    try {
+      const payload = value.slice(this.encryptedValuePrefix.length);
+      return CryptoService.decryptKey(payload).toString('utf8');
+    } catch (error) {
+      this.logError('decryptSensitiveSettingValue', error);
+      throw new Error('Failed to decrypt encrypted setting value');
+    }
+  }
+
+  private normalizeSettingForRead(setting: Setting): Setting {
+    if (!setting.isEncrypted) {
+      return setting;
+    }
+
+    return {
+      ...setting,
+      value: this.decryptSensitiveSettingValue(setting.value ?? null),
+    };
+  }
   
   // ============================================================
   // System Settings - Системные настройки
@@ -110,7 +184,16 @@ export class SystemRepository extends BaseRepository {
         .where(eq(settings.key, key))
         .limit(1);
       
-      return this.getFirstResult(result);
+      let setting = this.getFirstResult(result);
+      if (!setting) {
+        return undefined;
+      }
+
+      if (this.isLegacyPlaintextEncryptedSetting(setting)) {
+        setting = await this.migrateLegacyEncryptedSetting(setting);
+      }
+
+      return this.normalizeSettingForRead(setting);
     } catch (error) {
       this.logError('getSetting', error);
       throw new Error('Failed to get setting');
@@ -127,8 +210,18 @@ export class SystemRepository extends BaseRepository {
         .from(settings)
         .where(eq(settings.category, category))
         .orderBy(asc(settings.key));
-      
-      return result;
+
+      const normalizedSettings: Setting[] = [];
+
+      for (const originalSetting of result) {
+        let setting = originalSetting;
+        if (this.isLegacyPlaintextEncryptedSetting(setting)) {
+          setting = await this.migrateLegacyEncryptedSetting(setting);
+        }
+        normalizedSettings.push(this.normalizeSettingForRead(setting));
+      }
+
+      return normalizedSettings;
     } catch (error) {
       this.logError('getSettingsByCategory', error);
       throw new Error('Failed to get settings by category');
@@ -140,6 +233,10 @@ export class SystemRepository extends BaseRepository {
    */
   async setSetting(setting: InsertSetting & { updatedBy: string }): Promise<Setting> {
     try {
+      const normalizedValue = setting.isEncrypted
+        ? this.encryptSensitiveSettingValue(setting.value ?? null)
+        : (setting.value ?? null);
+
       // Проверяем существование настройки
       const existing = await this.getSetting(setting.key);
       
@@ -148,7 +245,7 @@ export class SystemRepository extends BaseRepository {
         const result = await this.db
           .update(settings)
           .set({
-            value: setting.value,
+            value: normalizedValue,
             description: setting.description,
             isEncrypted: setting.isEncrypted,
             updatedBy: setting.updatedBy,
@@ -157,14 +254,14 @@ export class SystemRepository extends BaseRepository {
           .where(eq(settings.key, setting.key))
           .returning();
         
-        return result[0];
+        return this.normalizeSettingForRead(result[0]);
       } else {
         // Создаем новую
         const result = await this.db
           .insert(settings)
           .values({
             key: setting.key,
-            value: setting.value,
+            value: normalizedValue,
             category: setting.category,
             description: setting.description,
             isEncrypted: setting.isEncrypted || false,
@@ -172,7 +269,7 @@ export class SystemRepository extends BaseRepository {
           })
           .returning();
         
-        return result[0];
+        return this.normalizeSettingForRead(result[0]);
       }
     } catch (error) {
       this.logError('setSetting', error);

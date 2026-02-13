@@ -2,7 +2,7 @@ import express from 'express';
 import { jwtAuth } from './jwt-middleware.js';
 import { db } from './db.js';
 import { bookReadingStatus, userReadingGoals, personalBooks, clubBooks } from '../shared/schema.js';
-import { eq, and, or, sql, isNull, gte, lte } from 'drizzle-orm';
+import { eq, and, or, sql, isNull, gte, lte, inArray } from 'drizzle-orm';
 import { logger } from './lib/logger.js';
 
 const router = express.Router();
@@ -67,8 +67,6 @@ router.get('/', jwtAuth, async (req, res) => {
 
     const { status, bookType } = req.query;
 
-    logger.info(`[ReadingStatus Debug] User ${userId} requesting books with status=${JSON.stringify(status)}, bookType=${JSON.stringify(bookType)}`);
-
     let conditions = [eq(bookReadingStatus.userId, userId)];
 
     // Фильтр по статусу
@@ -86,37 +84,43 @@ router.get('/', jwtAuth, async (req, res) => {
       .from(bookReadingStatus)
       .where(and(...conditions));
 
-    logger.info(`[ReadingStatus Debug] Found ${statuses.length} records`);
+    const personalBookIds = statuses
+      .filter((item) => item.bookType === 'personal')
+      .map((item) => item.bookId);
+    const clubBookIds = statuses
+      .filter((item) => item.bookType === 'club')
+      .map((item) => item.bookId);
 
-    // Обогащаем данными книг
-    const enrichedStatuses = await Promise.all(
-      statuses.map(async (status) => {
-        let bookInfo = null;
+    const personalBookMap = new Map<string, typeof personalBooks.$inferSelect>();
+    const clubBookMap = new Map<string, typeof clubBooks.$inferSelect>();
 
-        if (status.bookType === 'personal') {
-          const [book] = await db
-            .select()
-            .from(personalBooks)
-            .where(eq(personalBooks.id, status.bookId))
-            .limit(1);
-          bookInfo = book;
-        } else if (status.bookType === 'club') {
-          const [book] = await db
-            .select()
-            .from(clubBooks)
-            .where(eq(clubBooks.id, status.bookId))
-            .limit(1);
-          bookInfo = book;
-        }
+    if (personalBookIds.length > 0) {
+      const personalRows = await db
+        .select()
+        .from(personalBooks)
+        .where(inArray(personalBooks.id, personalBookIds));
+      for (const book of personalRows) {
+        personalBookMap.set(book.id, book);
+      }
+    }
 
-        return {
-          ...status,
-          book: bookInfo,
-        };
-      })
-    );
+    if (clubBookIds.length > 0) {
+      const clubRows = await db
+        .select()
+        .from(clubBooks)
+        .where(inArray(clubBooks.id, clubBookIds));
+      for (const book of clubRows) {
+        clubBookMap.set(book.id, book);
+      }
+    }
 
-    logger.info(`[ReadingStatus Debug] Returning ${enrichedStatuses.length} enriched records`);
+    const enrichedStatuses = statuses.map((item) => ({
+      ...item,
+      book:
+        item.bookType === 'personal'
+          ? (personalBookMap.get(item.bookId) ?? null)
+          : (clubBookMap.get(item.bookId) ?? null),
+    }));
 
     res.json(enrichedStatuses);
   } catch (error) {
@@ -142,8 +146,6 @@ router.get('/stats/year/:year', jwtAuth, async (req, res) => {
     const startOfYear = new Date(year, 0, 1);
     const endOfYear = new Date(year, 11, 31, 23, 59, 59, 999);
 
-    logger.info(`[Stats Debug] User ${userId} requesting stats for year ${year}`);
-
     // Количество прочитанных книг за год (с учетом NULL completedAt)
     const [completedCount] = await db
       .select({ count: sql<string>`count(*)::text` })
@@ -162,8 +164,6 @@ router.get('/stats/year/:year', jwtAuth, async (req, res) => {
         )
       );
 
-    logger.info(`[Stats Debug] Completed count raw: ${JSON.stringify(completedCount)}`);
-
     // Статистика по статусам (всего по каждому статусу)
     const statusStats = await db
       .select({
@@ -174,8 +174,6 @@ router.get('/stats/year/:year', jwtAuth, async (req, res) => {
       .where(eq(bookReadingStatus.userId, userId))
       .groupBy(bookReadingStatus.status);
 
-    logger.info(`[Stats Debug] Status breakdown raw: ${JSON.stringify(statusStats)}`);
-
     const result = {
       year,
       completedBooks: Number.parseInt(completedCount?.count || '0'),
@@ -184,8 +182,6 @@ router.get('/stats/year/:year', jwtAuth, async (req, res) => {
         return acc;
       }, {}),
     };
-
-    logger.info(`[Stats Debug] Final result: ${JSON.stringify(result)}`);
 
     res.json(result);
   } catch (error) {
@@ -209,8 +205,6 @@ router.get('/goal/:year', jwtAuth, async (req, res) => {
 
     const year = Number.parseInt(req.params.year);
 
-    logger.info(`[Goal Debug] User ${userId} requesting goal for year ${year}`);
-
     const [goal] = await db
       .select()
       .from(userReadingGoals)
@@ -222,10 +216,7 @@ router.get('/goal/:year', jwtAuth, async (req, res) => {
       )
       .limit(1);
 
-    logger.info(`[Goal Debug] Goal from DB: ${JSON.stringify(goal)}`);
-
     if (!goal) {
-      logger.info(`[Goal Debug] No goal found, returning default`);
       return res.json({ year, goalBooks: 12, progress: 0 });
     }
 
@@ -250,8 +241,6 @@ router.get('/goal/:year', jwtAuth, async (req, res) => {
         )
       );
 
-    logger.info(`[Goal Debug] Completed count raw: ${JSON.stringify(completedCount)}`);
-
     const progress = Number.parseInt(completedCount?.count || '0');
 
     const result = {
@@ -259,8 +248,6 @@ router.get('/goal/:year', jwtAuth, async (req, res) => {
       progress,
       percentComplete: Math.round((progress / goal.goalBooks) * 100),
     };
-
-    logger.info(`[Goal Debug] Final result: ${JSON.stringify(result)}`);
 
     res.json(result);
   } catch (error) {

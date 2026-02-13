@@ -15,7 +15,7 @@ import { logger } from './lib/logger.js';
 function normalizeString(str: string): string {
   if (!str) return '';
   
-  const result = str
+  return str
     .toLowerCase()
     .trim()
     .replaceAll(/\s+/g, ' ')
@@ -37,10 +37,42 @@ function normalizeString(str: string): string {
     .replaceAll('{', '')
     .replaceAll('}', '')
     .trim();
-  
-  logger.debug(`     [normalizeString] "${str}" → "${result}"`);
-  
-  return result;
+}
+
+function hasTokenOverlap(a: string, b: string): boolean {
+  const tokensA = a.split(' ').filter((token) => token.length >= 3);
+  const tokensB = b.split(' ').filter((token) => token.length >= 3);
+
+  if (tokensA.length === 0 || tokensB.length === 0) {
+    return true;
+  }
+
+  const tokenSetA = new Set(tokensA);
+  for (const token of tokensB) {
+    if (tokenSetA.has(token)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function isLikelyComparable(normalized1: string, normalized2: string): boolean {
+  const maxLength = Math.max(normalized1.length, normalized2.length);
+  const lengthDiff = Math.abs(normalized1.length - normalized2.length);
+
+  if (lengthDiff > Math.max(8, Math.floor(maxLength * 0.6))) {
+    const isSubstring = normalized1.includes(normalized2) || normalized2.includes(normalized1);
+    if (!isSubstring) {
+      return false;
+    }
+  }
+
+  if (!hasTokenOverlap(normalized1, normalized2)) {
+    return false;
+  }
+
+  return true;
 }
 
 /**
@@ -48,31 +80,59 @@ function normalizeString(str: string): string {
  * Используется для fuzzy matching названий книг
  */
 function levenshteinDistance(a: string, b: string): number {
-  const matrix: number[][] = [];
+  let left = a;
+  let right = b;
 
-  for (let i = 0; i <= b.length; i++) {
-    matrix[i] = [i];
+  if (left.length > right.length) {
+    [left, right] = [right, left];
   }
 
-  for (let j = 0; j <= a.length; j++) {
-    matrix[0][j] = j;
+  const leftLength = left.length;
+  const rightLength = right.length;
+  const previous = new Array<number>(leftLength + 1);
+  const current = new Array<number>(leftLength + 1);
+
+  for (let i = 0; i <= leftLength; i++) {
+    previous[i] = i;
   }
 
-  for (let i = 1; i <= b.length; i++) {
-    for (let j = 1; j <= a.length; j++) {
-      if (b.charAt(i - 1) === a.charAt(j - 1)) {
-        matrix[i][j] = matrix[i - 1][j - 1];
-      } else {
-        matrix[i][j] = Math.min(
-          matrix[i - 1][j - 1] + 1, // замена
-          matrix[i][j - 1] + 1,     // вставка
-          matrix[i - 1][j] + 1      // удаление
-        );
-      }
+  for (let i = 1; i <= rightLength; i++) {
+    current[0] = i;
+    const rightCode = right.charCodeAt(i - 1);
+
+    for (let j = 1; j <= leftLength; j++) {
+      const cost = left.charCodeAt(j - 1) === rightCode ? 0 : 1;
+      current[j] = Math.min(
+        current[j - 1] + 1,
+        previous[j] + 1,
+        previous[j - 1] + cost,
+      );
+    }
+
+    for (let j = 0; j <= leftLength; j++) {
+      previous[j] = current[j];
     }
   }
 
-  return matrix[b.length][a.length];
+  return previous[leftLength];
+}
+
+function calculateSimilarityFromNormalized(normalized1: string, normalized2: string): number {
+  if (!normalized1 || !normalized2) {
+    return 0;
+  }
+
+  if (normalized1 === normalized2) {
+    return 100;
+  }
+
+  if (!isLikelyComparable(normalized1, normalized2)) {
+    return 0;
+  }
+
+  const maxLength = Math.max(normalized1.length, normalized2.length);
+  const distance = levenshteinDistance(normalized1, normalized2);
+  return Math.max(0, Math.round(((maxLength - distance) / maxLength) * 100));
 }
 
 /**
@@ -80,30 +140,7 @@ function levenshteinDistance(a: string, b: string): number {
  * 100% - полное совпадение, 0% - совершенно разные строки
  */
 function calculateSimilarity(str1: string, str2: string): number {
-  const normalized1 = normalizeString(str1);
-  const normalized2 = normalizeString(str2);
-
-  logger.debug(`   → Сравнение: "${str1}" vs "${str2}"`);
-  logger.debug(`   → Нормализовано: "${normalized1}" (${normalized1.length} символов) vs "${normalized2}" (${normalized2.length} символов)`);
-
-  // Если одна из строк пуста или неполадка при нормализации
-  if (!normalized1 || !normalized2) {
-    logger.debug(`   ⚠️  Одна из строк пуста после нормализации - возвращаем 0%`);
-    return 0;
-  }
-
-  if (normalized1 === normalized2) {
-    logger.debug(`   → Точное совпадение после нормализации (100%)`);
-    return 100;
-  }
-
-  const distance = levenshteinDistance(normalized1, normalized2);
-  const maxLength = Math.max(normalized1.length, normalized2.length);
-  
-  const similarity = ((maxLength - distance) / maxLength) * 100;
-  const result = Math.round(similarity);
-  logger.debug(`   → Расстояние Левенштейна: ${distance}, макс длина: ${maxLength}, подобие: ${result}%`);
-  return result;
+  return calculateSimilarityFromNormalized(normalizeString(str1), normalizeString(str2));
 }
 
 /**
@@ -157,18 +194,15 @@ export class DuplicateDetectionService {
         .where(and(eq(personalBooks.userId, userId), eq(personalBooks.isDeleted, false)));
 
       const duplicates: DuplicateMatch[] = [];
-
-      logger.debug(`🔍 [DuplicateDetection] Поиск дубликатов для личной книги "${title}" от "${author}"`);
-      logger.debug(`   Найдено ${userBooks.length} книг у пользователя для сравнения`);
+      const normalizedTitle = normalizeString(title);
+      const normalizedAuthor = normalizeString(author);
 
       for (const book of userBooks) {
-        const titleSimilarity = calculateSimilarity(title, book.title);
-        const authorSimilarity = calculateSimilarity(author, book.author);
+        const titleSimilarity = calculateSimilarityFromNormalized(normalizedTitle, normalizeString(book.title));
+        const authorSimilarity = calculateSimilarityFromNormalized(normalizedAuthor, normalizeString(book.author));
 
         // Комбинированный score: автор важнее (60%), название (40%)
         const combinedScore = Math.round(authorSimilarity * 0.6 + titleSimilarity * 0.4);
-
-        logger.debug(`   📖 "${book.title}" от "${book.author}": title=${titleSimilarity}%, author=${authorSimilarity}%, combined=${combinedScore}%`);
 
         if (combinedScore >= similarityThreshold) {
           let matchReason = '';
@@ -194,10 +228,19 @@ export class DuplicateDetectionService {
         }
       }
 
+      logger.debug(
+        {
+          userId,
+          candidateCount: userBooks.length,
+          duplicateCount: duplicates.length,
+        },
+        '[DuplicateDetection] personal duplicate scan completed',
+      );
+
       // Сортировка по убыванию similarity
       return duplicates.sort((a, b) => b.similarity - a.similarity);
     } catch (error) {
-      console.error('[DuplicateDetection] Error finding personal book duplicates:', error);
+      logger.error({ error }, '[DuplicateDetection] Error finding personal book duplicates');
       return [];
     }
   }
@@ -224,17 +267,14 @@ export class DuplicateDetectionService {
         .where(and(eq(clubBooks.clubId, clubId), eq(clubBooks.isDeleted, false)));
 
       const duplicates: DuplicateMatch[] = [];
-
-      logger.debug(`🔍 [DuplicateDetection] Поиск дубликатов для книги "${title}" от "${author}" в клубе ${clubId}`);
-      logger.debug(`   Найдено ${books.length} книг в клубе для сравнения`);
+      const normalizedTitle = normalizeString(title);
+      const normalizedAuthor = normalizeString(author);
 
       for (const book of books) {
-        const titleSimilarity = calculateSimilarity(title, book.title);
-        const authorSimilarity = calculateSimilarity(author, book.author);
+        const titleSimilarity = calculateSimilarityFromNormalized(normalizedTitle, normalizeString(book.title));
+        const authorSimilarity = calculateSimilarityFromNormalized(normalizedAuthor, normalizeString(book.author));
 
         const combinedScore = Math.round(authorSimilarity * 0.6 + titleSimilarity * 0.4);
-
-        logger.debug(`   📖 "${book.title}" от "${book.author}": title=${titleSimilarity}%, author=${authorSimilarity}%, combined=${combinedScore}%`);
 
         if (combinedScore >= similarityThreshold) {
           let matchReason = '';
@@ -261,9 +301,18 @@ export class DuplicateDetectionService {
         }
       }
 
+      logger.debug(
+        {
+          clubId,
+          candidateCount: books.length,
+          duplicateCount: duplicates.length,
+        },
+        '[DuplicateDetection] club duplicate scan completed',
+      );
+
       return duplicates.sort((a, b) => b.similarity - a.similarity);
     } catch (error) {
-      console.error('[DuplicateDetection] Error finding club book duplicates:', error);
+      logger.error({ error }, '[DuplicateDetection] Error finding club book duplicates');
       return [];
     }
   }

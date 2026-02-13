@@ -2,6 +2,7 @@ import { Server as SocketIOServer, Socket } from "socket.io";
 import { storage } from "./repositories/index.js";
 import { logger } from "./lib/logger.js";
 import { AudioBroadcaster } from "./audio/audio-broadcaster.js";
+import { authService } from "./auth-service.js";
 import type { AudioChunk } from "./audio/types.js";
 import type { 
   SessionPositionUpdate, 
@@ -51,24 +52,31 @@ export function setupWebSocketHandlers(io: SocketIOServer) {
   // Authentication middleware for WebSocket connections
   io.use(async (socket: AuthenticatedSocket, next) => {
     try {
-      // Use session-based authentication for WebSocket
-      const userId = socket.handshake.auth.userId;
-      logger.info({ userId }, 'WebSocket auth attempt');
-      
-      if (!userId) {
-        logger.error('WebSocket auth failed: No userId provided');
+      const auth = socket.handshake.auth as Record<string, unknown> | undefined;
+      const authToken = typeof auth?.token === "string" ? auth.token : undefined;
+      const headerToken = socket.handshake.headers.authorization?.replace("Bearer ", "");
+      const cookieToken = socket.handshake.headers.cookie?.match(/(?:^|;\s*)accessToken=([^;]+)/)?.[1];
+      const token = authToken || headerToken || cookieToken;
+
+      if (!token) {
+        logger.error("WebSocket auth failed: missing access token");
         return next(new Error("Authentication required"));
       }
 
-      // Verify user exists in database
-      const user = await storage.getUser(userId);
-      if (!user) {
-        logger.error({ userId }, 'WebSocket auth failed: User not found');
-        return next(new Error("User not found"));
+      const payload = authService.verifyAccessToken(token);
+      if (!payload?.userId) {
+        logger.error("WebSocket auth failed: invalid or expired token");
+        return next(new Error("Invalid token"));
       }
 
-      socket.userId = userId;
-      logger.info({ userId }, 'WebSocket authenticated');
+      const user = await storage.getUser(payload.userId);
+      if (!user || user.status !== "active" || !user.emailConfirmed) {
+        logger.error({ userId: payload.userId }, "WebSocket auth failed: user inactive or not confirmed");
+        return next(new Error("User not allowed"));
+      }
+
+      socket.userId = payload.userId;
+      logger.info({ userId: payload.userId }, "WebSocket authenticated");
       next();
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);

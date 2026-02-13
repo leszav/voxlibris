@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -40,6 +40,7 @@ export function InviteMemberModal({ clubId, clubTitle }: InviteMemberModalProps)
   const [showResults, setShowResults] = useState(false);
   const { toast } = useToast();
   const inviteMutation = useInviteToClub(clubId);
+  const resetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Поиск пользователей
   const { data: searchResults = [], isLoading: isSearching } = useQuery<User[]>({
@@ -161,7 +162,10 @@ export function InviteMemberModal({ clubId, clubTitle }: InviteMemberModalProps)
   const handleOpenChange = (open: boolean) => {
     setIsOpen(open);
     if (!open) {
-      setTimeout(() => {
+      if (resetTimeoutRef.current) {
+        clearTimeout(resetTimeoutRef.current);
+      }
+      resetTimeoutRef.current = setTimeout(() => {
         setEmailsText("");
         setSearchQuery("");
         setSelectedUsers([]);
@@ -170,6 +174,14 @@ export function InviteMemberModal({ clubId, clubTitle }: InviteMemberModalProps)
       }, 300);
     }
   };
+
+  useEffect(() => {
+    return () => {
+      if (resetTimeoutRef.current) {
+        clearTimeout(resetTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const handleClose = () => {
     setIsOpen(false);

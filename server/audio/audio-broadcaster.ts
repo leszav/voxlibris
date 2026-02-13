@@ -8,12 +8,80 @@ export class AudioBroadcaster {
   private static instance: AudioBroadcaster;
   private sessions: Map<string, AudioSession> = new Map();
   private sessionStats: Map<string, AudioSessionStats> = new Map();
+  private readonly endedSessionCleanupTimers: Map<string, NodeJS.Timeout> = new Map();
+  private readonly MAX_TRACKED_SESSIONS = 500;
+  private readonly MAX_LISTENERS_PER_SESSION = 1000;
+  private readonly ENDED_SESSION_RETENTION_MS = 60_000;
+  private readonly CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
+  private readonly cleanupInterval: NodeJS.Timeout;
+
+  private constructor() {
+    this.cleanupInterval = setInterval(() => {
+      this.cleanupEndedSessions();
+    }, this.CLEANUP_INTERVAL_MS);
+    this.cleanupInterval.unref();
+  }
   
   static getInstance(): AudioBroadcaster {
     if (!AudioBroadcaster.instance) {
       AudioBroadcaster.instance = new AudioBroadcaster();
     }
     return AudioBroadcaster.instance;
+  }
+
+  private clearEndedSessionTimer(sessionId: string): void {
+    const timer = this.endedSessionCleanupTimers.get(sessionId);
+    if (!timer) {
+      return;
+    }
+    clearTimeout(timer);
+    this.endedSessionCleanupTimers.delete(sessionId);
+  }
+
+  private scheduleEndedSessionCleanup(sessionId: string): void {
+    this.clearEndedSessionTimer(sessionId);
+
+    const timer = setTimeout(() => {
+      this.sessions.delete(sessionId);
+      this.sessionStats.delete(sessionId);
+      this.endedSessionCleanupTimers.delete(sessionId);
+    }, this.ENDED_SESSION_RETENTION_MS);
+
+    timer.unref();
+    this.endedSessionCleanupTimers.set(sessionId, timer);
+  }
+
+  private ensureSessionCapacity(): void {
+    if (this.sessions.size < this.MAX_TRACKED_SESSIONS) {
+      return;
+    }
+
+    const removable = Array.from(this.sessions.values())
+      .sort((a, b) => a.startedAt.getTime() - b.startedAt.getTime())
+      .find((session) => !session.isActive);
+
+    const target = removable ?? Array.from(this.sessions.values()).sort((a, b) => a.startedAt.getTime() - b.startedAt.getTime())[0];
+    if (!target) {
+      return;
+    }
+
+    this.clearEndedSessionTimer(target.id);
+    this.sessions.delete(target.id);
+    this.sessionStats.delete(target.id);
+  }
+
+  private cleanupEndedSessions(): void {
+    const now = Date.now();
+    for (const session of this.sessions.values()) {
+      if (session.isActive) {
+        continue;
+      }
+      if (now - session.startedAt.getTime() >= this.ENDED_SESSION_RETENTION_MS) {
+        this.clearEndedSessionTimer(session.id);
+        this.sessions.delete(session.id);
+        this.sessionStats.delete(session.id);
+      }
+    }
   }
   
   /**
@@ -26,6 +94,12 @@ export class AudioBroadcaster {
     bookId: string,
     config?: AudioSessionConfig
   ): void {
+    if (!this.sessions.has(sessionId)) {
+      this.ensureSessionCapacity();
+    }
+
+    this.clearEndedSessionTimer(sessionId);
+
     const session: AudioSession = {
       id: sessionId,
       clubId,
@@ -62,6 +136,11 @@ export class AudioBroadcaster {
     const session = this.sessions.get(sessionId);
     if (!session || !session.isActive) {
       logger.warn(`Cannot add listener to inactive session: ${sessionId}`);
+      return false;
+    }
+
+    if (!session.listeners.has(socketId) && session.listeners.size >= this.MAX_LISTENERS_PER_SESSION) {
+      logger.warn(`Cannot add listener, max listeners reached for session: ${sessionId}`);
       return false;
     }
     
@@ -125,12 +204,14 @@ export class AudioBroadcaster {
       stats.duration = Math.floor((chunk.timestamp - session.startedAt.getTime()) / 1000);
     }
     
-    logger.debug(`Audio chunk broadcasted`, {
-      sessionId: chunk.sessionId,
-      sequence: chunk.sequence,
-      size: chunk.data.length,
-      listeners: session.listeners.size
-    } as any);
+    if (chunk.sequence % 100 === 0) {
+      logger.debug(`Audio chunk broadcasted (sampled)`, {
+        sessionId: chunk.sessionId,
+        sequence: chunk.sequence,
+        size: chunk.data.length,
+        listeners: session.listeners.size
+      } as any);
+    }
   }
   
   /**
@@ -148,11 +229,8 @@ export class AudioBroadcaster {
         totalListeners: session.listeners.size
       } as any);
       
-      // Очищаем через некоторое время для статистики
-      setTimeout(() => {
-        this.sessions.delete(sessionId);
-        this.sessionStats.delete(sessionId);
-      }, 60000); // 1 минута
+      // Оставляем краткий retention, затем детерминированно удаляем
+      this.scheduleEndedSessionCleanup(sessionId);
     }
   }
   

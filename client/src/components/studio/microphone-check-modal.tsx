@@ -1,5 +1,3 @@
- client/src/components/studio/microphone-check-modal.tsx
-
 import { useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';

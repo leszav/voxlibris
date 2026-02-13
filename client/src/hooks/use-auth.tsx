@@ -184,7 +184,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
     // Периодическая проверка состояния токена (каждые 5 минут)
     const interval = setInterval(() => {
-      if (authAPI.isAuthenticated()) {
+      if (user) {
         // Тихо пытаемся обновить, не очищаем при ошибках
         fetchCurrentUser();
       }
@@ -192,7 +192,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
     // Слушаем событие обновления токена для автоматического обновления пользователя
     const handleTokenRefresh = () => {
-      if (authAPI.isAuthenticated()) {
+      if (user) {
         fetchCurrentUser().catch((error) => {
           if (import.meta.env.DEV) {
             console.error('Failed to update user after token refresh:', error);
@@ -222,7 +222,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       globalThis.removeEventListener('token-refreshed', handleTokenRefresh);
       globalThis.removeEventListener('account-status-changed', handleAccountStatusChanged);
     };
-  }, []);
+  }, [user]);
 
   const contextValue = useMemo(() => ({
     user,

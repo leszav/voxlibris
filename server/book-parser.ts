@@ -15,6 +15,24 @@ type XmlElement = {
 const firstItem = <T>(value: unknown): T | undefined => (Array.isArray(value) ? (value[0] as T | undefined) : undefined);
 const asArray = <T>(value: unknown): T[] => (Array.isArray(value) ? (value as T[]) : []);
 
+function parsePositiveIntEnv(value: string | undefined, fallback: number): number {
+  const parsed = Number.parseInt(value || '', 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+const MAX_BOOK_PARSE_BYTES = parsePositiveIntEnv(process.env.MAX_BOOK_PARSE_MB, 50) * 1024 * 1024;
+const BOOK_PARSE_TIMEOUT_MS = parsePositiveIntEnv(process.env.BOOK_PARSE_TIMEOUT_MS, 15000);
+const MAX_EPUB_ENTRIES = parsePositiveIntEnv(process.env.MAX_EPUB_ENTRY_COUNT, 3000);
+const MAX_EPUB_UNCOMPRESSED_BYTES = parsePositiveIntEnv(process.env.MAX_EPUB_UNCOMPRESSED_MB, 200) * 1024 * 1024;
+const MAX_EPUB_TEXT_ENTRY_BYTES = parsePositiveIntEnv(process.env.MAX_EPUB_TEXT_ENTRY_MB, 8) * 1024 * 1024;
+const MAX_EPUB_COVER_BYTES = parsePositiveIntEnv(process.env.MAX_EPUB_COVER_MB, 10) * 1024 * 1024;
+const MAX_BOOK_CHAPTERS = parsePositiveIntEnv(
+  process.env.MAX_BOOK_CHAPTERS || process.env.MAX_EPUB_CHAPTERS,
+  1500,
+);
+const MAX_FB2_XML_BYTES = parsePositiveIntEnv(process.env.MAX_FB2_XML_MB, 20) * 1024 * 1024;
+const MAX_FB2_COVER_BYTES = parsePositiveIntEnv(process.env.MAX_FB2_COVER_MB, 10) * 1024 * 1024;
+
 export interface BookMetadata {
   title: string;
   author: string;
@@ -45,6 +63,35 @@ export interface ParsedBook {
 
 export abstract class BaseBookParser {
   abstract parseBook(fileBuffer: Buffer, filename: string): Promise<ParsedBook>;
+
+  protected assertInputSize(fileBuffer: Buffer): void {
+    if (!Buffer.isBuffer(fileBuffer) || fileBuffer.length === 0) {
+      throw new Error('Empty file payload');
+    }
+
+    if (fileBuffer.length > MAX_BOOK_PARSE_BYTES) {
+      throw new Error(`File exceeds parser limit of ${Math.round(MAX_BOOK_PARSE_BYTES / 1024 / 1024)} MB`);
+    }
+  }
+
+  protected async withTimeout<T>(promise: Promise<T>, label: string, timeoutMs = BOOK_PARSE_TIMEOUT_MS): Promise<T> {
+    let timeoutId: NodeJS.Timeout | undefined;
+
+    try {
+      return await Promise.race<T>([
+        promise,
+        new Promise<T>((_, reject) => {
+          timeoutId = setTimeout(() => {
+            reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+          }, timeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    }
+  }
 
   protected cleanText(text: string): string {
     return text
@@ -97,7 +144,13 @@ export abstract class BaseBookParser {
 export class EPUBParser extends BaseBookParser {
   async parseBook(fileBuffer: Buffer, filename: string): Promise<ParsedBook> {
     try {
-      const zip = await JSZip.loadAsync(fileBuffer);
+      this.assertInputSize(fileBuffer);
+
+      const zip = await this.withTimeout(
+        JSZip.loadAsync(fileBuffer),
+        'EPUB archive loading',
+      );
+      this.ensureArchiveSafety(zip);
 
       // Найти OPF файл (содержит метаданные)
       const opfFile = await this.findOpfFile(zip);
@@ -111,13 +164,20 @@ export class EPUBParser extends BaseBookParser {
         throw new Error('OPF file object not found');
       }
 
-      const opfContent = await opfFileObject.async('string');
+      this.assertZipEntrySize(opfFileObject, MAX_EPUB_TEXT_ENTRY_BYTES, 'OPF file');
+      const opfContent = await this.withTimeout(
+        opfFileObject.async('string'),
+        'Read OPF file',
+      );
       if (!opfContent) {
         throw new Error('Failed to read OPF content');
       }
 
       const parser = new xml2js.Parser();
-      const opfData = await parser.parseStringPromise(opfContent);
+      const opfData = await this.withTimeout(
+        parser.parseStringPromise(opfContent),
+        'Parse OPF XML',
+      );
 
       const opfDir = this.normalizeOpfDir(normalizedOpfPath);
 
@@ -146,15 +206,59 @@ export class EPUBParser extends BaseBookParser {
     }
   }
 
+  private getZipEntryUncompressedSize(entry: unknown): number | null {
+    const size = (entry as { _data?: { uncompressedSize?: unknown } })?._data?.uncompressedSize;
+    return typeof size === 'number' && Number.isFinite(size) && size >= 0 ? size : null;
+  }
+
+  private assertZipEntrySize(entry: unknown, maxBytes: number, entryLabel: string): void {
+    const declaredSize = this.getZipEntryUncompressedSize(entry);
+    if (declaredSize !== null && declaredSize > maxBytes) {
+      throw new Error(`${entryLabel} exceeds ${Math.round(maxBytes / 1024 / 1024)} MB limit`);
+    }
+  }
+
+  private ensureArchiveSafety(zip: JSZip): void {
+    const entries = Object.entries(zip.files);
+    const fileEntries = entries.filter(([, entry]) => !entry.dir);
+
+    if (fileEntries.length === 0) {
+      throw new Error('EPUB archive has no files');
+    }
+
+    if (fileEntries.length > MAX_EPUB_ENTRIES) {
+      throw new Error(`EPUB archive has too many files: ${fileEntries.length}`);
+    }
+
+    let totalUncompressedBytes = 0;
+
+    for (const [entryName, entry] of fileEntries) {
+      const normalizedName = entryName.replaceAll('\\', '/');
+      if (normalizedName.startsWith('/') || normalizedName.includes('../')) {
+        throw new Error(`Unsafe EPUB entry path: ${entryName}`);
+      }
+
+      const size = this.getZipEntryUncompressedSize(entry);
+      if (size !== null) {
+        totalUncompressedBytes += size;
+        if (totalUncompressedBytes > MAX_EPUB_UNCOMPRESSED_BYTES) {
+          throw new Error(`EPUB archive exceeds max uncompressed size of ${Math.round(MAX_EPUB_UNCOMPRESSED_BYTES / 1024 / 1024)} MB`);
+        }
+      }
+    }
+  }
+
   private async findOpfFile(zip: JSZip): Promise<string | null> {
     // Читаем META-INF/container.xml для поиска OPF файла
-    const containerFile = zip.file('META-INF/container.xml');
-    if (!containerFile) return null;
+    const containerContent = await this.readZipText(zip, 'META-INF/container.xml', MAX_EPUB_TEXT_ENTRY_BYTES);
+    if (!containerContent) return null;
 
     try {
-      const containerContent = await containerFile.async('string');
       const parser = new xml2js.Parser();
-      const containerData = await parser.parseStringPromise(containerContent);
+      const containerData = await this.withTimeout(
+        parser.parseStringPromise(containerContent),
+        'Parse EPUB container.xml',
+      );
 
       const rootfiles = containerData?.container?.rootfiles?.[0]?.rootfile;
       if (rootfiles && rootfiles.length > 0) {
@@ -268,7 +372,11 @@ export class EPUBParser extends BaseBookParser {
           const imagePath = this.resolveZipPath(opfDir, href.split('#')[0]);
           const imageFile = zip.file(imagePath);
           if (imageFile) {
-            const imageData = await imageFile.async('nodebuffer');
+            this.assertZipEntrySize(imageFile, MAX_EPUB_COVER_BYTES, `EPUB cover image: ${imagePath}`);
+            const imageData = await this.withTimeout(
+              imageFile.async('nodebuffer'),
+              `Read EPUB cover image: ${imagePath}`,
+            );
             return {
               data: imageData,
               type: mediaType || mime.lookup(href) || 'image/jpeg',
@@ -308,6 +416,10 @@ export class EPUBParser extends BaseBookParser {
     const chapters: BookChapter[] = [];
 
     for (let i = 0; i < spine.length; i++) {
+      if (chapters.length >= MAX_BOOK_CHAPTERS) {
+        throw new Error(`EPUB exceeds chapter limit of ${MAX_BOOK_CHAPTERS}`);
+      }
+
       const itemRef = spine[i];
       const idref = itemRef.$?.idref;
       const linear = itemRef.$?.linear;
@@ -327,7 +439,11 @@ export class EPUBParser extends BaseBookParser {
           continue;
         }
 
-        const chapterContent = await chapterFile.async('string');
+        this.assertZipEntrySize(chapterFile, MAX_EPUB_TEXT_ENTRY_BYTES, `EPUB chapter file: ${filePath}`);
+        const chapterContent = await this.withTimeout(
+          chapterFile.async('string'),
+          `Read EPUB chapter file: ${filePath}`,
+        );
         const { html, text, title } = this.extractReadableHtmlFromEpub(chapterContent);
         const textContent = text || this.extractTextFromHtml(chapterContent);
         const tocTitle = tocMap.get(filePath);
@@ -560,11 +676,17 @@ export class EPUBParser extends BaseBookParser {
     ) || null;
   }
 
-  private async readZipText(zip: JSZip, filePath: string): Promise<string | null> {
+  private async readZipText(zip: JSZip, filePath: string, maxBytes = MAX_EPUB_TEXT_ENTRY_BYTES): Promise<string | null> {
     const file = zip.file(filePath);
     if (!file) return null;
+
+    this.assertZipEntrySize(file, maxBytes, `EPUB entry: ${filePath}`);
+
     try {
-      return await file.async("string");
+      return await this.withTimeout(
+        file.async("string"),
+        `Read EPUB entry: ${filePath}`,
+      );
     } catch (error) {
       console.warn("Failed to read EPUB file:", error);
       return null;
@@ -770,12 +892,32 @@ export class FB2Parser extends BaseBookParser {
     return result;
   }
 
+  private looksLikeFb2Document(content: string): boolean {
+    const header = content.slice(0, 8192).toLowerCase();
+    return header.includes('<fictionbook');
+  }
+
   async parseBook(fileBuffer: Buffer, filename: string): Promise<ParsedBook> {
     try {
+      this.assertInputSize(fileBuffer);
+
       // Автоопределение кодировки для корректной обработки кириллицы
       const content = this.detectAndDecodeContent(fileBuffer);
+      const xmlBytes = Buffer.byteLength(content, 'utf8');
+
+      if (xmlBytes > MAX_FB2_XML_BYTES) {
+        throw new Error(`FB2 XML exceeds limit of ${Math.round(MAX_FB2_XML_BYTES / 1024 / 1024)} MB`);
+      }
+
+      if (!this.looksLikeFb2Document(content)) {
+        throw new Error('Invalid FB2 payload: FictionBook tag was not detected');
+      }
+
       const parser = new xml2js.Parser();
-      const fb2Data = await parser.parseStringPromise(content);
+      const fb2Data = await this.withTimeout(
+        parser.parseStringPromise(content),
+        'Parse FB2 XML',
+      );
 
       const fictionBook = fb2Data?.FictionBook as XmlElement | undefined;
       if (!fictionBook) {
@@ -835,8 +977,16 @@ export class FB2Parser extends BaseBookParser {
     try {
       const coverInfo = this.findCoverImage(fictionBook);
       if (coverInfo) {
-        coverImageData = Buffer.from(coverInfo.data, 'base64');
-        coverImageType = coverInfo.type;
+        const decodedCover = Buffer.from(coverInfo.data, 'base64');
+        if (decodedCover.length <= MAX_FB2_COVER_BYTES) {
+          coverImageData = decodedCover;
+          coverImageType = coverInfo.type;
+        } else {
+          logger.warn(
+            { coverBytes: decodedCover.length, maxBytes: MAX_FB2_COVER_BYTES },
+            '[FB2Parser] Skipping oversized cover image',
+          );
+        }
       }
     } catch (error) {
       logger.warn({ error }, 'Could not extract cover image');
@@ -982,6 +1132,10 @@ export class FB2Parser extends BaseBookParser {
       const sections = bodyElement?.section as XmlElement[] | undefined ?? [];
 
       sections.forEach((section) => {
+        if (chapters.length >= MAX_BOOK_CHAPTERS) {
+          return;
+        }
+
         const chapterContent = this.extractSectionContent(section);
         if (chapterContent.trim()) {
           // Попытаться извлечь заголовок
@@ -1097,6 +1251,136 @@ export class BookParserFactory {
       default:
         throw new Error(`Unsupported file type: ${fileType}`);
     }
+  }
+
+  private static async withTimeout<T>(promise: Promise<T>, label: string, timeoutMs = BOOK_PARSE_TIMEOUT_MS): Promise<T> {
+    let timeoutId: NodeJS.Timeout | undefined;
+
+    try {
+      return await Promise.race<T>([
+        promise,
+        new Promise<T>((_, reject) => {
+          timeoutId = setTimeout(() => {
+            reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+          }, timeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    }
+  }
+
+  private static hasZipSignature(fileBuffer: Buffer): boolean {
+    if (fileBuffer.length < 4) {
+      return false;
+    }
+
+    if (fileBuffer[0] !== 0x50 || fileBuffer[1] !== 0x4b) {
+      return false;
+    }
+
+    return (
+      (fileBuffer[2] === 0x03 && fileBuffer[3] === 0x04) ||
+      (fileBuffer[2] === 0x05 && fileBuffer[3] === 0x06) ||
+      (fileBuffer[2] === 0x07 && fileBuffer[3] === 0x08)
+    );
+  }
+
+  private static hasFb2Signature(fileBuffer: Buffer): boolean {
+    const head = fileBuffer.subarray(0, 8192).toString('utf8').replace(/^\uFEFF/, '').toLowerCase();
+    return head.includes('<fictionbook');
+  }
+
+  private static getZipEntryUncompressedSize(entry: unknown): number | null {
+    const size = (entry as { _data?: { uncompressedSize?: unknown } })?._data?.uncompressedSize;
+    return typeof size === 'number' && Number.isFinite(size) && size >= 0 ? size : null;
+  }
+
+  private static async isValidEpubBuffer(fileBuffer: Buffer): Promise<boolean> {
+    try {
+      const zip = await this.withTimeout(
+        JSZip.loadAsync(fileBuffer),
+        'Inspect EPUB archive',
+      );
+      const files = Object.entries(zip.files).filter(([, entry]) => !entry.dir);
+
+      if (files.length === 0 || files.length > MAX_EPUB_ENTRIES) {
+        return false;
+      }
+
+      let totalUncompressed = 0;
+      for (const [entryName, entry] of files) {
+        const normalizedName = entryName.replaceAll('\\', '/');
+        if (normalizedName.startsWith('/') || normalizedName.includes('../')) {
+          return false;
+        }
+
+        const size = this.getZipEntryUncompressedSize(entry);
+        if (size !== null) {
+          totalUncompressed += size;
+          if (totalUncompressed > MAX_EPUB_UNCOMPRESSED_BYTES) {
+            return false;
+          }
+        }
+      }
+
+      const mimetypeFile = zip.file('mimetype');
+      if (!mimetypeFile) {
+        return false;
+      }
+
+      const mimetypeSize = this.getZipEntryUncompressedSize(mimetypeFile);
+      if (mimetypeSize !== null && mimetypeSize > 128) {
+        return false;
+      }
+
+      const mimetypeContent = await this.withTimeout(
+        mimetypeFile.async('string'),
+        'Read EPUB mimetype',
+      );
+      if (mimetypeContent.trim() !== 'application/epub+zip') {
+        return false;
+      }
+
+      return Boolean(zip.file('META-INF/container.xml'));
+    } catch (error) {
+      logger.warn({ error }, '[BookParserFactory] Failed to validate EPUB signature');
+      return false;
+    }
+  }
+
+  static async detectFileTypeFromBuffer(fileBuffer: Buffer, filename?: string): Promise<'epub' | 'fb2' | null> {
+    if (!Buffer.isBuffer(fileBuffer) || fileBuffer.length === 0) {
+      return null;
+    }
+
+    if (fileBuffer.length > MAX_BOOK_PARSE_BYTES) {
+      return null;
+    }
+
+    if (this.hasZipSignature(fileBuffer)) {
+      const isValidEpub = await this.isValidEpubBuffer(fileBuffer);
+      if (isValidEpub) {
+        return 'epub';
+      }
+      return null;
+    }
+
+    if (this.hasFb2Signature(fileBuffer)) {
+      return 'fb2';
+    }
+
+    // Conservative fallback for legacy FB2 files with uncommon prologs.
+    if (filename && this.detectFileType(filename) === 'fb2') {
+      const xmlHead = fileBuffer.subarray(0, 4096).toString('utf8').toLowerCase();
+      if (xmlHead.includes('<?xml')) {
+        return 'fb2';
+      }
+    }
+
+    return null;
   }
 
   static detectFileType(filename: string): 'epub' | 'fb2' | null {

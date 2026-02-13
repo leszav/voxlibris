@@ -13,9 +13,9 @@ export { getAccessToken as getAuthToken, setAccessToken as setAuthToken } from "
 
 // Обновить access token через refresh token
 let isRefreshing = false;
-let refreshPromise: Promise<string> | null = null;
+let refreshPromise: Promise<void> | null = null;
 
-async function refreshAccessToken(): Promise<string> {
+async function refreshAccessToken(): Promise<void> {
   // Защита от одновременных запросов на обновление
   if (isRefreshing && refreshPromise) {
     return refreshPromise;
@@ -33,13 +33,11 @@ async function refreshAccessToken(): Promise<string> {
         throw new Error('Failed to refresh token');
       }
 
-      const data = await response.json();
-      setAccessToken(data.accessToken);
+      // Cookie-only auth model: server rotates httpOnly cookies.
+      setAccessToken(null);
       
       // Уведомляем приложение об успешном обновлении токена
       globalThis.dispatchEvent(new CustomEvent('token-refreshed'));
-      
-      return data.accessToken;
     } catch (error) {
       // При ошибке обновления очищаем токен
       setAccessToken(null);
@@ -179,10 +177,6 @@ async function retryRequestAfter401(
   options: RequestInit | undefined,
   isFormData: boolean
 ): Promise<Response | null> {
-  if (!getAccessToken()) {
-    return null;
-  }
-
   try {
     await refreshAccessToken();
     

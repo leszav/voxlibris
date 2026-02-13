@@ -5,6 +5,8 @@ import type { InsertClub, ClubMemberRole, InsertClubInvitation, Club, UserRole }
 import { emailService } from './services/email-service.js';
 import crypto from 'node:crypto';
 import { logger } from './lib/logger.js';
+import { getPublicBaseUrl } from './lib/public-base-url.js';
+import { sanitizeClubSettingsInput } from './lib/club-settings-sanitizer.js';
 
 const router = express.Router();
 
@@ -75,6 +77,8 @@ router.post('/', jwtAuth, requireActiveUser, async (req, res) => {
       return res.status(401).json({ message: 'Authentication required' });
     }
 
+    const sanitizedSettings = sanitizeClubSettingsInput(req.body.settings);
+
     // Валидация данных
     const clubData: InsertClub & { ownerId: string; status: Club['status'] } = {
       title: req.body.title,
@@ -86,7 +90,7 @@ router.post('/', jwtAuth, requireActiveUser, async (req, res) => {
       maxMembers: req.body.maxMembers || 50,
       isPrivate: req.body.isPrivate || false,
       schedule: req.body.schedule,
-      settings: req.body.settings,
+      settings: sanitizedSettings,
       // Обычные пользователи создают клубы со статусом pending (требуется модерация)
       // Админы и модераторы создают клубы со статусом recruiting (без модерации)
       status: (req.user.role === 'admin' || req.user.role === 'moderator') ? 'recruiting' : 'pending',
@@ -242,6 +246,8 @@ router.put('/:id', jwtAuth, async (req, res) => {
       return res.status(403).json({ message: 'Only club owner can update club' });
     }
 
+    const sanitizedSettings = sanitizeClubSettingsInput(req.body.settings);
+
     const updates: Partial<InsertClub> = {
       title: req.body.title,
       description: req.body.description,
@@ -249,10 +255,10 @@ router.put('/:id', jwtAuth, async (req, res) => {
       maxMembers: req.body.maxMembers,
       isPrivate: req.body.isPrivate,
       schedule: req.body.schedule,
-      settings: req.body.settings,
+      settings: sanitizedSettings,
     };
 
-    logger.info('[Clubs] Update request body settings: %s', req.body.settings?.substring(0, 200));
+    logger.info('[Clubs] Sanitized settings preview: %s', sanitizedSettings?.slice(0, 200));
 
     // Удаляем undefined значения
     Object.keys(updates).forEach(key => 
@@ -266,7 +272,7 @@ router.put('/:id', jwtAuth, async (req, res) => {
     }
 
     logger.info(`[Clubs] Club "${club.title}" updated by user ${req.user.username}`);
-    logger.info('[Clubs] Updated club settings: %s', updatedClub.settings?.substring(0, 200));
+    logger.info('[Clubs] Updated club settings: %s', updatedClub.settings?.slice(0, 200));
 
     res.json(updatedClub);
   } catch (error) {
@@ -502,7 +508,7 @@ router.post('/:id/invite', jwtAuth, async (req, res) => {
     const createdInvitation = await storage.createClubInvitation(invitation);
 
     // Отправляем email
-    const baseUrl = `${req.protocol}://${req.get('host')}`;
+    const baseUrl = await getPublicBaseUrl();
     const emailSent = await emailService.sendClubInvitation({
       email,
       clubName: club.title,
@@ -691,7 +697,7 @@ router.post('/invitations/:token/accept', jwtAuth, async (req, res) => {
     // Отправляем уведомление владельцу клуба
     const inviter = await storage.getUser(invitation.invitedBy);
     if (inviter) {
-      const baseUrl = `${req.protocol}://${req.get('host')}`;
+      const baseUrl = await getPublicBaseUrl();
       await emailService.sendInvitationAccepted({
         email: inviter.username, // assuming username is email
         clubName: club.title,
@@ -987,7 +993,7 @@ router.post('/:clubId/invitations/:invitationId/resend', jwtAuth, async (req, re
     const createdInvitation = await storage.createClubInvitation(newInvitation);
 
     // Отправляем email
-    const baseUrl = `${req.protocol}://${req.get('host')}`;
+    const baseUrl = await getPublicBaseUrl();
     const emailSent = await emailService.sendClubInvitation({
       email: oldInvitation.email,
       clubName: club.title,

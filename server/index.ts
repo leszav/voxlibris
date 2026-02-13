@@ -10,7 +10,9 @@ import cookieParser from "cookie-parser";
 import cors from "cors";
 import express from "express";
 import type { Request, Response, NextFunction } from "express";
-import rateLimit from "express-rate-limit";
+import rateLimit, { ipKeyGenerator } from "express-rate-limit";
+import { RedisStore } from "rate-limit-redis";
+import { createClient } from "redis";
 import slowDown from "express-slow-down";
 import helmet from "helmet";
 import { Server as SocketIOServer } from "socket.io";
@@ -164,41 +166,373 @@ app.use(
 	}),
 );
 
+declare global {
+	namespace Express {
+		interface Request {
+			_rateLimitUserKey?: string | null;
+		}
+	}
+}
+
+function parsePositiveIntEnv(name: string, fallback: number): number {
+	const raw = process.env[name];
+	if (!raw) return fallback;
+	const parsed = Number.parseInt(raw, 10);
+	return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function parseBooleanEnv(name: string, fallback: boolean): boolean {
+	const raw = process.env[name];
+	if (!raw) return fallback;
+	const normalized = raw.trim().toLowerCase();
+	if (["1", "true", "yes", "on"].includes(normalized)) return true;
+	if (["0", "false", "no", "off"].includes(normalized)) return false;
+	return fallback;
+}
+
+function withRedisPasswordIfMissing(redisUrl: string, password: string): string {
+	if (!password) {
+		return redisUrl;
+	}
+	try {
+		const parsed = new URL(redisUrl);
+		if (parsed.protocol !== "redis:" && parsed.protocol !== "rediss:") {
+			return redisUrl;
+		}
+		if (parsed.password || parsed.username) {
+			return redisUrl;
+		}
+		parsed.password = password;
+		return parsed.toString();
+	} catch {
+		return redisUrl;
+	}
+}
+
+function redactRedisUrl(redisUrl: string): string {
+	try {
+		const parsed = new URL(redisUrl);
+		if (parsed.protocol !== "redis:" && parsed.protocol !== "rediss:") {
+			return "invalid-redis-url";
+		}
+		return `${parsed.protocol}//${parsed.host}`;
+	} catch {
+		return "invalid-redis-url";
+	}
+}
+
+const isProduction = process.env.NODE_ENV === "production";
+const redisPassword = process.env.REDIS_PASSWORD || (!isProduction ? "redis_dev" : "");
+const configuredRedisUrl = process.env.RATE_LIMIT_REDIS_URL || process.env.REDIS_URL || "";
+const redisUrl = configuredRedisUrl
+	? withRedisPasswordIfMissing(configuredRedisUrl, redisPassword)
+	: !isProduction
+		? `redis://:${encodeURIComponent(redisPassword)}@127.0.0.1:6379`
+		: "";
+const redisLogTarget = redisUrl ? redactRedisUrl(redisUrl) : "";
+const redisEnabled = parseBooleanEnv(
+	"RATE_LIMIT_REDIS_ENABLED",
+	Boolean(redisUrl),
+);
+const redisPrefix = process.env.RATE_LIMIT_REDIS_PREFIX || "rl:voxlibris";
+
+let createRedisStore: ((namespace: string) => RedisStore) | null = null;
+
+if (redisEnabled && redisUrl) {
+	const redisClient = createClient({ url: redisUrl });
+	redisClient.on("error", (error) => {
+		logger.warn({ error }, "[rate-limit] Redis client error");
+	});
+	void redisClient
+		.connect()
+		.then(() => {
+			logger.info({ redisTarget: redisLogTarget }, "[rate-limit] Redis store connected");
+		})
+		.catch((error) => {
+			logger.warn({ error, redisTarget: redisLogTarget }, "[rate-limit] Redis connect failed, using memory fallback");
+		});
+
+	createRedisStore = (namespace: string) =>
+		new RedisStore({
+			sendCommand: (...args: string[]) => redisClient.sendCommand(args),
+			prefix: `${redisPrefix}:${namespace}:`,
+		});
+} else {
+	logger.info("[rate-limit] Redis store disabled, using in-memory store");
+}
+
+const rateLimitCommonOptions = {
+	passOnStoreError: true,
+} as const;
+
+const rateLimitHeadersOptions = {
+	standardHeaders: true,
+	legacyHeaders: false,
+} as const;
+
+function withRateLimitStore(namespace: string): { store?: RedisStore } {
+	return createRedisStore ? { store: createRedisStore(namespace) } : {};
+}
+
+const readMethods = new Set(["GET", "HEAD", "OPTIONS"]);
+
+function isReadMethod(req: Request): boolean {
+	return readMethods.has(req.method);
+}
+
+function getRequestPath(req: Request): string {
+	const originalUrl = req.originalUrl || req.url || req.path;
+	const queryIndex = originalUrl.indexOf("?");
+	return queryIndex === -1 ? originalUrl : originalUrl.slice(0, queryIndex);
+}
+
+function isAuthPath(req: Request): boolean {
+	return getRequestPath(req).startsWith("/api/auth");
+}
+
+function isHealthPath(req: Request): boolean {
+	return getRequestPath(req) === "/api/health";
+}
+
+function isExpensivePath(req: Request): boolean {
+	const path = getRequestPath(req);
+	const { method } = req;
+	if (!path.startsWith("/api/")) {
+		return false;
+	}
+	if (path.includes("/upload")) {
+		return true;
+	}
+	if (path.includes("/export")) {
+		return true;
+	}
+	if (path.startsWith("/api/storage")) {
+		return true;
+	}
+	if (path.startsWith("/api/recordings") && method !== "GET") {
+		return true;
+	}
+	return false;
+}
+
+function getClientIpKey(req: Request): string {
+	const ip = req.ip || req.socket.remoteAddress || "unknown";
+	return ipKeyGenerator(ip);
+}
+
+function getAccessTokenFromRequest(req: Request): string | null {
+	const tokenFromHeader = authService.extractTokenFromHeader(req.headers.authorization);
+	if (tokenFromHeader) {
+		return tokenFromHeader;
+	}
+	return typeof req.cookies?.accessToken === "string" ? req.cookies.accessToken : null;
+}
+
+function resolveAuthenticatedRateLimitKey(req: Request): string | null {
+	const token = getAccessTokenFromRequest(req);
+	if (!token) {
+		return null;
+	}
+	const payload = authService.verifyAccessToken(token);
+	if (!payload?.userId) {
+		return null;
+	}
+	return `user:${payload.userId}`;
+}
+
+function getAuthenticatedRateLimitKey(req: Request): string | null {
+	if (typeof req._rateLimitUserKey !== "undefined") {
+		return req._rateLimitUserKey;
+	}
+	const resolved = resolveAuthenticatedRateLimitKey(req);
+	req._rateLimitUserKey = resolved;
+	return resolved;
+}
+
+function getAuthIdentifier(req: Request): string | null {
+	if (!req.body || typeof req.body !== "object") {
+		return null;
+	}
+	const body = req.body as Record<string, unknown>;
+	const candidates = [body.email, body.username, body.emailOrUsername, body.login];
+	for (const candidate of candidates) {
+		if (typeof candidate === "string") {
+			const normalized = candidate.trim().toLowerCase();
+			if (normalized.length > 0) {
+				return normalized.slice(0, 254);
+			}
+		}
+	}
+	return null;
+}
+
+function getAuthRateLimitKey(req: Request): string {
+	const ipKey = getClientIpKey(req);
+	const identifier = getAuthIdentifier(req);
+	return identifier ? `auth:${identifier}:${ipKey}` : `auth:${ipKey}`;
+}
+
+function getGeneralRateLimitKey(req: Request): string {
+	return getAuthenticatedRateLimitKey(req) ?? `ip:${getClientIpKey(req)}`;
+}
+
+function isAuthenticatedRequest(req: Request): boolean {
+	return getAuthenticatedRateLimitKey(req) !== null;
+}
+
 // Rate limiting configuration
 // Строгий rate limiting для auth endpoints
 const authLimiter = rateLimit({
+	...rateLimitCommonOptions,
+	...rateLimitHeadersOptions,
+	...withRateLimitStore("auth-strict"),
 	windowMs: 15 * 60 * 1000, // 15 минут
 	max: 5, // максимум 5 попыток
+	keyGenerator: getAuthRateLimitKey,
 	message: {
 		error: "Too many authentication attempts. Please try again later.",
 		retryAfter: "15 minutes",
 	},
-	standardHeaders: true,
-	legacyHeaders: false,
 	skipSuccessfulRequests: true,
 });
 
-// General rate limiting
-const generalLimiter = rateLimit({
-	windowMs: 15 * 60 * 1000,
-	max: 500, // 500 запросов в 15 минут
-	message: {
-		error: "Too many requests. Please slow down.",
-		retryAfter: "15 minutes",
-	},
-	standardHeaders: true,
-	legacyHeaders: false,
-});
+const authSlowDownDelayAfter = parsePositiveIntEnv("RL_AUTH_DELAY_AFTER", 1000);
+const authSlowDownWindowMs = parsePositiveIntEnv("RL_AUTH_DELAY_WINDOW_MS", 15 * 60 * 1000);
 
-// Slow down for repeated requests
+// Slow down brute-force bursts on auth endpoints
 const speedLimiter = slowDown({
-	windowMs: 15 * 60 * 1000,
-	delayAfter: 1000,
+	...rateLimitCommonOptions,
+	...withRateLimitStore("auth-slow"),
+	windowMs: authSlowDownWindowMs,
+	delayAfter: authSlowDownDelayAfter,
+	keyGenerator: getAuthRateLimitKey,
 	delayMs: (used, req) => {
 		const delayAfter = req.slowDown.limit;
 		return (used - delayAfter) * 500;
 	},
 	validate: { delayMs: false },
+});
+
+const anonBurstWindowMs = parsePositiveIntEnv("RL_ANON_BURST_WINDOW_MS", 5 * 1000);
+const anonBurstMax = parsePositiveIntEnv("RL_ANON_BURST_MAX", 5);
+const anonReadWindowMs = parsePositiveIntEnv("RL_ANON_READ_WINDOW_MS", 60 * 1000);
+const anonReadMax = parsePositiveIntEnv("RL_ANON_READ_MAX", 120);
+const anonWriteWindowMs = parsePositiveIntEnv("RL_ANON_WRITE_WINDOW_MS", 15 * 60 * 1000);
+const anonWriteMax = parsePositiveIntEnv("RL_ANON_WRITE_MAX", 30);
+
+const authReadWindowMs = parsePositiveIntEnv("RL_AUTH_READ_WINDOW_MS", 15 * 60 * 1000);
+const authReadMax = parsePositiveIntEnv("RL_AUTH_READ_MAX", 1200);
+const authWriteWindowMs = parsePositiveIntEnv("RL_AUTH_WRITE_WINDOW_MS", 15 * 60 * 1000);
+const authWriteMax = parsePositiveIntEnv("RL_AUTH_WRITE_MAX", 300);
+const expensiveWindowMs = parsePositiveIntEnv("RL_EXPENSIVE_WINDOW_MS", 15 * 60 * 1000);
+const expensiveMax = parsePositiveIntEnv("RL_EXPENSIVE_MAX", 30);
+
+const shouldSkipRiskLimiter = (req: Request) => isHealthPath(req) || isAuthPath(req);
+
+// Anti-burst protection for unauthenticated traffic
+const anonymousBurstLimiter = rateLimit({
+	...rateLimitCommonOptions,
+	...rateLimitHeadersOptions,
+	...withRateLimitStore("anon-burst"),
+	windowMs: anonBurstWindowMs,
+	max: anonBurstMax,
+	keyGenerator: (req) => `anon-burst:${getClientIpKey(req)}`,
+	skip: (req) => shouldSkipRiskLimiter(req) || isAuthenticatedRequest(req),
+	message: {
+		error: "Too many requests from this source. Please wait a few seconds.",
+		retryAfter: `${Math.ceil(anonBurstWindowMs / 1000)} seconds`,
+	},
+});
+
+// Sustained limiter for anonymous read traffic
+const anonymousReadLimiter = rateLimit({
+	...rateLimitCommonOptions,
+	...rateLimitHeadersOptions,
+	...withRateLimitStore("anon-read"),
+	windowMs: anonReadWindowMs,
+	max: anonReadMax,
+	keyGenerator: (req) => `anon-read:${getClientIpKey(req)}`,
+	skip: (req) =>
+		shouldSkipRiskLimiter(req) ||
+		isAuthenticatedRequest(req) ||
+		!isReadMethod(req) ||
+		isExpensivePath(req),
+	message: {
+		error: "Too many requests. Please slow down.",
+		retryAfter: `${Math.ceil(anonReadWindowMs / 1000)} seconds`,
+	},
+});
+
+// Sustained limiter for anonymous mutations (non-auth endpoints only)
+const anonymousWriteLimiter = rateLimit({
+	...rateLimitCommonOptions,
+	...rateLimitHeadersOptions,
+	...withRateLimitStore("anon-write"),
+	windowMs: anonWriteWindowMs,
+	max: anonWriteMax,
+	keyGenerator: (req) => `anon-write:${getClientIpKey(req)}`,
+	skip: (req) =>
+		shouldSkipRiskLimiter(req) ||
+		isAuthenticatedRequest(req) ||
+		isReadMethod(req) ||
+		isExpensivePath(req),
+	message: {
+		error: "Too many requests. Please slow down.",
+		retryAfter: `${Math.ceil(anonWriteWindowMs / 1000)} seconds`,
+	},
+});
+
+// Strict limiter for expensive operations (upload/export/storage)
+const expensiveLimiter = rateLimit({
+	...rateLimitCommonOptions,
+	...rateLimitHeadersOptions,
+	...withRateLimitStore("expensive"),
+	windowMs: expensiveWindowMs,
+	max: expensiveMax,
+	keyGenerator: getGeneralRateLimitKey,
+	skip: (req) => shouldSkipRiskLimiter(req) || !isExpensivePath(req),
+	message: {
+		error: "Too many heavy requests. Please retry later.",
+		retryAfter: `${Math.ceil(expensiveWindowMs / 1000)} seconds`,
+	},
+});
+
+// Authenticated read traffic limiter
+const authenticatedReadLimiter = rateLimit({
+	...rateLimitCommonOptions,
+	...rateLimitHeadersOptions,
+	...withRateLimitStore("auth-read"),
+	windowMs: authReadWindowMs,
+	max: authReadMax,
+	keyGenerator: getGeneralRateLimitKey,
+	skip: (req) =>
+		shouldSkipRiskLimiter(req) ||
+		!isAuthenticatedRequest(req) ||
+		!isReadMethod(req) ||
+		isExpensivePath(req),
+	message: {
+		error: "Too many requests. Please slow down.",
+		retryAfter: `${Math.ceil(authReadWindowMs / 1000)} seconds`,
+	},
+});
+
+// Authenticated write traffic limiter
+const authenticatedWriteLimiter = rateLimit({
+	...rateLimitCommonOptions,
+	...rateLimitHeadersOptions,
+	...withRateLimitStore("auth-write"),
+	windowMs: authWriteWindowMs,
+	max: authWriteMax,
+	keyGenerator: getGeneralRateLimitKey,
+	skip: (req) =>
+		shouldSkipRiskLimiter(req) ||
+		!isAuthenticatedRequest(req) ||
+		isReadMethod(req) ||
+		isExpensivePath(req),
+	message: {
+		error: "Too many requests. Please slow down.",
+		retryAfter: `${Math.ceil(authWriteWindowMs / 1000)} seconds`,
+	},
 });
 
 declare module "http" {
@@ -209,14 +543,14 @@ declare module "http" {
 
 app.use(
 	express.json({
-		limit: "50mb",
+		limit: process.env.JSON_BODY_LIMIT || "15mb",
 		verify: (req, _res, buf) => {
 			req.rawBody = buf;
 		},
 	}),
 );
 
-app.use(express.urlencoded({ extended: false }));
+app.use(express.urlencoded({ extended: false, limit: process.env.URLENCODED_BODY_LIMIT || "1mb" }));
 
 // Cookie parser для работы с JWT токенами в cookies
 app.use(cookieParser());
@@ -228,7 +562,12 @@ app.use("/api/auth/register", authLimiter);
 app.use("/api/auth/forgot-password", authLimiter);
 app.use("/api/auth/reset-password", authLimiter);
 app.use("/api/auth", speedLimiter);
-app.use(generalLimiter);
+app.use("/api", anonymousBurstLimiter);
+app.use("/api", anonymousReadLimiter);
+app.use("/api", anonymousWriteLimiter);
+app.use("/api", expensiveLimiter);
+app.use("/api", authenticatedReadLimiter);
+app.use("/api", authenticatedWriteLimiter);
 
 setupAuthRoutes(app);
 
@@ -270,16 +609,22 @@ app.use((req, res, next) => {
 	};
 
 	res.on("finish", () => {
-		const duration = Date.now() - start;
-		if (path.startsWith("/api")) {
-			let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-			if (capturedJsonResponse) {
-				const safeResponse = maskSensitiveData(capturedJsonResponse);
-				logLine += ` :: ${JSON.stringify(safeResponse)}`;
-			}
+			const duration = Date.now() - start;
+			if (path.startsWith("/api")) {
+				let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
+				if (capturedJsonResponse) {
+					const safeResponse = maskSensitiveData(capturedJsonResponse);
+					if (Array.isArray(safeResponse)) {
+						logLine += ` :: response=array(${safeResponse.length})`;
+					} else if (typeof safeResponse === "object" && safeResponse !== null) {
+						logLine += ` :: response=object(${Object.keys(safeResponse).length} keys)`;
+					} else {
+						logLine += ` :: response=${typeof safeResponse}`;
+					}
+				}
 
-			log(logLine);
-		}
+				log(logLine);
+			}
 	});
 
 	next();
@@ -340,8 +685,17 @@ try {
 		const errorLike = err as { status?: number; statusCode?: number; message?: string };
 		const status = errorLike.status ?? errorLike.statusCode ?? 500;
 		const message = errorLike.message || "Internal Server Error";
-		res.status(status).json({ message });
-		throw err;
+		if (!res.headersSent) {
+			res.status(status).json({ message });
+		}
+
+		logger.error(
+			{
+				status,
+				error: err instanceof Error ? { message: err.message, stack: err.stack } : String(err),
+			},
+			"Unhandled request error",
+		);
 	});
 
 	// Setup static serving for production

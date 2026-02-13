@@ -20,11 +20,11 @@ interface RegisterRequest {
 
 interface AuthResponse {
   user: User;
-  accessToken?: string;
 }
 
 interface RefreshResponse {
-  accessToken: string;
+  success: boolean;
+  sessionType?: string;
 }
 
 class AuthAPI {
@@ -32,6 +32,8 @@ class AuthAPI {
   private refreshTimer: NodeJS.Timeout | null = null;
   private activityTimer: NodeJS.Timeout | null = null;
   private lastActivity: number = Date.now();
+  private readonly activityEvents = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart', 'click'] as const;
+  private activityHandler: (() => void) | null = null;
 
   // Запуск автоматического обновления токенов
   private startTokenRefreshTimer(): void {
@@ -80,7 +82,9 @@ class AuthAPI {
 
   // Отслеживание активности пользователя
   private startActivityTracking(): void {
-    const events = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart', 'click'];
+    if (this.activityHandler || typeof document === 'undefined') {
+      return;
+    }
     
     const updateActivity = () => {
       this.lastActivity = Date.now();
@@ -90,8 +94,9 @@ class AuthAPI {
         this.startTokenRefreshTimer();
       }
     };
+    this.activityHandler = updateActivity;
     
-    events.forEach(event => {
+    this.activityEvents.forEach(event => {
       document.addEventListener(event, updateActivity, { passive: true });
     });
     
@@ -109,6 +114,13 @@ class AuthAPI {
 
   // Остановить отслеживание активности
   private stopActivityTracking(): void {
+    if (this.activityHandler && typeof document !== 'undefined') {
+      this.activityEvents.forEach(event => {
+        document.removeEventListener(event, this.activityHandler as EventListener);
+      });
+      this.activityHandler = null;
+    }
+
     if (this.activityTimer) {
       clearInterval(this.activityTimer);
       this.activityTimer = null;
@@ -128,17 +140,9 @@ class AuthAPI {
         method: 'POST',
         body: JSON.stringify(data),
       });
-      
-      // Сохраняем access token из ответа
-      if (result.accessToken) {
-        setAccessToken(result.accessToken);
-        
-        // Запускаем автоматическое обновление токенов
-        this.startTokenRefreshTimer();
-        
-        // Запускаем отслеживание активности
-        this.startActivityTracking();
-      }
+
+      // Cookie-only auth: track activity, but do not store access token in JS.
+      this.startActivityTracking();
 
       return result;
     } catch (error) {
@@ -154,17 +158,9 @@ class AuthAPI {
         method: 'POST',
         body: JSON.stringify(data),
       });
-      
-      // Сохраняем access token из ответа
-      if (result.accessToken) {
-        setAccessToken(result.accessToken);
-        
-        // Запускаем автоматическое обновление токенов
-        this.startTokenRefreshTimer();
-        
-        // Запускаем отслеживание активности
-        this.startActivityTracking();
-      }
+
+      // Cookie-only auth: track activity, but do not store access token in JS.
+      this.startActivityTracking();
 
       return result;
     } catch (error) {
@@ -229,17 +225,13 @@ class AuthAPI {
   // Принудительное обновление токена
   async forceRefreshToken(): Promise<boolean> {
     try {
-      const result = await apiRequest<RefreshResponse>('/api/auth/refresh', {
+      await apiRequest<RefreshResponse>('/api/auth/refresh', {
         method: 'POST',
       });
-      
-      if (result.accessToken) {
-        setAccessToken(result.accessToken);
-        this.startTokenRefreshTimer();
-        return true;
-      }
-      
-      return false;
+
+      setAccessToken(null);
+      this.startActivityTracking();
+      return true;
     } catch {
       setAccessToken(null);
       return false;

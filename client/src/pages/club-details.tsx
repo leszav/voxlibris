@@ -45,6 +45,7 @@ import { useDeleteClubBook } from "@/hooks/use-books-v2";
 import { useClub, useClubMembers, useRemoveMember, type ClubMemberWithUser } from "@/hooks/use-clubs";
 import { useToast } from "@/hooks/use-toast";
 import { getAccessToken } from "@/lib/token-store";
+import DOMPurify from "dompurify";
 
 interface ScheduleItem {
   id: string;
@@ -74,7 +75,22 @@ const getMemberRoleBadgeVariant = (role: ClubMemberRole): "default" | "secondary
 const parseClubSettings = (settings: string | null): ClubSettings => {
   if (!settings) return {};
   try {
-    return JSON.parse(settings) as ClubSettings;
+    const parsed = JSON.parse(settings) as ClubSettings;
+    return {
+      ...parsed,
+      welcomeHtml: parsed.welcomeHtml
+        ? DOMPurify.sanitize(parsed.welcomeHtml, {
+            ALLOWED_TAGS: ["p", "br", "strong", "em", "u", "b", "i", "a", "ul", "ol", "li", "blockquote", "h1", "h2", "h3", "h4", "h5", "h6"],
+            ALLOWED_ATTR: ["href", "target", "rel"],
+          })
+        : undefined,
+      rulesHtml: parsed.rulesHtml
+        ? DOMPurify.sanitize(parsed.rulesHtml, {
+            ALLOWED_TAGS: ["p", "br", "strong", "em", "u", "b", "i", "a", "ul", "ol", "li", "blockquote", "h1", "h2", "h3", "h4", "h5", "h6"],
+            ALLOWED_ATTR: ["href", "target", "rel"],
+          })
+        : undefined,
+    };
   } catch {
     return {};
   }

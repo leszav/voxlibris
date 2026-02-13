@@ -38,11 +38,24 @@ export class ReaderWebSocketClient {
     }
 
     if (this.isConnecting) {
-      return new Promise((resolve) => {
+      return new Promise((resolve, reject) => {
+        const startedAt = Date.now();
         const checkConnection = setInterval(() => {
           if (this.socket?.connected) {
             clearInterval(checkConnection);
             resolve();
+            return;
+          }
+
+          if (!this.isConnecting && !this.socket?.connected) {
+            clearInterval(checkConnection);
+            reject(new Error("Reader WebSocket connection failed"));
+            return;
+          }
+
+          if (Date.now() - startedAt > 10000) {
+            clearInterval(checkConnection);
+            reject(new Error("Reader WebSocket connection timeout"));
           }
         }, 100);
       });
@@ -145,14 +158,18 @@ export class ReaderWebSocketClient {
 
       this.socket.emit("join_book", { bookId, clubId });
 
+      const handleJoinedBook = () => {
+        clearTimeout(timeout);
+        this.off("joined_book", handleJoinedBook);
+        resolve();
+      };
+
       const timeout = setTimeout(() => {
+        this.off("joined_book", handleJoinedBook);
         reject(new Error("Join book timeout"));
       }, 5000);
 
-      this.once("joined_book", () => {
-        clearTimeout(timeout);
-        resolve();
-      });
+      this.on("joined_book", handleJoinedBook);
     });
   }
 

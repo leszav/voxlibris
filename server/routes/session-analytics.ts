@@ -5,6 +5,70 @@ import { logger } from '../lib/logger.js';
 
 const router = Router();
 
+function getUserId(req: Request): string | null {
+  return req.user?.id || req.user?.userId || null;
+}
+
+function isSystemElevated(req: Request): boolean {
+  return req.user?.role === 'admin' || req.user?.role === 'moderator';
+}
+
+async function getClubRoleForUser(clubId: string, userId: string): Promise<'owner' | 'moderator' | 'member' | null> {
+  const membership = await storage.getUserClubMembership(clubId, userId);
+  if (!membership || !membership.isActive) {
+    return null;
+  }
+
+  return membership.role;
+}
+
+async function canViewClubSummary(req: Request, clubId: string): Promise<boolean> {
+  const userId = getUserId(req);
+  if (!userId) {
+    return false;
+  }
+
+  if (isSystemElevated(req)) {
+    return true;
+  }
+
+  const role = await getClubRoleForUser(clubId, userId);
+  return role !== null;
+}
+
+async function canViewClubDetailed(req: Request, clubId: string): Promise<boolean> {
+  const userId = getUserId(req);
+  if (!userId) {
+    return false;
+  }
+
+  if (isSystemElevated(req)) {
+    return true;
+  }
+
+  const role = await getClubRoleForUser(clubId, userId);
+  return role === 'owner' || role === 'moderator';
+}
+
+async function canViewSessionAnalytics(req: Request, sessionId: string): Promise<boolean> {
+  const userId = getUserId(req);
+  if (!userId) {
+    return false;
+  }
+
+  const session = await storage.getReadingSession(sessionId);
+  if (!session) {
+    return false;
+  }
+
+  if (isSystemElevated(req) || session.readerId === userId) {
+    return true;
+  }
+
+  const role = await getClubRoleForUser(session.clubId, userId);
+  return role === 'owner' || role === 'moderator';
+}
+
 /**
  * GET /api/sessions/:sessionId/analytics
  * Получить аналитику сессии
@@ -12,6 +76,14 @@ const router = Router();
 router.get('/sessions/:sessionId/analytics', async (req: Request, res: Response) => {
   try {
     const { sessionId } = req.params;
+    const userId = getUserId(req);
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        error: 'Unauthorized',
+      });
+    }
 
     // Проверяем существование сессии
     const session = await storage.getReadingSession(sessionId);
@@ -19,6 +91,14 @@ router.get('/sessions/:sessionId/analytics', async (req: Request, res: Response)
       return res.status(404).json({
         success: false,
         error: 'Session not found',
+      });
+    }
+
+    const allowed = await canViewSessionAnalytics(req, sessionId);
+    if (!allowed) {
+      return res.status(403).json({
+        success: false,
+        error: 'Insufficient permissions to access session analytics',
       });
     }
 
@@ -64,6 +144,14 @@ router.get('/sessions/:sessionId/analytics', async (req: Request, res: Response)
 router.get('/clubs/:clubId/analytics', async (req: Request, res: Response) => {
   try {
     const { clubId } = req.params;
+    const userId = getUserId(req);
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        error: 'Unauthorized',
+      });
+    }
 
     // Проверяем существование клуба
     const club = await storage.getClub(clubId);
@@ -71,6 +159,14 @@ router.get('/clubs/:clubId/analytics', async (req: Request, res: Response) => {
       return res.status(404).json({
         success: false,
         error: 'Club not found',
+      });
+    }
+
+    const allowed = await canViewClubSummary(req, clubId);
+    if (!allowed) {
+      return res.status(403).json({
+        success: false,
+        error: 'Insufficient permissions to access club analytics',
       });
     }
 
@@ -97,6 +193,14 @@ router.get('/clubs/:clubId/analytics', async (req: Request, res: Response) => {
 router.get('/clubs/:clubId/analytics/sessions', async (req: Request, res: Response) => {
   try {
     const { clubId } = req.params;
+    const userId = getUserId(req);
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        error: 'Unauthorized',
+      });
+    }
 
     // Проверяем существование клуба
     const club = await storage.getClub(clubId);
@@ -104,6 +208,14 @@ router.get('/clubs/:clubId/analytics/sessions', async (req: Request, res: Respon
       return res.status(404).json({
         success: false,
         error: 'Club not found',
+      });
+    }
+
+    const allowed = await canViewClubDetailed(req, clubId);
+    if (!allowed) {
+      return res.status(403).json({
+        success: false,
+        error: 'Insufficient permissions to access detailed club analytics',
       });
     }
 
@@ -156,6 +268,20 @@ router.get('/clubs/:clubId/analytics/sessions', async (req: Request, res: Respon
 router.get('/users/:userId/analytics/reader', async (req: Request, res: Response) => {
   try {
     const { userId } = req.params;
+    const requesterId = getUserId(req);
+    if (!requesterId) {
+      return res.status(401).json({
+        success: false,
+        error: 'Unauthorized',
+      });
+    }
+
+    if (!isSystemElevated(req) && requesterId !== userId) {
+      return res.status(403).json({
+        success: false,
+        error: 'Insufficient permissions to access reader analytics',
+      });
+    }
 
     // Проверяем существование пользователя
     const user = await storage.getUser(userId);
@@ -242,6 +368,22 @@ router.get('/users/:userId/analytics/reader', async (req: Request, res: Response
 router.get('/sessions/:sessionId/analytics/export', async (req: Request, res: Response) => {
   try {
     const { sessionId } = req.params;
+    const userId = getUserId(req);
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        error: 'Unauthorized',
+      });
+    }
+
+    const allowed = await canViewSessionAnalytics(req, sessionId);
+    if (!allowed) {
+      return res.status(403).json({
+        success: false,
+        error: 'Insufficient permissions to export session analytics',
+      });
+    }
 
     const analytics = await sessionAnalyticsService.getSessionAnalytics(sessionId);
     if (!analytics) {

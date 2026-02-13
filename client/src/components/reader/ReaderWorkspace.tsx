@@ -253,6 +253,8 @@ function useRestoreScrollPosition({
   setProgressRestored: (value: boolean) => void;
 }) {
   useEffect(() => {
+    let restoreTimeout: ReturnType<typeof setTimeout> | null = null;
+
     if (
       !progress ||
       contentLoading ||
@@ -260,13 +262,17 @@ function useRestoreScrollPosition({
       currentChapter === null ||
       currentChapter !== progress.currentChapter
     ) {
-      return;
+      return () => {
+        if (restoreTimeout) {
+          clearTimeout(restoreTimeout);
+        }
+      };
     }
 
     if (progress.currentPosition && scrollContainerRef.current) {
       try {
         const position = JSON.parse(progress.currentPosition);
-        setTimeout(() => {
+        restoreTimeout = setTimeout(() => {
           if (scrollContainerRef.current) {
             scrollContainerRef.current.scrollTop = position.scrollTop || 0;
           }
@@ -279,6 +285,12 @@ function useRestoreScrollPosition({
     }
 
     setProgressRestored(true);
+
+    return () => {
+      if (restoreTimeout) {
+        clearTimeout(restoreTimeout);
+      }
+    };
   }, [
     progress,
     contentLoading,

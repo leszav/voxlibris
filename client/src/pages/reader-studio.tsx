@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useLocation, useRoute } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
@@ -78,6 +78,7 @@ export default function ReaderStudio() {
   const [micMuted, setMicMuted] = useState(false);
   const [isStartingBroadcast, setIsStartingBroadcast] = useState(false);
   const [streamStartError, setStreamStartError] = useState<string | null>(null);
+  const initRetryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Microphone detection
   const {
@@ -143,7 +144,10 @@ export default function ReaderStudio() {
           console.error('Не удалось инициализировать сессию:', error);
         }
         // Try again after a delay if session creation fails
-        setTimeout(() => {
+        if (initRetryTimeoutRef.current) {
+          clearTimeout(initRetryTimeoutRef.current);
+        }
+        initRetryTimeoutRef.current = setTimeout(() => {
           setIsInitialized(false);
         }, 3000);
       }
@@ -153,6 +157,14 @@ export default function ReaderStudio() {
       initializeSession();
     }
   }, [user, isInitialized, clubId, bookId, currentChapter, clubData]);
+
+  useEffect(() => {
+    return () => {
+      if (initRetryTimeoutRef.current) {
+        clearTimeout(initRetryTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // Check cached microphone check on mount
   useEffect(() => {
@@ -190,7 +202,9 @@ export default function ReaderStudio() {
   // Log audio errors
   useEffect(() => {
     if (audioError) {
-      console.error('[Studio] Audio error:', audioError);
+      if (import.meta.env.DEV) {
+        console.error('[Studio] Audio error:', audioError);
+      }
       setStreamStartError(audioError);
     }
   }, [audioError]);

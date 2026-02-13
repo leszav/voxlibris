@@ -94,57 +94,15 @@ class Scheduler {
   private async checkSchedule(): Promise<void> {
     try {
       const now = new Date();
+      const dueSchedules = await repositories.readingSchedule.getSchedulesDueForReminder(now);
 
-      // Получаем все расписания со статусом "scheduled"
-      // Для простоты проверяем все клубы. В продакшене можно оптимизировать.
-      const clubs = await repositories.clubs.getClubs();
-
-      for (const club of clubs) {
-        await this.checkClubSchedules(club.id, now);
+      for (const schedule of dueSchedules) {
+        await this.sendReminders(schedule);
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       logger.error({ error: errorMessage }, 'Error checking schedule');
     }
-  }
-
-  private async checkClubSchedules(clubId: string, now: Date): Promise<void> {
-    try {
-      const schedules = await repositories.readingSchedule.getClubSchedule(clubId);
-
-      for (const schedule of schedules) {
-        if (!this.shouldSendReminder(schedule, now)) {
-          continue;
-        }
-
-        await this.sendReminders(schedule);
-      }
-    } catch (clubError) {
-      const errorMessage = clubError instanceof Error ? clubError.message : String(clubError);
-      logger.error({ error: errorMessage }, `Error checking schedule for club ${clubId}`);
-    }
-  }
-
-  private shouldSendReminder(schedule: ReadingSchedule, now: Date): boolean {
-    if (schedule.remindersSent) {
-      return false;
-    }
-
-    if (schedule.status !== 'scheduled' || !schedule.scheduledStart) {
-      return false;
-    }
-
-    const scheduledStart = new Date(schedule.scheduledStart);
-    if (scheduledStart <= now) {
-      return false;
-    }
-
-    const timeDiff = scheduledStart.getTime() - now.getTime();
-    const reminderMinutes = schedule.reminderMinutes ?? 15;
-    const reminderThreshold = reminderMinutes * 60 * 1000;
-    const tolerance = 60 * 1000; // 1 минута допуска
-
-    return Math.abs(timeDiff - reminderThreshold) <= tolerance;
   }
 
   /**

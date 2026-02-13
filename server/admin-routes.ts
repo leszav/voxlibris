@@ -6,8 +6,16 @@ import { emailService } from './services/email-service.js';
 import type { UserRole, UserStatus, AdminActionType, AdminActionTargetType } from '../shared/schema.js';
 import { db } from './db.js';
 import postgres from 'postgres';
-import { books, personalBooks, clubBooks } from '../shared/schema.js';
+import { and, desc, eq, inArray, sql } from 'drizzle-orm';
+import type { SQL } from 'drizzle-orm';
+import { books, personalBooks, clubBooks, users, clubs, clubMembers } from '../shared/schema.js';
 import { logger } from './lib/logger.js';
+import {
+  getPublicBaseUrl,
+  invalidatePublicBaseUrlCache,
+  normalizePublicBaseUrl,
+  platformBaseUrlSettingKey,
+} from './lib/public-base-url.js';
 const PostgresError = postgres.PostgresError;
 
 const router = express.Router();
@@ -77,67 +85,173 @@ const logAction = (
   req
 });
 
+const DEFAULT_ADMIN_PAGE_LIMIT = 20;
+const MAX_ADMIN_PAGE_LIMIT = 100;
+
+function parsePositiveInt(value: unknown, fallback: number, max?: number): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+
+  const normalized = Math.floor(parsed);
+  if (normalized < 1) {
+    return fallback;
+  }
+
+  return max ? Math.min(normalized, max) : normalized;
+}
+
+function parseAdminPagination(pageRaw: unknown, limitRaw: unknown) {
+  const page = parsePositiveInt(pageRaw, 1);
+  const limit = parsePositiveInt(limitRaw, DEFAULT_ADMIN_PAGE_LIMIT, MAX_ADMIN_PAGE_LIMIT);
+
+  return {
+    page,
+    limit,
+    offset: (page - 1) * limit,
+  };
+}
+
+function buildAdminUsersWhere(params: {
+  search?: string;
+  role?: string;
+  status?: string;
+  includeDeleted: boolean;
+}): SQL<unknown>[] {
+  const conditions: SQL<unknown>[] = [];
+
+  if (!params.includeDeleted) {
+    conditions.push(sql`${users.status} != 'deleted'`);
+  }
+
+  if (params.search) {
+    conditions.push(sql`LOWER(${users.username}) LIKE ${`%${params.search.toLowerCase()}%`}`);
+  }
+
+  if (params.role) {
+    conditions.push(eq(users.role, params.role as UserRole));
+  }
+
+  if (params.status) {
+    conditions.push(eq(users.status, params.status as UserStatus));
+  }
+
+  return conditions;
+}
+
+type AdminUserRow = {
+  id: string;
+  username: string;
+  email: string;
+  role: UserRole;
+  status: UserStatus;
+  createdAt: Date | null;
+  lastActivityAt: Date | null;
+  booksRead: number;
+  clubsJoined: number;
+  clubsCreated: number;
+};
+
+function formatAdminUserForResponse(user: AdminUserRow) {
+  return {
+    id: user.id,
+    username: user.username,
+    email: user.email,
+    role: user.role,
+    status: user.status,
+    created_at: user.createdAt?.toISOString() || null,
+    last_active: user.lastActivityAt?.toISOString() || null,
+    books_read: Number(user.booksRead || 0),
+    clubs_joined: Number(user.clubsJoined || 0),
+    clubs_created: Number(user.clubsCreated || 0),
+  };
+}
+
+async function queryAdminUsersWithStats(params: {
+  conditions: SQL<unknown>[];
+  limit?: number;
+  offset?: number;
+}) {
+  const whereClause =
+    params.conditions.length === 0
+      ? sql`true`
+      : params.conditions.length === 1
+        ? params.conditions[0]
+        : (and(...params.conditions) as SQL<unknown>);
+
+  const [totalRow] = await db
+    .select({
+      count: sql<number>`COUNT(*)::int`,
+    })
+    .from(users)
+    .where(whereClause);
+
+  const baseUsersQuery = db
+    .select({
+      id: users.id,
+      username: users.username,
+      email: users.email,
+      role: users.role,
+      status: users.status,
+      createdAt: users.createdAt,
+      lastActivityAt: users.lastActivityAt,
+      booksRead: sql<number>`(
+        SELECT COUNT(*)::int
+        FROM ${personalBooks}
+        WHERE ${personalBooks.userId} = ${users.id}
+          AND ${personalBooks.isDeleted} = false
+      )`,
+      clubsJoined: sql<number>`(
+        SELECT COUNT(*)::int
+        FROM ${clubMembers}
+        WHERE ${clubMembers.userId} = ${users.id}
+          AND ${clubMembers.isActive} = true
+      )`,
+      clubsCreated: sql<number>`(
+        SELECT COUNT(*)::int
+        FROM ${clubs}
+        WHERE ${clubs.ownerId} = ${users.id}
+      )`,
+    })
+    .from(users)
+    .where(whereClause)
+    .orderBy(desc(users.createdAt));
+
+  const rows = typeof params.limit === 'number' && typeof params.offset === 'number'
+    ? await baseUsersQuery.limit(params.limit).offset(params.offset)
+    : await baseUsersQuery;
+
+  return {
+    total: Number(totalRow?.count || 0),
+    users: rows.map(formatAdminUserForResponse),
+  };
+}
+
 // ==== USER MANAGEMENT ====
 
 // Получить список всех пользователей
 router.get('/users', jwtAuth, requireAdmin, async (req, res) => {
   try {
-    const { page = 1, limit = 20, search, role, status } = req.query;
+    const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+    const role = typeof req.query.role === 'string' ? req.query.role : undefined;
+    const status = typeof req.query.status === 'string' ? req.query.status : undefined;
+    const { page, limit, offset } = parseAdminPagination(req.query.page, req.query.limit);
 
-    const allUsers = await storage.getAllUsers();
+    const conditions = buildAdminUsersWhere({
+      search: search || undefined,
+      role,
+      status,
+      includeDeleted: false,
+    });
 
-    let filteredUsers = allUsers;
-
-    if (search && typeof search === 'string') {
-      const searchStr = search.toLowerCase();
-      filteredUsers = filteredUsers.filter(user =>
-        user.username.toLowerCase().includes(searchStr)
-      );
-    }
-
-    if (role && typeof role === 'string') {
-      filteredUsers = filteredUsers.filter(user => user.role === role);
-    }
-
-    if (status && typeof status === 'string') {
-      filteredUsers = filteredUsers.filter(user => user.status === status);
-    }
-
-    const offset = (Number(page) - 1) * Number(limit);
-    const paginatedUsers = filteredUsers.slice(offset, offset + Number(limit));
-
-    const usersWithStats = await Promise.all(paginatedUsers.map(async (user) => {
-      const { password: _password, createdAt, lastActivityAt, ...rest } = user;
-
-      const personalBooks = await storage.getPersonalBooksByUser(user.id);
-      const booksRead = personalBooks.filter(book => !book.isDeleted).length;
-
-      const clubsByUser = await storage.getClubsByUser(user.id);
-      const clubsJoined = clubsByUser.length;
-
-      const createdClubs = await storage.getClubsOwnedByUser(user.id);
-      const clubsCreated = createdClubs.length;
-
-      return {
-        ...rest,
-        id: user.id,
-        username: user.username,
-        email: user.email,
-        role: user.role,
-        status: user.status,
-        created_at: createdAt?.toISOString() || null,
-        last_active: lastActivityAt?.toISOString() || null,
-        books_read: booksRead,
-        clubs_joined: clubsJoined,
-        clubs_created: clubsCreated,
-      };
-    }));
+    const result = await queryAdminUsersWithStats({ conditions, limit, offset });
 
     res.json({
-      users: usersWithStats,
-      total: filteredUsers.length,
-      page: Number(page),
-      limit: Number(limit),
+      users: result.users,
+      total: result.total,
+      page,
+      limit,
     });
   } catch (error) {
     console.error('Error fetching users:', error);
@@ -189,10 +303,19 @@ router.put('/users/:username/status', jwtAuth, requireAdmin, async (req, res) =>
       return res.status(400).json({ message: 'Invalid status' });
     }
 
+    const existingUser = await storage.getUserByUsername(username);
+    if (!existingUser) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
     const updatedUser = await storage.updateUserStatus(username, status as UserStatus);
 
     if (!updatedUser) {
       return res.status(404).json({ message: 'User not found' });
+    }
+
+    if (status === 'suspended' || status === 'deleted') {
+      await storage.revokeAllUserRefreshTokens(updatedUser.id);
     }
 
     await logAction(
@@ -201,7 +324,7 @@ router.put('/users/:username/status', jwtAuth, requireAdmin, async (req, res) =>
       'user',
       updatedUser.id,
       `Changed status to ${status}`,
-      updatedUser.status,
+      existingUser.status,
       status
     );
 
@@ -224,7 +347,7 @@ router.post('/users/:id/reset-password', jwtAuth, requireFullAdmin, async (req, 
       return res.status(404).json({ message: 'User not found' });
     }
 
-    const baseUrl = `${req.protocol}://${req.get('host')}`;
+    const baseUrl = await getPublicBaseUrl();
     const result = await authService.requestPasswordReset(
       user.email,
       baseUrl,
@@ -401,36 +524,13 @@ router.delete('/users/:id/permanent', jwtAuth, requireFullAdmin, async (req, res
 // Получить список удаленных пользователей
 router.get('/users/deleted', jwtAuth, requireAdmin, async (req, res) => {
   try {
-    const deletedUsers = await storage.getDeletedUsers();
+    const conditions = buildAdminUsersWhere({
+      includeDeleted: true,
+      status: 'deleted',
+    });
 
-    const usersWithStats = await Promise.all(deletedUsers.map(async (user) => {
-      const { password: _password, createdAt, lastActivityAt, ...rest } = user;
-
-      const personalBooks = await storage.getPersonalBooksByUser(user.id);
-      const booksRead = personalBooks.filter(book => !book.isDeleted).length;
-
-      const clubsByUser = await storage.getClubsByUser(user.id);
-      const clubsJoined = clubsByUser.length;
-
-      const createdClubs = await storage.getClubsOwnedByUser(user.id);
-      const clubsCreated = createdClubs.length;
-
-      return {
-        ...rest,
-        id: user.id,
-        username: user.username,
-        email: user.email,
-        role: user.role,
-        status: user.status,
-        created_at: createdAt?.toISOString() || null,
-        last_active: lastActivityAt?.toISOString() || null,
-        books_read: booksRead,
-        clubs_joined: clubsJoined,
-        clubs_created: clubsCreated,
-      };
-    }));
-
-    res.json({ users: usersWithStats });
+    const result = await queryAdminUsersWithStats({ conditions });
+    res.json({ users: result.users });
   } catch (error) {
     console.error('Error fetching deleted users:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -550,16 +650,11 @@ function formatBookForAdmin(book: BookWithSource, usersMap: Map<string, string>)
 
 // Helper functions to reduce cognitive complexity
 async function fetchAllBooksFromSources(): Promise<BookWithSource[]> {
-  const allBooks = await storage.getBooks();
-  const allUsers = await storage.getAllUsers();
-  const allPersonalBooks = [];
-  
-  for (const user of allUsers) {
-    const userPersonalBooks = await storage.getPersonalBooksByUser(user.id);
-    allPersonalBooks.push(...userPersonalBooks);
-  }
-
-  const allClubBooks = await storage.getAllClubBooks();
+  const [allBooks, allPersonalBooks, allClubBooks] = await Promise.all([
+    storage.getBooks(),
+    storage.getAllPersonalBooks(),
+    storage.getAllClubBooks(),
+  ]);
 
   return [
     ...allBooks.map(book => ({ ...book, source: 'books' as const })),
@@ -586,12 +681,12 @@ function applyBooksFiltering(books: BookWithSource[], search?: string, status?: 
   return filtered;
 }
 
-async function buildUsersMap(books: BookWithSource[]): Promise<Map<string, string>> {
-  const usersMap = new Map();
-  
-  for (const book of books) {
+async function buildUsersMap(booksToFormat: BookWithSource[]): Promise<Map<string, string>> {
+  const userIds = new Set<string>();
+
+  for (const book of booksToFormat) {
     let userId: string | undefined;
-    
+
     if (book.source === 'books' && 'uploadedBy' in book) {
       userId = book.uploadedBy || undefined;
     } else if (book.source === 'personal_books' && 'userId' in book) {
@@ -599,40 +694,292 @@ async function buildUsersMap(books: BookWithSource[]): Promise<Map<string, strin
     } else if (book.source === 'club_books' && 'uploadedByUserId' in book) {
       userId = book.uploadedByUserId;
     }
-    
-    if (userId && !usersMap.has(userId)) {
-      const user = await storage.getUser(userId);
-      if (user) {
-        usersMap.set(userId, user.username);
-      }
+
+    if (userId) {
+      userIds.add(userId);
     }
   }
-  
-  return usersMap;
+
+  if (userIds.size === 0) {
+    return new Map();
+  }
+
+  const usersData = await db
+    .select({
+      id: users.id,
+      username: users.username,
+    })
+    .from(users)
+    .where(inArray(users.id, Array.from(userIds)));
+
+  return new Map(usersData.map((user) => [user.id, user.username]));
 }
 
 // Получить список всех книг (refactored for low cognitive complexity)
 router.get('/books', jwtAuth, requireAdmin, async (req, res) => {
   try {
-    const { page = 1, limit = 20, search, status } = req.query;
+    const search = typeof req.query.search === 'string' ? req.query.search.trim().toLowerCase() : '';
+    const status = typeof req.query.status === 'string' ? req.query.status : undefined;
+    const { page, limit, offset } = parseAdminPagination(req.query.page, req.query.limit);
 
-    const combinedBooks = await fetchAllBooksFromSources();
-    const filteredBooks = applyBooksFiltering(combinedBooks, search as string, status as string);
-    
-    // Пагинация
-    const offset = (Number(page) - 1) * Number(limit);
-    const paginatedBooks = filteredBooks.slice(offset, offset + Number(limit));
+    if (status && !['active', 'blocked', 'pending'].includes(status)) {
+      return res.json({
+        books: [],
+        pagination: {
+          page,
+          limit,
+          total: 0,
+          pages: 0,
+        },
+      });
+    }
 
-    const usersMap = await buildUsersMap(paginatedBooks);
-    const formattedBooks = paginatedBooks.map(book => formatBookForAdmin(book, usersMap));
+    const searchPattern = search ? `%${search}%` : null;
+
+    const sourceWhere = (conditions: SQL<unknown>[]): SQL<unknown> | undefined => {
+      if (conditions.length === 0) {
+        return undefined;
+      }
+      if (conditions.length === 1) {
+        return conditions[0];
+      }
+      return and(...conditions) as SQL<unknown>;
+    };
+
+    const booksConditions: SQL<unknown>[] = [];
+    if (searchPattern) {
+      booksConditions.push(
+        sql`(LOWER(${books.title}) LIKE ${searchPattern} OR LOWER(${books.author}) LIKE ${searchPattern})`,
+      );
+    }
+    if (status === 'active') {
+      booksConditions.push(eq(books.status, 'active'));
+    } else if (status === 'blocked') {
+      booksConditions.push(eq(books.status, 'blocked'));
+    } else if (status === 'pending') {
+      booksConditions.push(sql`${books.status} NOT IN ('active', 'blocked')`);
+    }
+
+    const personalConditions: SQL<unknown>[] = [];
+    if (searchPattern) {
+      personalConditions.push(
+        sql`(LOWER(${personalBooks.title}) LIKE ${searchPattern} OR LOWER(${personalBooks.author}) LIKE ${searchPattern})`,
+      );
+    }
+    if (status === 'active') {
+      personalConditions.push(eq(personalBooks.isDeleted, false));
+    } else if (status === 'blocked') {
+      personalConditions.push(eq(personalBooks.isDeleted, true));
+    } else if (status === 'pending') {
+      personalConditions.push(sql`false`);
+    }
+
+    const clubConditions: SQL<unknown>[] = [];
+    if (searchPattern) {
+      clubConditions.push(
+        sql`(LOWER(${clubBooks.title}) LIKE ${searchPattern} OR LOWER(${clubBooks.author}) LIKE ${searchPattern})`,
+      );
+    }
+    if (status === 'active') {
+      clubConditions.push(eq(clubBooks.isDeleted, false));
+    } else if (status === 'blocked') {
+      clubConditions.push(eq(clubBooks.isDeleted, true));
+    } else if (status === 'pending') {
+      clubConditions.push(sql`false`);
+    }
+
+    const booksWhere = sourceWhere(booksConditions);
+    const personalWhere = sourceWhere(personalConditions);
+    const clubWhere = sourceWhere(clubConditions);
+
+    const [booksCountRows, personalCountRows, clubCountRows] = await Promise.all([
+      booksWhere
+        ? db.select({ count: sql<number>`COUNT(*)::int` }).from(books).where(booksWhere)
+        : db.select({ count: sql<number>`COUNT(*)::int` }).from(books),
+      personalWhere
+        ? db.select({ count: sql<number>`COUNT(*)::int` }).from(personalBooks).where(personalWhere)
+        : db.select({ count: sql<number>`COUNT(*)::int` }).from(personalBooks),
+      clubWhere
+        ? db.select({ count: sql<number>`COUNT(*)::int` }).from(clubBooks).where(clubWhere)
+        : db.select({ count: sql<number>`COUNT(*)::int` }).from(clubBooks),
+    ]);
+
+    const booksCount = Number(booksCountRows[0]?.count || 0);
+    const personalCount = Number(personalCountRows[0]?.count || 0);
+    const clubCount = Number(clubCountRows[0]?.count || 0);
+    const total = booksCount + personalCount + clubCount;
+
+    let remainingOffset = offset;
+    let remainingLimit = limit;
+
+    const calculateWindow = (segmentCount: number) => {
+      if (remainingLimit <= 0) {
+        return { skip: 0, take: 0 };
+      }
+      if (remainingOffset >= segmentCount) {
+        remainingOffset -= segmentCount;
+        return { skip: 0, take: 0 };
+      }
+
+      const skip = remainingOffset;
+      const take = Math.min(remainingLimit, segmentCount - skip);
+
+      remainingOffset = 0;
+      remainingLimit -= take;
+
+      return { skip, take };
+    };
+
+    const booksWindow = calculateWindow(booksCount);
+    const personalWindow = calculateWindow(personalCount);
+    const clubWindow = calculateWindow(clubCount);
+
+    const booksQuery = db
+      .select({
+        id: books.id,
+        title: books.title,
+        author: books.author,
+        isbn: books.isbn,
+        coverUrl: books.coverUrl,
+        fileUrl: books.contentPath,
+        uploadedBy: users.username,
+        uploadedAt: books.uploadedAt,
+        createdAt: books.createdAt,
+        fileSize: books.fileSize,
+        downloadsCount: books.downloadCount,
+        description: books.description,
+        status: sql<string>`CASE
+          WHEN ${books.status} = 'active' THEN 'active'
+          WHEN ${books.status} = 'blocked' THEN 'blocked'
+          ELSE 'pending'
+        END`,
+      })
+      .from(books)
+      .leftJoin(users, eq(books.uploadedBy, users.id))
+      .orderBy(desc(books.createdAt));
+
+    const personalQuery = db
+      .select({
+        id: personalBooks.id,
+        title: personalBooks.title,
+        author: personalBooks.author,
+        genre: personalBooks.genre,
+        coverUrl: personalBooks.coverUrl,
+        fileUrl: personalBooks.storagePath,
+        uploadedBy: users.username,
+        uploadedAt: personalBooks.uploadedAt,
+        fileSize: personalBooks.fileSizeBytes,
+        description: personalBooks.description,
+        status: sql<string>`CASE
+          WHEN ${personalBooks.isDeleted} = true THEN 'blocked'
+          ELSE 'active'
+        END`,
+      })
+      .from(personalBooks)
+      .leftJoin(users, eq(personalBooks.userId, users.id))
+      .orderBy(desc(personalBooks.createdAt));
+
+    const clubQuery = db
+      .select({
+        id: clubBooks.id,
+        title: clubBooks.title,
+        author: clubBooks.author,
+        genre: clubBooks.genre,
+        coverUrl: clubBooks.coverUrl,
+        fileUrl: clubBooks.storagePath,
+        uploadedBy: users.username,
+        uploadedAt: clubBooks.uploadedAt,
+        fileSize: clubBooks.fileSizeBytes,
+        description: clubBooks.description,
+        clubId: clubBooks.clubId,
+        status: sql<string>`CASE
+          WHEN ${clubBooks.isDeleted} = true THEN 'blocked'
+          ELSE 'active'
+        END`,
+      })
+      .from(clubBooks)
+      .leftJoin(users, eq(clubBooks.uploadedByUserId, users.id))
+      .orderBy(desc(clubBooks.createdAt));
+
+    const [booksRows, personalRows, clubRows] = await Promise.all([
+      booksWindow.take > 0
+        ? (booksWhere
+          ? booksQuery.where(booksWhere).limit(booksWindow.take).offset(booksWindow.skip)
+          : booksQuery.limit(booksWindow.take).offset(booksWindow.skip))
+        : Promise.resolve([]),
+      personalWindow.take > 0
+        ? (personalWhere
+          ? personalQuery.where(personalWhere).limit(personalWindow.take).offset(personalWindow.skip)
+          : personalQuery.limit(personalWindow.take).offset(personalWindow.skip))
+        : Promise.resolve([]),
+      clubWindow.take > 0
+        ? (clubWhere
+          ? clubQuery.where(clubWhere).limit(clubWindow.take).offset(clubWindow.skip)
+          : clubQuery.limit(clubWindow.take).offset(clubWindow.skip))
+        : Promise.resolve([]),
+    ]);
+
+    const formattedBooks = [
+      ...booksRows.map((book) => ({
+        id: book.id,
+        title: book.title,
+        author: book.author,
+        isbn: book.isbn || null,
+        genre: null,
+        cover_url: book.coverUrl || null,
+        file_url: book.fileUrl || '',
+        status: book.status,
+        uploaded_by: book.uploadedBy || 'System',
+        upload_date: (book.uploadedAt || book.createdAt).toISOString(),
+        file_size: book.fileSize || 0,
+        downloads_count: book.downloadsCount || 0,
+        description: book.description || null,
+        source: 'books',
+        club_id: null,
+      })),
+      ...personalRows.map((book) => ({
+        id: book.id,
+        title: book.title,
+        author: book.author,
+        isbn: null,
+        genre: book.genre || null,
+        cover_url: book.coverUrl || null,
+        file_url: book.fileUrl || '',
+        status: book.status,
+        uploaded_by: book.uploadedBy || 'System',
+        upload_date: book.uploadedAt.toISOString(),
+        file_size: book.fileSize || 0,
+        downloads_count: 0,
+        description: book.description || null,
+        source: 'personal_books',
+        club_id: null,
+      })),
+      ...clubRows.map((book) => ({
+        id: book.id,
+        title: book.title,
+        author: book.author,
+        isbn: null,
+        genre: book.genre || null,
+        cover_url: book.coverUrl || null,
+        file_url: book.fileUrl || '',
+        status: book.status,
+        uploaded_by: book.uploadedBy || 'System',
+        upload_date: book.uploadedAt.toISOString(),
+        file_size: book.fileSize || 0,
+        downloads_count: 0,
+        description: book.description || null,
+        source: 'club_books',
+        club_id: book.clubId,
+      })),
+    ];
 
     res.json({
       books: formattedBooks,
       pagination: {
-        page: Number(page),
-        limit: Number(limit),
-        total: filteredBooks.length,
-        pages: Math.ceil(filteredBooks.length / Number(limit))
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit)
       }
     });
   } catch (error) {
@@ -804,75 +1151,82 @@ router.delete('/books/:id', jwtAuth, requireAdmin, async (req, res) => {
 // Получить список всех клубов
 router.get('/clubs', jwtAuth, requireAdmin, async (req, res) => {
   try {
-    const { page = 1, limit = 20, search, status } = req.query;
+    const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+    const status = typeof req.query.status === 'string' ? req.query.status : undefined;
+    const { page, limit, offset } = parseAdminPagination(req.query.page, req.query.limit);
 
-    const allClubs = await storage.getClubs();
-
-    let filteredClubs = allClubs;
-
-    if (search && typeof search === 'string') {
-      const searchStr = search.toLowerCase();
-      filteredClubs = filteredClubs.filter(club =>
-        club.title.toLowerCase().includes(searchStr)
-      );
+    const conditions: SQL<unknown>[] = [sql`${clubs.status} != 'pending'`];
+    if (search) {
+      conditions.push(sql`LOWER(${clubs.title}) LIKE ${`%${search.toLowerCase()}%`}`);
+    }
+    if (status) {
+      conditions.push(eq(clubs.status, status as typeof clubs.$inferSelect['status']));
     }
 
-    if (status && typeof status === 'string') {
-      filteredClubs = filteredClubs.filter(club => club.status === status);
-    }
+    const whereClause = conditions.length === 1 ? conditions[0] : (and(...conditions) as SQL<unknown>);
 
-    // Пагинация
-    const offset = (Number(page) - 1) * Number(limit);
-    const paginatedClubs = filteredClubs.slice(offset, offset + Number(limit));
+    const [totalRows, rows] = await Promise.all([
+      db
+        .select({ count: sql<number>`COUNT(*)::int` })
+        .from(clubs)
+        .where(whereClause),
+      db
+        .select({
+          id: clubs.id,
+          name: clubs.title,
+          description: clubs.description,
+          bookId: clubs.bookId,
+          regularBookTitle: books.title,
+          regularBookAuthor: books.author,
+          clubBookTitle: clubBooks.title,
+          clubBookAuthor: clubBooks.author,
+          creatorUsername: users.username,
+          status: clubs.status,
+          createdAt: clubs.createdAt,
+          maxParticipants: clubs.maxMembers,
+          readingSchedule: clubs.schedule,
+          isPrivate: clubs.isPrivate,
+          currentParticipants: sql<number>`(
+            SELECT COUNT(*)::int
+            FROM ${clubMembers}
+            WHERE ${clubMembers.clubId} = ${clubs.id}
+              AND ${clubMembers.isActive} = true
+          )`,
+        })
+        .from(clubs)
+        .leftJoin(users, eq(clubs.ownerId, users.id))
+        .leftJoin(books, eq(clubs.bookId, books.id))
+        .leftJoin(clubBooks, eq(clubs.bookId, clubBooks.id))
+        .where(whereClause)
+        .orderBy(desc(clubs.popularityScore), desc(clubs.createdAt))
+        .limit(limit)
+        .offset(offset),
+    ]);
 
-    // Получаем дополнительную информацию для каждого клуба
-    const formattedClubs = await Promise.all(paginatedClubs.map(async (club) => {
-      // Получаем информацию о книге
-      let bookTitle = 'N/A';
-      let bookAuthor = 'N/A';
-      if (club.bookId) {
-        const book = await storage.getBook(club.bookId);
-        if (book) {
-          bookTitle = book.title;
-          bookAuthor = book.author;
-        }
-      }
-
-      // Получаем информацию о создателе
-      let creatorUsername = 'Unknown';
-      const creator = await storage.getUser(club.ownerId);
-      if (creator) {
-        creatorUsername = creator.username;
-      }
-
-      // Получаем количество участников
-      const members = await storage.getClubMembers(club.id);
-      const currentParticipants = members.length;
-
-      return {
-        id: club.id,
-        name: club.title,
-        description: club.description,
-        book_id: club.bookId,
-        book_title: bookTitle,
-        book_author: bookAuthor,
-        creator_username: creatorUsername,
-        status: club.status,
-        created_at: club.createdAt.toISOString(),
-        max_participants: club.maxMembers,
-        current_participants: currentParticipants,
-        reading_schedule: club.schedule,
-        is_public: !club.isPrivate,
-      };
+    const total = Number(totalRows[0]?.count || 0);
+    const formattedClubs = rows.map((club) => ({
+      id: club.id,
+      name: club.name,
+      description: club.description,
+      book_id: club.bookId,
+      book_title: club.regularBookTitle || club.clubBookTitle || 'N/A',
+      book_author: club.regularBookAuthor || club.clubBookAuthor || 'N/A',
+      creator_username: club.creatorUsername || 'Unknown',
+      status: club.status,
+      created_at: club.createdAt.toISOString(),
+      max_participants: club.maxParticipants,
+      current_participants: Number(club.currentParticipants || 0),
+      reading_schedule: club.readingSchedule,
+      is_public: !club.isPrivate,
     }));
 
     res.json({
       clubs: formattedClubs,
       pagination: {
-        page: Number(page),
-        limit: Number(limit),
-        total: filteredClubs.length,
-        pages: Math.ceil(filteredClubs.length / Number(limit))
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit)
       }
     });
   } catch (error) {
@@ -973,30 +1327,52 @@ router.delete('/clubs/:id', jwtAuth, requireAdmin, async (req, res) => {
 // ==== CLUB MODERATION ====
 
 // Получить клубы на модерации
-router.get('/clubs/pending', jwtAuth, requireAdmin, async (req, res) => {
+router.get('/clubs/pending', jwtAuth, requireAdmin, async (_req, res) => {
   try {
-    const pendingClubs = await storage.getClubsForModeration();
-    
-    const clubsFormatted = await Promise.all(pendingClubs.map(async (club) => {
-      return {
-        id: club.id,
-        title: club.title,
-        description: club.description,
-        coverImage: club.coverImage,
-        type: club.type,
-        isPrivate: club.isPrivate,
-        status: club.status,
-        owner: {
-          id: club.owner?.id,
-          username: club.owner?.username,
-          email: club.owner?.email,
-        },
-        memberCount: club.memberCount,
-        maxMembers: club.maxMembers,
-        createdAt: club.createdAt.toISOString(),
-      };
+    const pendingClubs = await db
+      .select({
+        id: clubs.id,
+        title: clubs.title,
+        description: clubs.description,
+        coverImage: clubs.coverImage,
+        type: clubs.type,
+        isPrivate: clubs.isPrivate,
+        status: clubs.status,
+        ownerId: users.id,
+        ownerUsername: users.username,
+        ownerEmail: users.email,
+        maxMembers: clubs.maxMembers,
+        createdAt: clubs.createdAt,
+        memberCount: sql<number>`(
+          SELECT COUNT(*)::int
+          FROM ${clubMembers}
+          WHERE ${clubMembers.clubId} = ${clubs.id}
+            AND ${clubMembers.isActive} = true
+        )`,
+      })
+      .from(clubs)
+      .leftJoin(users, eq(clubs.ownerId, users.id))
+      .where(eq(clubs.status, 'pending'))
+      .orderBy(clubs.createdAt);
+
+    const clubsFormatted = pendingClubs.map((club) => ({
+      id: club.id,
+      title: club.title,
+      description: club.description,
+      coverImage: club.coverImage,
+      type: club.type,
+      isPrivate: club.isPrivate,
+      status: club.status,
+      owner: {
+        id: club.ownerId,
+        username: club.ownerUsername,
+        email: club.ownerEmail,
+      },
+      memberCount: Number(club.memberCount || 0),
+      maxMembers: club.maxMembers,
+      createdAt: club.createdAt.toISOString(),
     }));
-    
+
     res.json({
       clubs: clubsFormatted,
       total: clubsFormatted.length
@@ -1110,45 +1486,93 @@ router.put('/clubs/:id/reject', jwtAuth, requireAdmin, async (req, res) => {
 // ==== STATISTICS ====
 
 // Получить общую статистику системы
-router.get('/stats/overview', jwtAuth, requireAdmin, async (req, res) => {
+router.get('/stats/overview', jwtAuth, requireAdmin, async (_req, res) => {
   try {
-    const [users, books, clubs] = await Promise.all([
-      storage.getAllUsers(),
-      storage.getBooks(),
-      storage.getClubs()
+    const [userStatsRows, generalBookStatsRows, personalBookStatsRows, clubBookStatsRows, clubStatsRows] = await Promise.all([
+      db
+        .select({
+          total: sql<number>`COUNT(*)::int`,
+          active: sql<number>`COUNT(*) FILTER (WHERE ${users.status} = 'active')::int`,
+          pending: sql<number>`COUNT(*) FILTER (WHERE ${users.status} = 'pending')::int`,
+          suspended: sql<number>`COUNT(*) FILTER (WHERE ${users.status} = 'suspended')::int`,
+          admins: sql<number>`COUNT(*) FILTER (WHERE ${users.role} = 'admin')::int`,
+          moderators: sql<number>`COUNT(*) FILTER (WHERE ${users.role} = 'moderator')::int`,
+        })
+        .from(users)
+        .where(sql`${users.status} != 'deleted'`),
+      db
+        .select({
+          total: sql<number>`COUNT(*)::int`,
+          active: sql<number>`COUNT(*) FILTER (WHERE ${books.status} = 'active')::int`,
+          blocked: sql<number>`COUNT(*) FILTER (WHERE ${books.status} = 'blocked')::int`,
+        })
+        .from(books),
+      db
+        .select({
+          total: sql<number>`COUNT(*)::int`,
+          active: sql<number>`COUNT(*) FILTER (WHERE ${personalBooks.isDeleted} = false)::int`,
+          blocked: sql<number>`COUNT(*) FILTER (WHERE ${personalBooks.isDeleted} = true)::int`,
+        })
+        .from(personalBooks),
+      db
+        .select({
+          total: sql<number>`COUNT(*)::int`,
+          active: sql<number>`COUNT(*) FILTER (WHERE ${clubBooks.isDeleted} = false)::int`,
+          blocked: sql<number>`COUNT(*) FILTER (WHERE ${clubBooks.isDeleted} = true)::int`,
+        })
+        .from(clubBooks),
+      db
+        .select({
+          total: sql<number>`COUNT(*)::int`,
+          active: sql<number>`COUNT(*) FILTER (WHERE ${clubs.status} = 'active')::int`,
+          recruiting: sql<number>`COUNT(*) FILTER (WHERE ${clubs.status} = 'recruiting')::int`,
+          completed: sql<number>`COUNT(*) FILTER (WHERE ${clubs.status} = 'completed')::int`,
+          archived: sql<number>`COUNT(*) FILTER (WHERE ${clubs.status} = 'archived')::int`,
+        })
+        .from(clubs)
+        .where(sql`${clubs.status} != 'pending'`),
     ]);
 
-    // Получаем все персональные книги пользователей
-    const allPersonalBooks = [];
-    for (const user of users) {
-      const userPersonalBooks = await storage.getPersonalBooksByUser(user.id);
-      allPersonalBooks.push(...userPersonalBooks);
-    }
-
-    // Получаем все книги клубов
-    const allClubBooks = await storage.getAllClubBooks();
+    const userStatsRaw = userStatsRows[0] || {
+      total: 0,
+      active: 0,
+      pending: 0,
+      suspended: 0,
+      admins: 0,
+      moderators: 0,
+    };
+    const generalBookStatsRaw = generalBookStatsRows[0] || { total: 0, active: 0, blocked: 0 };
+    const personalBookStatsRaw = personalBookStatsRows[0] || { total: 0, active: 0, blocked: 0 };
+    const clubBookStatsRaw = clubBookStatsRows[0] || { total: 0, active: 0, blocked: 0 };
+    const clubStatsRaw = clubStatsRows[0] || {
+      total: 0,
+      active: 0,
+      recruiting: 0,
+      completed: 0,
+      archived: 0,
+    };
 
     const userStats = {
-      total: users.length,
-      active: users.filter(u => u.status === 'active').length,
-      pending: users.filter(u => u.status === 'pending').length,
-      suspended: users.filter(u => u.status === 'suspended').length,
-      admins: users.filter(u => u.role === 'admin').length,
-      moderators: users.filter(u => u.role === 'moderator').length,
+      total: Number(userStatsRaw.total || 0),
+      active: Number(userStatsRaw.active || 0),
+      pending: Number(userStatsRaw.pending || 0),
+      suspended: Number(userStatsRaw.suspended || 0),
+      admins: Number(userStatsRaw.admins || 0),
+      moderators: Number(userStatsRaw.moderators || 0),
     };
 
     // Считаем книги из всех таблиц: books, personal_books, club_books
-    const totalGeneralBooks = books.length;
-    const activeGeneralBooks = books.filter(b => b.status === 'active').length;
-    const blockedGeneralBooks = books.filter(b => b.status === 'blocked').length;
-    
-    const totalPersonalBooks = allPersonalBooks.length;
-    const activePersonalBooks = allPersonalBooks.filter(b => !b.isDeleted).length;
-    const blockedPersonalBooks = allPersonalBooks.filter(b => b.isDeleted).length;
+    const totalGeneralBooks = Number(generalBookStatsRaw.total || 0);
+    const activeGeneralBooks = Number(generalBookStatsRaw.active || 0);
+    const blockedGeneralBooks = Number(generalBookStatsRaw.blocked || 0);
 
-    const totalClubBooks = allClubBooks.length;
-    const activeClubBooks = allClubBooks.filter(b => !b.isDeleted).length;
-    const blockedClubBooks = allClubBooks.filter(b => b.isDeleted).length;
+    const totalPersonalBooks = Number(personalBookStatsRaw.total || 0);
+    const activePersonalBooks = Number(personalBookStatsRaw.active || 0);
+    const blockedPersonalBooks = Number(personalBookStatsRaw.blocked || 0);
+
+    const totalClubBooks = Number(clubBookStatsRaw.total || 0);
+    const activeClubBooks = Number(clubBookStatsRaw.active || 0);
+    const blockedClubBooks = Number(clubBookStatsRaw.blocked || 0);
     
     const bookStats = {
       total: totalGeneralBooks + totalPersonalBooks + totalClubBooks,
@@ -1157,11 +1581,11 @@ router.get('/stats/overview', jwtAuth, requireAdmin, async (req, res) => {
     };
 
     const clubStats = {
-      total: clubs.length,
-      active: clubs.filter(c => c.status === 'active').length,
-      recruiting: clubs.filter(c => c.status === 'recruiting').length,
-      completed: clubs.filter(c => c.status === 'completed').length,
-      archived: clubs.filter(c => c.status === 'archived').length,
+      total: Number(clubStatsRaw.total || 0),
+      active: Number(clubStatsRaw.active || 0),
+      recruiting: Number(clubStatsRaw.recruiting || 0),
+      completed: Number(clubStatsRaw.completed || 0),
+      archived: Number(clubStatsRaw.archived || 0),
     };
 
     res.json({
@@ -1276,17 +1700,111 @@ router.put('/settings', jwtAuth, requireFullAdmin, async (req, res) => {
 
 // ==== SMTP SETTINGS ====
 
+// ==== PLATFORM URL SETTINGS ====
+
+router.get('/settings/platform', jwtAuth, requireAdmin, async (_req, res) => {
+  try {
+    const setting = await storage.getSetting(platformBaseUrlSettingKey);
+    const canonicalUrl = setting?.value ? normalizePublicBaseUrl(setting.value) : null;
+    const effectiveUrl = await getPublicBaseUrl();
+    const envConfigured = Boolean(process.env.APP_BASE_URL || process.env.APP_BASE_URLS || process.env.CLIENT_URL);
+
+    res.json({
+      settings: {
+        canonicalUrl: canonicalUrl || '',
+        effectiveUrl,
+        source: canonicalUrl ? 'database' : envConfigured ? 'environment' : 'fallback',
+      },
+    });
+  } catch (error) {
+    console.error('Error fetching platform URL settings:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+router.put('/settings/platform', jwtAuth, requireFullAdmin, async (req, res) => {
+  try {
+    const rawCanonicalUrl = typeof req.body?.canonicalUrl === 'string' ? req.body.canonicalUrl : '';
+    const normalizedCanonicalUrl = normalizePublicBaseUrl(rawCanonicalUrl);
+
+    if (!normalizedCanonicalUrl) {
+      return res.status(400).json({
+        message: 'Некорректный canonical URL. Допустимы только абсолютные http/https URL.',
+      });
+    }
+
+    const parsed = new URL(normalizedCanonicalUrl);
+    if (
+      process.env.NODE_ENV === 'production' &&
+      parsed.hostname !== 'localhost' &&
+      parsed.protocol !== 'https:'
+    ) {
+      return res.status(400).json({
+        message: 'В production canonical URL должен использовать https.',
+      });
+    }
+
+    const previous = await storage.getSetting(platformBaseUrlSettingKey);
+
+    await storage.setSetting({
+      key: platformBaseUrlSettingKey,
+      value: normalizedCanonicalUrl,
+      category: 'platform',
+      description: 'Canonical public URL used for emails and external links',
+      isEncrypted: false,
+      updatedBy: req.user!.userId,
+    });
+
+    invalidatePublicBaseUrlCache();
+
+    await logAction(
+      req,
+      'update_settings',
+      'settings',
+      platformBaseUrlSettingKey,
+      'Updated canonical public URL',
+      previous?.value || undefined,
+      normalizedCanonicalUrl,
+    );
+
+    res.json({
+      success: true,
+      settings: {
+        canonicalUrl: normalizedCanonicalUrl,
+      },
+    });
+  } catch (error) {
+    console.error('Error saving platform URL settings:', error);
+    res.status(500).json({ message: 'Failed to save platform URL settings' });
+  }
+});
+
 // Получить SMTP настройки
-router.get('/settings/smtp', jwtAuth, requireAdmin, async (req, res) => {
+router.get('/settings/smtp', jwtAuth, requireFullAdmin, async (req, res) => {
   try {
     const smtpSettings = await storage.getSettingsByCategory('smtp');
     
     const settings: Record<string, string> = {};
-    smtpSettings.forEach(s => {
-      settings[s.key] = s.value || '';
+    smtpSettings.forEach((s) => {
+      if (s.key === 'smtp.password') {
+        settings[s.key] = s.value ? '********' : '';
+      } else {
+        settings[s.key] = s.value || '';
+      }
     });
 
-    res.json({ settings });
+    res.json({
+      success: true,
+      settings: {
+        'smtp.host': settings['smtp.host'] || '',
+        'smtp.port': settings['smtp.port'] || '587',
+        'smtp.user': settings['smtp.user'] || '',
+        'smtp.password': settings['smtp.password'] || '',
+        'smtp.from': settings['smtp.from'] || '',
+        'smtp.secure': settings['smtp.secure'] || 'false',
+        'smtp.enabled': settings['smtp.enabled'] || 'false',
+      },
+    });
   } catch (error) {
     console.error('Error fetching SMTP settings:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -1323,14 +1841,16 @@ router.put('/settings/smtp', jwtAuth, requireFullAdmin, async (req, res) => {
       updatedBy: req.user!.userId,
     });
 
-    await storage.setSetting({
-      key: 'smtp.password',
-      value: password || '',
-      category: 'smtp',
-      description: 'SMTP password',
-      isEncrypted: true,
-      updatedBy: req.user!.userId,
-    });
+    if (password && password !== '********') {
+      await storage.setSetting({
+        key: 'smtp.password',
+        value: password,
+        category: 'smtp',
+        description: 'SMTP password',
+        isEncrypted: true,
+        updatedBy: req.user!.userId,
+      });
+    }
 
     await storage.setSetting({
       key: 'smtp.from',
@@ -1372,7 +1892,7 @@ router.put('/settings/smtp', jwtAuth, requireFullAdmin, async (req, res) => {
 });
 
 // Тестовая отправка email
-router.post('/settings/smtp/test', jwtAuth, requireAdmin, async (req, res) => {
+router.post('/settings/smtp/test', jwtAuth, requireFullAdmin, async (req, res) => {
   try {
     const { testEmail } = req.body;
 
@@ -1520,26 +2040,23 @@ function formatUptime(seconds: number): string {
 // Получить список отчетов
 router.get('/reports', jwtAuth, requireAdmin, async (req, res) => {
   try {
-    const { page = 1, limit = 20, status, type, assignedTo } = req.query;
+    const { page, limit } = parseAdminPagination(req.query.page, req.query.limit);
+    const { status, type, assignedTo } = req.query;
 
     const filters: { status?: string; type?: string; assignedTo?: string } = {};
     if (status) filters.status = status as string;
     if (type) filters.type = type as string;
     if (assignedTo) filters.assignedTo = assignedTo as string;
 
-    const allReports = await storage.getModerationReports(filters);
-
-    // Пагинация
-    const offset = (Number(page) - 1) * Number(limit);
-    const paginatedReports = allReports.slice(offset, offset + Number(limit));
+    const result = await storage.getModerationReportsPage({ filters, page, limit });
 
     res.json({
-      reports: paginatedReports,
+      reports: result.reports,
       pagination: {
-        page: Number(page),
-        limit: Number(limit),
-        total: allReports.length,
-        pages: Math.ceil(allReports.length / Number(limit))
+        page,
+        limit,
+        total: result.total,
+        pages: Math.ceil(result.total / limit)
       }
     });
   } catch (error) {

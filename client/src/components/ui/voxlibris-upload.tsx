@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from "@/components/ui/dialog";
 import { AlertCircle, Plus } from "lucide-react";
@@ -31,6 +31,7 @@ export function VoxLibrisUpload({
   // Используем контекст напрямую, без промежуточного выбора
   const scenario = defaultContext;
   const [selectedClubId, setSelectedClubId] = useState<string>(clubId || '');
+  const resetClubTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { user } = useAuth();
   const { data: clubs = [] } = useClubs();
@@ -41,10 +42,21 @@ export function VoxLibrisUpload({
   const handleClose = () => {
     setIsOpen(false);
     // Reset club selection after closing
-    setTimeout(() => {
+    if (resetClubTimeoutRef.current) {
+      clearTimeout(resetClubTimeoutRef.current);
+    }
+    resetClubTimeoutRef.current = setTimeout(() => {
       setSelectedClubId(clubId || '');
     }, 300);
   };
+
+  useEffect(() => {
+    return () => {
+      if (resetClubTimeoutRef.current) {
+        clearTimeout(resetClubTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const handleSuccess = () => {
     handleClose();

@@ -1,5 +1,5 @@
 import { BaseRepository } from './BaseRepository.js';
-import { eq, and, desc, gt } from 'drizzle-orm';
+import { eq, and, desc, gt, sql } from 'drizzle-orm';
 import { readingSchedule, type ReadingSchedule, type InsertReadingSchedule } from '../../shared/schema.js';
 
 /**
@@ -57,6 +57,41 @@ export class ReadingScheduleRepository extends BaseRepository {
   }
 
   /**
+   * Получить агрегированную статистику расписаний клуба
+   */
+  async getClubScheduleStats(clubId: string): Promise<{
+    total: number;
+    scheduled: number;
+    inProgress: number;
+    completed: number;
+    cancelled: number;
+  }> {
+    try {
+      const [stats] = await this.db
+        .select({
+          total: sql<number>`COUNT(*)::int`,
+          scheduled: sql<number>`COUNT(*) FILTER (WHERE ${readingSchedule.status} = 'scheduled')::int`,
+          inProgress: sql<number>`COUNT(*) FILTER (WHERE ${readingSchedule.status} = 'in_progress')::int`,
+          completed: sql<number>`COUNT(*) FILTER (WHERE ${readingSchedule.status} = 'completed')::int`,
+          cancelled: sql<number>`COUNT(*) FILTER (WHERE ${readingSchedule.status} = 'cancelled')::int`,
+        })
+        .from(readingSchedule)
+        .where(eq(readingSchedule.clubId, clubId));
+
+      return {
+        total: Number(stats?.total || 0),
+        scheduled: Number(stats?.scheduled || 0),
+        inProgress: Number(stats?.inProgress || 0),
+        completed: Number(stats?.completed || 0),
+        cancelled: Number(stats?.cancelled || 0),
+      };
+    } catch (error) {
+      this.logError('getClubScheduleStats', error);
+      throw new Error('Failed to get club schedule stats');
+    }
+  }
+
+  /**
    * Получить предстоящие расписания клуба
    */
   async getUpcomingSchedules(clubId: string): Promise<ReadingSchedule[]> {
@@ -74,6 +109,30 @@ export class ReadingScheduleRepository extends BaseRepository {
     } catch (error) {
       this.logError('getUpcomingSchedules', error);
       throw new Error('Failed to get upcoming schedules');
+    }
+  }
+
+  /**
+   * Получить расписания, для которых прямо сейчас нужно отправить напоминание
+   */
+  async getSchedulesDueForReminder(now: Date, toleranceSeconds: number = 60): Promise<ReadingSchedule[]> {
+    try {
+      return await this.db
+        .select()
+        .from(readingSchedule)
+        .where(and(
+          eq(readingSchedule.status, 'scheduled'),
+          eq(readingSchedule.remindersSent, false),
+          gt(readingSchedule.scheduledStart, now),
+          sql`ABS(
+            EXTRACT(EPOCH FROM (${readingSchedule.scheduledStart} - ${now}))
+            - (COALESCE(${readingSchedule.reminderMinutes}, 15) * 60)
+          ) <= ${toleranceSeconds}`
+        ))
+        .orderBy(readingSchedule.scheduledStart);
+    } catch (error) {
+      this.logError('getSchedulesDueForReminder', error);
+      throw new Error('Failed to get schedules due for reminder');
     }
   }
 

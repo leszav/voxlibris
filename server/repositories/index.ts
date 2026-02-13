@@ -287,6 +287,9 @@ class StorageAdapter implements Partial<IStorage> {
       } else {
         this.readingSessionStatusOverrides.delete(sessionId);
       }
+      if (status === 'cancelled' || status === 'completed') {
+        this.readingSessionRoomIds.delete(sessionId);
+      }
       const session = await this.repos.reading.getReadingSession(sessionId);
       return session ? this.toLegacySession(session) : undefined;
     },
@@ -333,9 +336,14 @@ class StorageAdapter implements Partial<IStorage> {
     endSession: async (sessionId: string) => {
       await this.repos.reading.endSession(sessionId);
       this.readingSessionStatusOverrides.delete(sessionId);
+      this.readingSessionRoomIds.delete(sessionId);
     },
 
     updateSessionRoomId: async (sessionId: string, roomId: string) => {
+      if (!roomId) {
+        this.readingSessionRoomIds.delete(sessionId);
+        return;
+      }
       this.readingSessionRoomIds.set(sessionId, roomId);
     },
   };
@@ -647,6 +655,10 @@ class StorageAdapter implements Partial<IStorage> {
     return this.repos.users.getAllUsers(includeDeleted);
   }
 
+  async searchUsers(query: string, limit?: number) {
+    return this.repos.users.searchUsers(query, limit);
+  }
+
   async getDeletedUsers() {
     return this.repos.users.getDeletedUsers();
   }
@@ -673,6 +685,10 @@ class StorageAdapter implements Partial<IStorage> {
 
   async getPersonalBooksByUser(userId: string) {
     return this.repos.personalBooks.getPersonalBooksByUser(userId);
+  }
+
+  async getAllPersonalBooks() {
+    return this.repos.personalBooks.getAllPersonalBooks();
   }
 
   async updatePersonalBook(id: string, updates: Parameters<PersonalBooksRepository['updatePersonalBook']>[1]) {
@@ -858,6 +874,10 @@ class StorageAdapter implements Partial<IStorage> {
 
   async getModerationReports(filters?: Parameters<ModerationRepository['getModerationReports']>[0]) {
     return this.repos.moderation.getModerationReports(filters);
+  }
+
+  async getModerationReportsPage(params: Parameters<ModerationRepository['getModerationReportsPage']>[0]) {
+    return this.repos.moderation.getModerationReportsPage(params);
   }
 
   async updateModerationReport(

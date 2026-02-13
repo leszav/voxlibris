@@ -48,12 +48,57 @@ export interface SessionMetrics {
 class SessionAnalyticsService {
   // Хранилище активных сессий для отслеживания в реальном времени
   private readonly activeSessions: Map<string, Set<ListenerEvent>> = new Map();
+  private readonly sessionStartedAt: Map<string, number> = new Map();
+  private readonly MAX_TRACKED_SESSIONS = 500;
+  private readonly MAX_LISTENER_EVENTS_PER_SESSION = 2000;
+  private readonly SESSION_TTL_MS = 24 * 60 * 60 * 1000;
+
+  private cleanupStaleSessions(nowMs: number = Date.now()): void {
+    for (const [sessionId, startedAt] of this.sessionStartedAt.entries()) {
+      if (nowMs - startedAt > this.SESSION_TTL_MS) {
+        this.activeSessions.delete(sessionId);
+        this.sessionStartedAt.delete(sessionId);
+      }
+    }
+  }
+
+  private enforceSessionLimit(): void {
+    if (this.activeSessions.size <= this.MAX_TRACKED_SESSIONS) {
+      return;
+    }
+
+    const oldestSessions = Array.from(this.sessionStartedAt.entries())
+      .sort((a, b) => a[1] - b[1])
+      .slice(0, this.activeSessions.size - this.MAX_TRACKED_SESSIONS);
+
+    for (const [sessionId] of oldestSessions) {
+      this.activeSessions.delete(sessionId);
+      this.sessionStartedAt.delete(sessionId);
+    }
+  }
+
+  private trimListenerEvents(listeners: Set<ListenerEvent>): void {
+    if (listeners.size <= this.MAX_LISTENER_EVENTS_PER_SESSION) {
+      return;
+    }
+
+    const kept = Array.from(listeners)
+      .sort((a, b) => a.joinedAt.getTime() - b.joinedAt.getTime())
+      .slice(listeners.size - this.MAX_LISTENER_EVENTS_PER_SESSION);
+
+    listeners.clear();
+    for (const event of kept) {
+      listeners.add(event);
+    }
+  }
 
   /**
    * Инициализировать аналитику для новой сессии
    */
   async initializeSessionAnalytics(sessionId: string): Promise<void> {
     try {
+      this.cleanupStaleSessions();
+
       await repositories.sessionAnalytics.createSessionAnalytics({
         sessionId,
         peakListenerCount: 0,
@@ -75,6 +120,8 @@ class SessionAnalyticsService {
 
       // Инициализируем хранилище для отслеживания слушателей
       this.activeSessions.set(sessionId, new Set());
+      this.sessionStartedAt.set(sessionId, Date.now());
+      this.enforceSessionLimit();
 
       logger.info(`Session analytics initialized for session ${sessionId}`);
     } catch (error) {
@@ -94,6 +141,8 @@ class SessionAnalyticsService {
     userAgent?: string
   ): Promise<void> {
     try {
+      this.cleanupStaleSessions();
+
       const listeners = this.activeSessions.get(sessionId);
       if (!listeners) {
         return;
@@ -114,7 +163,14 @@ class SessionAnalyticsService {
         deviceType,
       };
 
+      for (const existingEvent of listeners) {
+        if (existingEvent.userId === userId && !existingEvent.leftAt) {
+          return;
+        }
+      }
+
       listeners.add(event);
+      this.trimListenerEvents(listeners);
 
       // Обновляем счётчик слушателей
       await this.updateListenerCount(sessionId);
@@ -131,6 +187,8 @@ class SessionAnalyticsService {
    */
   async trackListenerLeave(sessionId: string, userId: string): Promise<void> {
     try {
+      this.cleanupStaleSessions();
+
       const listeners = this.activeSessions.get(sessionId);
       if (!listeners) {
         return;
@@ -333,6 +391,7 @@ class SessionAnalyticsService {
 
       // Очищаем хранилище
       this.activeSessions.delete(sessionId);
+      this.sessionStartedAt.delete(sessionId);
 
       logger.info(`Session analytics finalized for session ${sessionId}`);
 

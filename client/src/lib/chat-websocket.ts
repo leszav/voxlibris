@@ -48,11 +48,24 @@ export class ChatWebSocketClient {
     }
 
     if (this.isConnecting) {
-      return new Promise((resolve) => {
+      return new Promise((resolve, reject) => {
+        const startedAt = Date.now();
         const check = setInterval(() => {
           if (this.socket?.connected) {
             clearInterval(check);
             resolve();
+            return;
+          }
+
+          if (!this.isConnecting && !this.socket?.connected) {
+            clearInterval(check);
+            reject(new Error("Chat WebSocket connection failed"));
+            return;
+          }
+
+          if (Date.now() - startedAt > 10000) {
+            clearInterval(check);
+            reject(new Error("Chat WebSocket connection timeout"));
           }
         }, 100);
       });

@@ -58,6 +58,7 @@ export function ClubSettingsModal({ club }: ClubSettingsModalProps) {
 
   const welcomeEditorRef = useRef<RichTextEditorRef>(null);
   const rulesEditorRef = useRef<RichTextEditorRef>(null);
+  const reloadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (isOpen) {
@@ -80,6 +81,14 @@ export function ClubSettingsModal({ club }: ClubSettingsModalProps) {
       });
     }
   }, [isOpen, club.settings]);
+
+  useEffect(() => {
+    return () => {
+      if (reloadTimeoutRef.current) {
+        clearTimeout(reloadTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const handleCoverUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -185,7 +194,10 @@ export function ClubSettingsModal({ club }: ClubSettingsModalProps) {
       });
       setIsOpen(false);
 
-      setTimeout(() => {
+      if (reloadTimeoutRef.current) {
+        clearTimeout(reloadTimeoutRef.current);
+      }
+      reloadTimeoutRef.current = setTimeout(() => {
         globalThis.location.reload();
       }, 500);
     } catch (error) {

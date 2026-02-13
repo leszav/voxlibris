@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useAuth } from './use-auth';
 import { io, type Socket } from 'socket.io-client';
+import { getAccessToken } from '@/lib/token-store';
 
 interface ReadingSessionState {
   sessionId?: string;
@@ -43,13 +44,18 @@ export function useReadingSession() {
 
   // Initialize WebSocket connection
   useEffect(() => {
-    if (!user) return;
+    if (!user) {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+      return;
+    }
 
+    const token = getAccessToken();
     const socket = io(globalThis.location.origin, {
       withCredentials: true,
-      auth: {
-        userId: user.id
-      }
+      auth: token ? { token } : undefined
     });
 
     socketRef.current = socket;
@@ -101,6 +107,10 @@ export function useReadingSession() {
     });
 
     return () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
       socket.disconnect();
     };
   }, [user]);

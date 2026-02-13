@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useLocation, useRoute, Link } from 'wouter';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -18,6 +18,24 @@ export default function InviteAccept() {
   const acceptInvitation = useAcceptInvitation();
   const declineInvitation = useDeclineInvitation();
   const [actionTaken, setActionTaken] = useState<'accepted' | 'removed' | null>(null);
+  const redirectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const scheduleRedirect = (to: string, delayMs: number) => {
+    if (redirectTimeoutRef.current) {
+      clearTimeout(redirectTimeoutRef.current);
+    }
+    redirectTimeoutRef.current = setTimeout(() => {
+      setLocation(to);
+    }, delayMs);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (redirectTimeoutRef.current) {
+        clearTimeout(redirectTimeoutRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     // Если пользователь не авторизован, перенаправляем на регистрацию с параметрами приглашения
@@ -50,9 +68,7 @@ export default function InviteAccept() {
       });
 
       // Перенаправляем в клуб через 2 секунды
-      setTimeout(() => {
-        setLocation(`/clubs/${result.club?.id || invitation.club?.id}`);
-      }, 2000);
+      scheduleRedirect(`/clubs/${result.club?.id || invitation.club?.id}`, 2000);
     } catch (error) {
       toast({
         title: "Ошибка",
@@ -77,9 +93,7 @@ export default function InviteAccept() {
       });
 
       // Перенаправляем на главную через 2 секунды
-      setTimeout(() => {
-        setLocation('/');
-      }, 2000);
+      scheduleRedirect('/', 2000);
     } catch (error) {
       toast({
         title: "Ошибка",

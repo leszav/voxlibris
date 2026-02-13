@@ -87,6 +87,21 @@ export class PersonalBooksRepository extends BaseRepository {
   }
 
   /**
+   * Получение всех личных книг (для админских сценариев)
+   */
+  async getAllPersonalBooks(): Promise<PersonalBook[]> {
+    try {
+      return await this.db
+        .select()
+        .from(personalBooks)
+        .orderBy(desc(personalBooks.createdAt));
+    } catch (error) {
+      this.logError('getAllPersonalBooks', error);
+      throw new Error('Failed to get all personal books');
+    }
+  }
+
+  /**
    * Обновление личной книги
    */
   async updatePersonalBook(id: string, updates: Partial<InsertPersonalBook>): Promise<PersonalBook | undefined> {

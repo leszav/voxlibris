@@ -1,6 +1,6 @@
 // client/src/hooks/use-microphone-detection.ts
 
-import { useState, useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 export type MicrophonePermissionStatus = 'granted' | 'denied' | 'prompt' | 'unknown';
 
@@ -18,6 +18,7 @@ export function useMicrophoneDetection() {
     error: null,
     permissionStatus: 'unknown'
   });
+  const detectRetryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const detectMicrophone = async () => {
     try {
@@ -35,10 +36,13 @@ export function useMicrophoneDetection() {
         try {
           const permission = await navigator.permissions.query({ name: 'microphone' as PermissionName });
           permissionStatus = permission.state;
-          
-          console.log('[MicDetection] Permission status:', permissionStatus);
+          if (import.meta.env.DEV) {
+            console.log('[MicDetection] Permission status:', permissionStatus);
+          }
         } catch (err) {
-          console.warn('[MicDetection] Cannot check permissions:', err);
+          if (import.meta.env.DEV) {
+            console.warn('[MicDetection] Cannot check permissions:', err);
+          }
         }
       }
 
@@ -61,7 +65,9 @@ export function useMicrophoneDetection() {
         throw new Error('Микрофон не найден. Подключите микрофон и обновите страницу.');
       }
 
-      console.log('[MicDetection] Found audio inputs:', audioInputs.length);
+      if (import.meta.env.DEV) {
+        console.log('[MicDetection] Found audio inputs:', audioInputs.length);
+      }
 
       // Пытаемся получить доступ к микрофону (но сразу останавливаем)
       let stream: MediaStream | null = null;
@@ -84,7 +90,9 @@ export function useMicrophoneDetection() {
           permissionStatus: 'granted'
         });
 
-        console.log('[MicDetection] Microphone is available');
+        if (import.meta.env.DEV) {
+          console.log('[MicDetection] Microphone is available');
+        }
 
       } catch (micError) {
         if (stream) {
@@ -113,7 +121,9 @@ export function useMicrophoneDetection() {
           permissionStatus: newPermissionStatus
         });
 
-        console.error('[MicDetection] Microphone access failed:', error);
+        if (import.meta.env.DEV) {
+          console.error('[MicDetection] Microphone access failed:', error);
+        }
       }
 
     } catch (err) {
@@ -125,7 +135,9 @@ export function useMicrophoneDetection() {
         permissionStatus: 'unknown'
       });
 
-      console.error('[MicDetection] Detection failed:', error);
+      if (import.meta.env.DEV) {
+        console.error('[MicDetection] Detection failed:', error);
+      }
     }
   };
 
@@ -139,8 +151,13 @@ export function useMicrophoneDetection() {
 
     // Слушаем изменения устройств
     const handleDeviceChange = () => {
-      console.log('[MicDetection] Device change detected, retrying...');
-      setTimeout(detectMicrophone, 1000); // Небольшая задержка
+      if (import.meta.env.DEV) {
+        console.log('[MicDetection] Device change detected, retrying...');
+      }
+      if (detectRetryTimeoutRef.current) {
+        clearTimeout(detectRetryTimeoutRef.current);
+      }
+      detectRetryTimeoutRef.current = setTimeout(detectMicrophone, 1000); // Небольшая задержка
     };
 
     const mediaDevices = navigator.mediaDevices;
@@ -149,8 +166,17 @@ export function useMicrophoneDetection() {
       
       return () => {
         mediaDevices.removeEventListener('devicechange', handleDeviceChange);
+        if (detectRetryTimeoutRef.current) {
+          clearTimeout(detectRetryTimeoutRef.current);
+        }
       };
     }
+
+    return () => {
+      if (detectRetryTimeoutRef.current) {
+        clearTimeout(detectRetryTimeoutRef.current);
+      }
+    };
   }, []);
 
   return {
