@@ -19,10 +19,6 @@ interface ReadingProgress {
   progress: number;
 }
 
-interface ReadingProgressResponse {
-  progress: ReadingProgress;
-}
-
 interface BookmarksResponse {
   bookmarks: Bookmark[];
 }
@@ -71,12 +67,11 @@ export function useBookContent(bookId: string, chapter?: number, enabled: boolea
 // Получение прогресса чтения
 export function useReadingProgress(bookId: string) {
   return useQuery({
-    queryKey: ["/api/progress", bookId],
+    queryKey: ["/api/v1/books", bookId, "progress"],
     queryFn: async () => {
       try {
-        const response = await apiRequest<ReadingProgressResponse>(`/api/progress/${bookId}`);
-        // API возвращает { progress: {...} }, извлекаем внутренний объект
-        return response.progress;
+        const response = await apiRequest<ReadingProgress>(`/api/v1/books/${bookId}/progress`);
+        return response;
       } catch (error: unknown) {
         // Если прогресс не найден, возвращаем начальные значения
         const err = error as { status?: number };
@@ -105,18 +100,15 @@ export function useUpdateProgress(bookId: string) {
       progress: number;
       clubId?: string;
     }) => {
-      const response = await apiRequest(`/api/progress`, {
+      const response = await apiRequest(`/api/v1/books/${bookId}/progress`, {
         method: "PUT",
-        body: JSON.stringify({
-          ...data,
-          bookId
-        }),
+        body: JSON.stringify(data),
       });
       return response;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({
-        queryKey: ["/api/progress", bookId],
+        queryKey: ["/api/v1/books", bookId, "progress"],
       });
       queryClient.invalidateQueries({ queryKey: ["reading-status"] });
       queryClient.invalidateQueries({ queryKey: ["reading-stats"] });

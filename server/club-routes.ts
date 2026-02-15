@@ -91,8 +91,8 @@ router.post('/', jwtAuth, requireActiveUser, async (req, res) => {
       isPrivate: req.body.isPrivate || false,
       schedule: req.body.schedule,
       settings: sanitizedSettings,
-      // Обычные пользователи создают клубы со статусом pending (требуется модерация)
-      // Админы и модераторы создают клубы со статусом recruiting (без модерации)
+      // Обычные пользователи создают клубы со статусом pending (требуется модерация).
+      // Админы и модераторы создают клубы со статусом recruiting (без модерации).
       status: (req.user.role === 'admin' || req.user.role === 'moderator') ? 'recruiting' : 'pending',
     };
 

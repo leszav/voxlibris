@@ -1,6 +1,7 @@
-import React, { createContext, useContext, useEffect, useState, useMemo, ReactNode } from 'react';
+import React, { createContext, useContext, useEffect, useState, useMemo, useRef, ReactNode } from 'react';
 import { User } from '../../../shared/schema';
 import { authAPI } from '@/lib/auth';
+import { syncTokenFromCookie } from '@/lib/token-store';
 
 interface AuthContextType {
   user: User | null;
@@ -19,71 +20,61 @@ interface AuthProviderProps {
   readonly children: ReactNode;
 }
 
-// Ключ для хранения кэша пользователя
-const USER_CACHE_KEY = 'voxlibris_user_cache';
-
 export function AuthProvider({ children }: AuthProviderProps) {
-  // Оптимистичная загрузка: загружаем пользователя из localStorage
-  // Не проверяем токен здесь - это будет сделано в фоне через useEffect
-  const [user, setUser] = useState<User | null>(() => {
-    try {
-      const cached = localStorage.getItem(USER_CACHE_KEY);
-      if (cached) {
-        return JSON.parse(cached);
-      }
-    } catch {
-      // Ignore cache errors
-    }
-    return null;
-  });
- const [isLoading, setIsLoading] = useState(false);
+  // Безопасное состояние без кэширования в localStorage
+  const [user, setUser] = useState<User | null>(null);
+ const [isLoading, setIsLoading] = useState(true);
+  const isInitializedRef = useRef(false);
+  const hasExplicitLogoutRef = useRef(false);
+  const isFetchingRef = useRef(false); // Debounce для fetchCurrentUser
 
   const isAuthenticated = !!user;
 
-  // Кэширование пользователя в localStorage
+  // Безопасное управление состоянием без localStorage
   const cacheUser = (userData: User | null) => {
-    try {
-      if (userData) {
-        localStorage.setItem(USER_CACHE_KEY, JSON.stringify(userData));
-      } else {
-        localStorage.removeItem(USER_CACHE_KEY);
-      }
-    } catch {
-      // localStorage может быть недоступен
-    }
+    // Убрано кэширование в localStorage по соображениям безопасности
+    // httpOnly cookies обеспечивают безопасность, localStorage создает XSS уязвимости
   };
 
   const fetchCurrentUser = async () => {
-    try {
-      // При первой загрузке accessToken может отсутствовать в памяти,
-      // но refreshToken есть в httpOnly cookie. Пробуем восстановить сессию.
-      if (!authAPI.isAuthenticated()) {
-        // Попытка восстановить сессию через refresh token в cookie
-        const refreshSuccess = await authAPI.forceRefreshToken();
-        if (!refreshSuccess) {
-          // Не очищаем user - оставляем кэшированного для offline-first UX
-          // Сервер сам пришлёт 401 если сессия истекла
-          return;
-        }
-      }
+    // Debounce: предотвращаем одновременные вызовы
+    if (isFetchingRef.current) {
+      return;
+    }
+    
+    // После явного logout не пытаемся автоматически реанимировать сессию.
+    if (hasExplicitLogoutRef.current) {
+      return;
+    }
 
-      // Получаем актуальные данные пользователя с сервера
+    isFetchingRef.current = true;
+    try {
+      // Запрашиваем данные пользователя с сервера
+      // apiRequest автоматически обновит истекший токен при необходимости
+      // Токен автоматически передается через cookie и Authorization header
       const response = await authAPI.getCurrentUser();
       setUser(response.user);
       cacheUser(response.user);
+      hasExplicitLogoutRef.current = false;
     } catch (error: unknown) {
       if (import.meta.env.DEV) {
         console.error('Failed to fetch current user:', error);
       }
       
-      // Очищаем ТОЛЬКО при явном 401/403 от сервера (сессия невалидна)
-      const err = error as { response?: { status?: number } };
-      if (err?.response?.status === 401 || err?.response?.status === 403) {
+      // Проверяем тип ошибки для корректной обработки
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      
+      // Очищаем состояние при ошибках авторизации
+      if (errorMessage.includes('401') || errorMessage.includes('403') || 
+          errorMessage.includes('Требуется авторизация') || 
+          errorMessage.includes('Недействительный токен')) {
         authAPI.clearTokens();
         setUser(null);
         cacheUser(null);
       }
       // При других ошибках (сеть, таймаут) - оставляем кэшированного user
+    } finally {
+      isFetchingRef.current = false;
     }
   };
 
@@ -92,6 +83,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       const response = await authAPI.login({ username, password, rememberMe });
       setUser(response.user);
       cacheUser(response.user);
+      hasExplicitLogoutRef.current = false;
     } catch (error) {
       // Очищаем состояние при неудачном входе
       authAPI.clearTokens();
@@ -113,6 +105,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       const response = await authAPI.register(payload);
       setUser(response.user);
       cacheUser(response.user);
+      hasExplicitLogoutRef.current = false;
     } catch (error) {
       // Очищаем состояние при неудачной регистрации
       authAPI.clearTokens();
@@ -123,19 +116,18 @@ export function AuthProvider({ children }: AuthProviderProps) {
   };
 
   const logout = async () => {
-    try {
-      await authAPI.logout();
-    } catch (error) {
+    // Оптимистичный logout: очищаем клиентское состояние сразу,
+    // а серверный revoke запускаем в фоне.
+    hasExplicitLogoutRef.current = true;
+    authAPI.clearTokens();
+    setUser(null);
+    cacheUser(null);
+
+    void authAPI.logout().catch((error) => {
       if (import.meta.env.DEV) {
         console.error('Logout request failed:', error);
       }
-      // Продолжаем выход даже если запрос не удался
-    } finally {
-      // Всегда очищаем локальное состояние
-      authAPI.clearTokens();
-      setUser(null);
-      cacheUser(null);
-    }
+    });
   };
 
   const refetchUser = async () => {
@@ -148,17 +140,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const syncAuthState = async () => {
     setIsLoading(true);
     try {
-      // Проверяем локальное состояние токена или восстанавливаем из refresh cookie
-      if (!authAPI.isAuthenticated()) {
-        // Попытка восстановить сессию через refresh token
-        const refreshSuccess = await authAPI.forceRefreshToken();
-        if (!refreshSuccess) {
-          // Не очищаем - оставляем offline-first
-          return;
-        }
+      if (hasExplicitLogoutRef.current) {
+        return;
       }
 
-      // Получаем актуальные данные пользователя
+      // Просто запрашиваем данные пользователя
+      // httpOnly cookie автоматически передается с запросом
       await fetchCurrentUser();
     } catch (error: unknown) {
       if (import.meta.env.DEV) {
@@ -177,28 +164,44 @@ export function AuthProvider({ children }: AuthProviderProps) {
   };
 
   useEffect(() => {
-    // Фоновая валидация токена при монтировании
-    // Не блокируем UI - пользователь из кэша уже загружен
-    // Не очищаем при ошибках - fetchCurrentUser сам решает когда чистить
-    fetchCurrentUser();
+    let isMounted = true;
 
-    // Периодическая проверка состояния токена (каждые 5 минут)
+    const initializeAuthState = async () => {
+      // Синхронизируем токен из cookie при инициализации
+      syncTokenFromCookie();
+      
+      if (!isInitializedRef.current) {
+        setIsLoading(true);
+      }
+
+      await fetchCurrentUser();
+
+      if (isMounted && !isInitializedRef.current) {
+        isInitializedRef.current = true;
+        setIsLoading(false);
+      }
+    };
+
+    void initializeAuthState();
+
+    // Периодическая проверка состояния токена (каждые 15 минут)
+    // Оптимизировано для снижения нагрузки на сервер
     const interval = setInterval(() => {
-      if (user) {
+      // Проверяем наличие токена вместо user state чтобы избежать stale closure
+      if (authAPI.isAuthenticated()) {
         // Тихо пытаемся обновить, не очищаем при ошибках
         fetchCurrentUser();
       }
-    }, 5 * 60 * 1000);
+    }, 15 * 60 * 1000);
 
     // Слушаем событие обновления токена для автоматического обновления пользователя
     const handleTokenRefresh = () => {
-      if (user) {
-        fetchCurrentUser().catch((error) => {
-          if (import.meta.env.DEV) {
-            console.error('Failed to update user after token refresh:', error);
-          }
-        });
-      }
+      // Убираем проверку user чтобы избежать stale closure
+      fetchCurrentUser().catch((error) => {
+        if (import.meta.env.DEV) {
+          console.error('Failed to update user after token refresh:', error);
+        }
+      });
     };
 
     globalThis.addEventListener('token-refreshed', handleTokenRefresh);
@@ -218,11 +221,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
     globalThis.addEventListener('account-status-changed', handleAccountStatusChanged);
 
     return () => {
+      isMounted = false;
       clearInterval(interval);
       globalThis.removeEventListener('token-refreshed', handleTokenRefresh);
       globalThis.removeEventListener('account-status-changed', handleAccountStatusChanged);
     };
-  }, [user]);
+  }, []); // Убираем user из зависимостей чтобы избежать бесконечного цикла
 
   const contextValue = useMemo(() => ({
     user,

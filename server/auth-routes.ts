@@ -7,6 +7,9 @@ import { jwtAuth } from "./jwt-middleware.js";
 import { getPublicBaseUrl } from "./lib/public-base-url.js";
 import { insertUserSchema } from "../shared/schema.js";
 
+// Email validation regex (RFC 5322 simplified)
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 // Password validation schema
 const passwordSchema = z.string()
   .min(8, "Пароль должен содержать минимум 8 символов")
@@ -15,6 +18,11 @@ const passwordSchema = z.string()
 
 // Registration schema with password validation
 const registerSchema = insertUserSchema.extend({
+  email: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .regex(EMAIL_REGEX, "Укажите корректный email"),
   password: passwordSchema
 });
 
@@ -30,7 +38,7 @@ const loginSchema = z.object({
 
 // Forgot password schema
 const forgotPasswordSchema = z.object({
-  email: z.string().email().optional(),
+  email: z.string().regex(EMAIL_REGEX, "Invalid email format").optional(),
   username: z.string().min(1).optional(),
 }).refine(data => data.email || data.username, {
   message: "Either username or email must be provided"
@@ -101,8 +109,9 @@ export function setupAuthRoutes(app: Express): void {
       const validation = registerSchema.safeParse(req.body);
       
       if (!validation.success) {
+        const emailIssue = validation.error.issues.find((issue) => issue.path.includes("email"));
         return res.status(400).json({
-          message: "Ошибка валидации данных",
+          message: emailIssue?.message || "Ошибка валидации данных",
           errors: validation.error.issues
         });
       }
@@ -145,10 +154,11 @@ export function setupAuthRoutes(app: Express): void {
       const isProduction = process.env.NODE_ENV === 'production';
 
       res.cookie('accessToken', authResult.tokens.accessToken, {
-        httpOnly: true,
+        httpOnly: false, // Доступен для JavaScript (WebSocket и client-side проверки)
         secure: isProduction,
         sameSite: 'strict',
         maxAge: accessMaxAge,
+        path: '/',
       });
 
       res.cookie('refreshToken', authResult.tokens.refreshToken, {
@@ -156,6 +166,7 @@ export function setupAuthRoutes(app: Express): void {
         secure: isProduction,
         sameSite: 'strict',
         maxAge: refreshMaxAge,
+        path: '/',
       });
 
       res.status(201).json({
@@ -201,22 +212,26 @@ export function setupAuthRoutes(app: Express): void {
       }
 
       // Set tokens as httpOnly cookies
+      // accessToken доступен JS для WebSocket и client-side проверок
+      // refreshToken остается httpOnly для максимальной безопасности
       const refreshMaxAge = rememberMe ? 30 * 24 * 60 * 60 * 1000 : 7 * 24 * 60 * 60 * 1000;
       const accessMaxAge = rememberMe ? 2 * 60 * 60 * 1000 : 15 * 60 * 1000;
       const isProduction = process.env.NODE_ENV === 'production';
 
       res.cookie('accessToken', authResult.tokens.accessToken, {
-        httpOnly: true,
+        httpOnly: false, // Доступен для JavaScript
         secure: isProduction,
         sameSite: 'strict',
         maxAge: accessMaxAge,
+        path: '/',
       });
 
       res.cookie('refreshToken', authResult.tokens.refreshToken, {
-        httpOnly: true,
+        httpOnly: true, // Защищен от XSS
         secure: isProduction,
         sameSite: 'strict',
         maxAge: refreshMaxAge,
+        path: '/',
       });
 
       res.json({
@@ -327,6 +342,8 @@ export function setupAuthRoutes(app: Express): void {
       }
 
       // Set new tokens as httpOnly cookies
+      // accessToken доступен JS для WebSocket и client-side проверок
+      // refreshToken остается httpOnly для максимальной безопасности
       const refreshMaxAge = result.sessionType === 'remember_me' 
         ? 30 * 24 * 60 * 60 * 1000 
         : 7 * 24 * 60 * 60 * 1000;
@@ -336,17 +353,19 @@ export function setupAuthRoutes(app: Express): void {
       const isProduction = process.env.NODE_ENV === 'production';
 
       res.cookie('accessToken', result.newTokens.accessToken, {
-        httpOnly: true,
+        httpOnly: false, // Доступен для JavaScript
         secure: isProduction,
         sameSite: 'strict',
         maxAge: accessMaxAge,
+        path: '/',
       });
 
       res.cookie('refreshToken', result.newTokens.refreshToken, {
-        httpOnly: true,
+        httpOnly: true, // Защищен от XSS
         secure: isProduction,
         sameSite: 'strict',
         maxAge: refreshMaxAge,
+        path: '/',
       });
 
       res.json({
@@ -369,8 +388,8 @@ export function setupAuthRoutes(app: Express): void {
       }
 
       // Clear all auth cookies
-      res.clearCookie('refreshToken');
-      res.clearCookie('accessToken');
+      res.clearCookie('refreshToken', { path: '/' });
+      res.clearCookie('accessToken', { path: '/' });
       
       res.json({ message: "Успешный выход из системы" });
     } catch (error) {
@@ -380,14 +399,53 @@ export function setupAuthRoutes(app: Express): void {
   });
 
   // Get current user endpoint
-  app.get("/api/auth/me", jwtAuth, (req: Request, res: Response) => {
-    res.json({
-      user: {
-        id: req.user!.userId,
-        username: req.user!.username,
-        role: req.user!.role
+  app.get("/api/auth/me", jwtAuth, async (req: Request, res: Response) => {
+    try {
+      // Получаем полные данные пользователя из БД
+      const user = await storage.getUser(req.user!.userId);
+      
+      if (!user) {
+        return res.status(404).json({
+          message: "Пользователь не найден"
+        });
       }
-    });
+
+      // Проверяем статус пользователя - для админов и модераторов пропускаем проверку
+      if (!['admin', 'moderator'].includes(user.role)) {
+        if (user.status !== 'active') {
+          const statusMessages = {
+            pending: "Ваш аккаунт ожидает подтверждения email.",
+            suspended: "Ваш аккаунт заблокирован.",
+            deleted: "Ваш аккаунт удалён."
+          };
+          
+          return res.status(403).json({
+            message: statusMessages[user.status] || "Ваш аккаунт неактивен.",
+            code: "ACCOUNT_NOT_ACTIVATED",
+            userStatus: user.status
+          });
+        }
+
+        // Проверяем подтверждение email для обычных пользователей
+        if (!user.emailConfirmed) {
+          return res.status(403).json({
+            message: "Необходимо подтвердить email для доступа к этой функции.",
+            code: "EMAIL_NOT_CONFIRMED",
+            userStatus: user.status
+          });
+        }
+      }
+
+      // Возвращаем пользователя без пароля
+      const { password: _, ...userWithoutPassword } = user;
+      
+      res.json({
+        user: userWithoutPassword
+      });
+    } catch (error) {
+      console.error("Get current user error:", error);
+      res.status(500).json({ message: "Ошибка получения данных пользователя" });
+    }
   });
 
   // Email confirmation endpoints

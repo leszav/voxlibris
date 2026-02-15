@@ -19,14 +19,19 @@ import {
 } from "@/components/ui/dialog";
 import { useState, useEffect } from "react";
 import { useAuth } from "@/hooks/use-auth";
-import { useToast } from "@/hooks/use-toast";
 
 export function MainLayout({ children }: { children: React.ReactNode }) {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [showComingSoon, setShowComingSoon] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [, setLocation] = useLocation();
   const { user, isAuthenticated, logout } = useAuth();
-  const { toast } = useToast();
+
+  useEffect(() => {
+    if (!isAuthenticated && isLoggingOut) {
+      setIsLoggingOut(false);
+    }
+  }, [isAuthenticated, isLoggingOut]);
 
   useEffect(() => {
     if (showComingSoon) {
@@ -43,20 +48,11 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
   };
 
   const handleLogout = async () => {
-    try {
-      await logout();
-      toast({
-        title: "Успешный выход",
-        description: "Вы вышли из системы",
-      });
-      setLocation("/");
-    } catch {
-      toast({
-        title: "Ошибка выхода",
-        description: "Не удалось выйти из системы",
-        variant: "destructive",
-      });
-    }
+    if (isLoggingOut) return;
+
+    setIsLoggingOut(true);
+    await logout();
+    setLocation("/");
   };
 
   return (
@@ -188,8 +184,14 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
                       </>
                     )}
                     <DropdownMenuSeparator />
-                    <DropdownMenuItem onClick={handleLogout}>
-                      Выйти
+                    <DropdownMenuItem
+                      onSelect={(event) => {
+                        event.preventDefault();
+                        void handleLogout();
+                      }}
+                      disabled={isLoggingOut}
+                    >
+                      {isLoggingOut ? "Выходим..." : "Выйти"}
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>

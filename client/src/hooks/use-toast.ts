@@ -1,191 +1,317 @@
-import * as React from "react"
+import * as React from "react";
 
-import type {
-  ToastActionElement,
-  ToastProps,
-} from "@/components/ui/toast"
+const TOAST_LIMIT = 50;
 
-const TOAST_LIMIT = 1
-const TOAST_REMOVE_DELAY = 1000000
+export type ToastVariant = "default" | "destructive";
 
-type ToasterToast = ToastProps & {
-  id: string
-  title?: React.ReactNode
-  description?: React.ReactNode
-  action?: ToastActionElement
+export type ToastMessage = {
+  id: string;
+  kind: "toast";
+  title?: React.ReactNode;
+  description?: React.ReactNode;
+  variant?: ToastVariant;
+};
+
+type DialogBase = {
+  id: string;
+  title: string;
+  description?: string;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  variant?: ToastVariant;
+};
+
+export type AlertDialogRequest = DialogBase & {
+  kind: "alert";
+};
+
+export type ConfirmDialogRequest = DialogBase & {
+  kind: "confirm";
+};
+
+export type PromptDialogRequest = DialogBase & {
+  kind: "prompt";
+  placeholder?: string;
+  defaultValue?: string;
+};
+
+export type DialogRequest =
+  | AlertDialogRequest
+  | ConfirmDialogRequest
+  | PromptDialogRequest;
+
+interface State {
+  messages: ToastMessage[];
+  dialogs: DialogRequest[];
 }
-
-const _actionTypes = {
-  ADD_TOAST: "ADD_TOAST",
-  UPDATE_TOAST: "UPDATE_TOAST",
-  DISMISS_TOAST: "DISMISS_TOAST",
-  REMOVE_TOAST: "REMOVE_TOAST",
-} as const
-
-let count = 0
-
-function genId() {
-  count = (count + 1) % Number.MAX_SAFE_INTEGER
-  return count.toString()
-}
-
-type ActionType = typeof _actionTypes
 
 type Action =
   | {
-      type: ActionType["ADD_TOAST"]
-      toast: ToasterToast
+      type: "ADD_MESSAGE";
+      message: ToastMessage;
     }
   | {
-      type: ActionType["UPDATE_TOAST"]
-      toast: Partial<ToasterToast>
+      type: "UPDATE_MESSAGE";
+      message: Partial<ToastMessage> & { id: string };
     }
   | {
-      type: ActionType["DISMISS_TOAST"]
-      toastId?: ToasterToast["id"]
+      type: "REMOVE_MESSAGE";
+      messageId?: string;
     }
   | {
-      type: ActionType["REMOVE_TOAST"]
-      toastId?: ToasterToast["id"]
+      type: "ADD_DIALOG";
+      dialog: DialogRequest;
     }
+  | {
+      type: "REMOVE_DIALOG";
+      dialogId: string;
+    };
 
-interface State {
-  toasts: ToasterToast[]
-}
-
-const toastTimeouts = new Map<string, ReturnType<typeof setTimeout>>()
-
-const addToRemoveQueue = (toastId: string) => {
-  if (toastTimeouts.has(toastId)) {
-    return
-  }
-
-  const timeout = setTimeout(() => {
-    toastTimeouts.delete(toastId)
-    dispatch({
-      type: "REMOVE_TOAST",
-      toastId: toastId,
-    })
-  }, TOAST_REMOVE_DELAY)
-
-  toastTimeouts.set(toastId, timeout)
+let count = 0;
+function genId() {
+  count = (count + 1) % Number.MAX_SAFE_INTEGER;
+  return count.toString();
 }
 
 export const reducer = (state: State, action: Action): State => {
   switch (action.type) {
-    case "ADD_TOAST":
+    case "ADD_MESSAGE":
       return {
         ...state,
-        toasts: [action.toast, ...state.toasts].slice(0, TOAST_LIMIT),
-      }
-
-    case "UPDATE_TOAST":
+        messages: [...state.messages, action.message].slice(-TOAST_LIMIT),
+      };
+    case "UPDATE_MESSAGE":
       return {
         ...state,
-        toasts: state.toasts.map((t) =>
-          t.id === action.toast.id ? { ...t, ...action.toast } : t
+        messages: state.messages.map((message) =>
+          message.id === action.message.id
+            ? { ...message, ...action.message }
+            : message,
         ),
-      }
-
-    case "DISMISS_TOAST": {
-      const { toastId } = action
-
-      // ! Side effects ! - This could be extracted into a dismissToast() action,
-      // but I'll keep it here for simplicity
-      if (toastId) {
-        addToRemoveQueue(toastId)
-      } else {
-        state.toasts.forEach((toast) => {
-          addToRemoveQueue(toast.id)
-        })
-      }
-
-      return {
-        ...state,
-        toasts: state.toasts.map((t) =>
-          t.id === toastId || toastId === undefined
-            ? {
-                ...t,
-                open: false,
-              }
-            : t
-        ),
-      }
-    }
-    case "REMOVE_TOAST":
-      if (action.toastId === undefined) {
-        return {
-          ...state,
-          toasts: [],
-        }
+      };
+    case "REMOVE_MESSAGE":
+      if (action.messageId === undefined) {
+        return { ...state, messages: [] };
       }
       return {
         ...state,
-        toasts: state.toasts.filter((t) => t.id !== action.toastId),
-      }
+        messages: state.messages.filter((message) => message.id !== action.messageId),
+      };
+    case "ADD_DIALOG":
+      return {
+        ...state,
+        dialogs: [...state.dialogs, action.dialog],
+      };
+    case "REMOVE_DIALOG":
+      return {
+        ...state,
+        dialogs: state.dialogs.filter((dialog) => dialog.id !== action.dialogId),
+      };
+    default:
+      return state;
   }
-}
+};
 
-const listeners: Array<(state: State) => void> = []
+const listeners: Array<(state: State) => void> = [];
+const dialogResolvers = new Map<string, (value: unknown) => void>();
+const dialogFallbackValues = new Map<string, unknown>();
 
-let memoryState: State = { toasts: [] }
+let memoryState: State = { messages: [], dialogs: [] };
 
 function dispatch(action: Action) {
-  memoryState = reducer(memoryState, action)
+  memoryState = reducer(memoryState, action);
   listeners.forEach((listener) => {
-    listener(memoryState)
-  })
+    listener(memoryState);
+  });
 }
 
-type Toast = Omit<ToasterToast, "id">
+type ToastInput = Omit<ToastMessage, "id" | "kind">;
 
-function toast({ ...props }: Toast) {
-  const id = genId()
+function toast(props: ToastInput) {
+  const id = genId();
 
-  const update = (props: ToasterToast) =>
+  const update = (nextProps: ToastInput) =>
     dispatch({
-      type: "UPDATE_TOAST",
-      toast: { ...props, id },
-    })
-  const dismiss = () => dispatch({ type: "DISMISS_TOAST", toastId: id })
+      type: "UPDATE_MESSAGE",
+      message: { ...nextProps, id },
+    });
+
+  const dismiss = () =>
+    dispatch({
+      type: "REMOVE_MESSAGE",
+      messageId: id,
+    });
 
   dispatch({
-    type: "ADD_TOAST",
-    toast: {
-      ...props,
+    type: "ADD_MESSAGE",
+    message: {
       id,
-      open: true,
-      onOpenChange: (open) => {
-        if (!open) dismiss()
-      },
+      kind: "toast",
+      ...props,
     },
-  })
+  });
 
   return {
-    id: id,
+    id,
     dismiss,
     update,
+  };
+}
+
+function dismissToast(messageId?: string) {
+  dispatch({
+    type: "REMOVE_MESSAGE",
+    messageId,
+  });
+}
+
+function enqueueDialog<T>(
+  dialog: Omit<DialogRequest, "id">,
+  fallbackValue: T,
+): Promise<T> {
+  const id = genId();
+  const dialogWithId: DialogRequest = {
+    ...dialog,
+    id,
+  } as DialogRequest;
+
+  dispatch({
+    type: "ADD_DIALOG",
+    dialog: dialogWithId,
+  });
+
+  dialogFallbackValues.set(id, fallbackValue);
+
+  return new Promise<T>((resolve) => {
+    dialogResolvers.set(id, (value) => {
+      resolve(value as T);
+    });
+  });
+}
+
+function settleDialog(dialogId: string, value?: unknown) {
+  const resolver = dialogResolvers.get(dialogId);
+  if (resolver) {
+    const resolvedValue =
+      value === undefined ? dialogFallbackValues.get(dialogId) : value;
+    resolver(resolvedValue);
   }
+
+  dialogResolvers.delete(dialogId);
+  dialogFallbackValues.delete(dialogId);
+
+  dispatch({
+    type: "REMOVE_DIALOG",
+    dialogId,
+  });
+}
+
+type DialogInput = string | Partial<Omit<DialogBase, "id">>;
+type PromptDialogInput =
+  | string
+  | (Partial<Omit<DialogBase, "id">> & {
+      placeholder?: string;
+      defaultValue?: string;
+    });
+
+function normalizeDialogInput(
+  input: DialogInput,
+  fallbackTitle: string,
+): Omit<DialogBase, "id"> {
+  if (typeof input === "string") {
+    return {
+      title: fallbackTitle,
+      description: input,
+    };
+  }
+
+  return {
+    title: input.title || fallbackTitle,
+    description: input.description,
+    confirmLabel: input.confirmLabel,
+    cancelLabel: input.cancelLabel,
+    variant: input.variant,
+  };
+}
+
+function modalAlert(input: DialogInput): Promise<void> {
+  const options = normalizeDialogInput(input, "Уведомление");
+  return enqueueDialog<void>(
+    {
+      kind: "alert",
+      ...options,
+    },
+    undefined,
+  );
+}
+
+function modalConfirm(input: DialogInput): Promise<boolean> {
+  const options = normalizeDialogInput(input, "Подтвердите действие");
+  return enqueueDialog<boolean>(
+    {
+      kind: "confirm",
+      ...options,
+    },
+    false,
+  );
+}
+
+function modalPrompt(input: PromptDialogInput): Promise<string | null> {
+  if (typeof input === "string") {
+    return enqueueDialog<string | null>(
+      {
+        kind: "prompt",
+        title: "Введите значение",
+        description: input,
+      },
+      null,
+    );
+  }
+
+  const options = normalizeDialogInput(input, "Введите значение");
+  return enqueueDialog<string | null>(
+    {
+      kind: "prompt",
+      ...options,
+      placeholder: input.placeholder,
+      defaultValue: input.defaultValue,
+    } as Omit<PromptDialogRequest, "id">,
+    null,
+  );
+}
+
+function resolveDialog(dialogId: string, value?: unknown) {
+  settleDialog(dialogId, value);
+}
+
+function dismissDialog(dialogId: string) {
+  settleDialog(dialogId);
 }
 
 function useToast() {
-  const [state, setState] = React.useState<State>(memoryState)
+  const [state, setState] = React.useState<State>(memoryState);
 
   React.useEffect(() => {
-    listeners.push(setState)
+    listeners.push(setState);
     return () => {
-      const index = listeners.indexOf(setState)
+      const index = listeners.indexOf(setState);
       if (index > -1) {
-        listeners.splice(index, 1)
+        listeners.splice(index, 1);
       }
-    }
-  }, [state])
+    };
+  }, []);
 
   return {
     ...state,
     toast,
-    dismiss: (toastId?: string) => dispatch({ type: "DISMISS_TOAST", toastId }),
-  }
+    dismiss: dismissToast,
+    dismissToast,
+    resolveDialog,
+    dismissDialog,
+    alert: modalAlert,
+    confirm: modalConfirm,
+    prompt: modalPrompt,
+  };
 }
 
-export { useToast, toast }
+export { useToast, toast, modalAlert, modalConfirm, modalPrompt };

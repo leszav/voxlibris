@@ -3,7 +3,7 @@ import { Server, Socket } from "socket.io";
 import jwt, { JwtPayload } from "jsonwebtoken";
 import { db } from "./db.js";
 import { users, readingProgress, bookmarks, notes, books, clubMembers, bookReadingStatus } from "../shared/schema.js";
-import { eq, and } from "drizzle-orm";
+import { eq, and, isNull } from "drizzle-orm";
 import type {
   ReaderProgressUpdate,
   BookmarkUpdate,
@@ -108,34 +108,59 @@ export function initializeReaderWebSocket(httpServer: HttpServer) {
     // Обновление прогресса чтения
     socket.on("progress_update", async (data: ReaderProgressUpdate) => {
       try {
-        // Сохранение прогресса в БД (с debounce на клиенте)
-        await db
-          .insert(readingProgress)
-          .values({
-            userId: authSocket.userId,
-            bookId: data.bookId,
-            clubId: data.clubId,
-            currentChapter: data.currentChapter,
-            currentPosition: data.currentPosition,
-            progress: data.progress,
-            lastReadAt: new Date(),
-            updatedAt: new Date(),
-          })
-          .onConflictDoUpdate({
-            target: [readingProgress.userId, readingProgress.bookId],
-            set: {
-              currentChapter: data.currentChapter,
-              currentPosition: data.currentPosition,
-              progress: data.progress,
+        const normalizedClubId = typeof data.clubId === 'string' && data.clubId.length > 0
+          ? data.clubId
+          : null;
+        const normalizedCurrentChapter = typeof data.currentChapter === 'number' && data.currentChapter > 0
+          ? data.currentChapter
+          : 1;
+        const normalizedCurrentPosition = typeof data.currentPosition === 'string'
+          ? data.currentPosition
+          : JSON.stringify(data.currentPosition || {});
+        const normalizedProgress = typeof data.progress === 'number' ? data.progress : 0;
+
+        // Сохранение прогресса без ON CONFLICT: в reading_progress нет unique(user_id, book_id)
+        const [existingProgress] = await db
+          .select({ id: readingProgress.id })
+          .from(readingProgress)
+          .where(and(
+            eq(readingProgress.userId, authSocket.userId),
+            eq(readingProgress.bookId, data.bookId),
+            normalizedClubId ? eq(readingProgress.clubId, normalizedClubId) : isNull(readingProgress.clubId),
+          ))
+          .limit(1);
+
+        if (existingProgress) {
+          await db
+            .update(readingProgress)
+            .set({
+              currentChapter: normalizedCurrentChapter,
+              currentPosition: normalizedCurrentPosition,
+              progress: normalizedProgress,
+              clubId: normalizedClubId,
               lastReadAt: new Date(),
               updatedAt: new Date(),
-            },
-          });
+            })
+            .where(eq(readingProgress.id, existingProgress.id));
+        } else {
+          await db
+            .insert(readingProgress)
+            .values({
+              userId: authSocket.userId,
+              bookId: data.bookId,
+              clubId: normalizedClubId,
+              currentChapter: normalizedCurrentChapter,
+              currentPosition: normalizedCurrentPosition,
+              progress: normalizedProgress,
+              lastReadAt: new Date(),
+              updatedAt: new Date(),
+            });
+        }
 
         // Обновляем статус книги в book_reading_status
         try {
-          const bookType = data.clubId ? 'club' : 'personal';
-          const newStatus = data.progress === 100 ? 'completed' : 'reading';
+          const bookType = normalizedClubId ? 'club' : 'personal';
+          const newStatus = normalizedProgress === 100 ? 'completed' : 'reading';
           const now = new Date();
 
           await db
@@ -145,16 +170,16 @@ export function initializeReaderWebSocket(httpServer: HttpServer) {
               bookId: data.bookId,
               bookType,
               status: newStatus,
-              progress: data.progress,
+              progress: normalizedProgress,
               startedAt: now,
-              completedAt: data.progress === 100 ? now : null,
+              completedAt: normalizedProgress === 100 ? now : null,
             })
             .onConflictDoUpdate({
               target: [bookReadingStatus.userId, bookReadingStatus.bookId, bookReadingStatus.bookType],
               set: {
                 status: newStatus,
-                progress: data.progress,
-                completedAt: data.progress === 100 ? now : undefined,
+                progress: normalizedProgress,
+                completedAt: normalizedProgress === 100 ? now : undefined,
                 updatedAt: now,
               },
             });
@@ -164,13 +189,13 @@ export function initializeReaderWebSocket(httpServer: HttpServer) {
         }
 
         // Broadcast в комнату (для клубов)
-        if (data.clubId) {
-          const roomName = `club:${data.clubId}:book:${data.bookId}`;
+        if (normalizedClubId) {
+          const roomName = `club:${normalizedClubId}:book:${data.bookId}`;
           socket.to(roomName).emit("member_progress", {
             userId: authSocket.userId,
             username: authSocket.username,
-            currentChapter: data.currentChapter,
-            progress: data.progress,
+            currentChapter: normalizedCurrentChapter,
+            progress: normalizedProgress,
             timestamp: new Date().toISOString(),
           });
         }

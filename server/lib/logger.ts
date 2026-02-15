@@ -1,9 +1,10 @@
 import pino from 'pino';
 
 const isProduction = process.env.NODE_ENV === 'production';
+const loggerLevel = process.env.LOG_LEVEL || (isProduction ? 'info' : 'debug');
 
 export const logger = pino({
-  level: isProduction ? 'info' : 'debug',
+  level: loggerLevel,
   transport: isProduction ? undefined : {
     target: 'pino/file',
     options: { destination: 1 },

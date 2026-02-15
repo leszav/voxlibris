@@ -30,9 +30,6 @@ export function jwtAuth(req: Request, res: Response, next: NextFunction) {
     // Если нет в header, проверяем cookies
     if (!token && req.cookies?.accessToken) {
       token = req.cookies.accessToken;
-      logger.debug('[jwtAuth] Token found in cookies');
-    } else if (token) {
-      logger.debug('[jwtAuth] Token found in Authorization header');
     }
 
     if (!token) {

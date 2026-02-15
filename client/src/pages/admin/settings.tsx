@@ -20,7 +20,8 @@ import {
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import * as React from "react";
-import { getAccessToken } from "@/lib/token-store";
+import { modalAlert } from "@/hooks/use-toast";
+import { apiRequest } from "@/lib/queryClient";
 
 type HealthStatus = 'healthy' | 'warning' | 'error';
 
@@ -91,93 +92,29 @@ interface PlatformSettingsResponse {
 }
 
 async function fetchSystemSettings(): Promise<SystemSettings> {
-  const token = getAccessToken();
-  if (!token) throw new Error('No auth token');
-
-  const response = await fetch('/api/v1/admin/settings', {
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error('Failed to fetch system settings');
-  }
-
-  return response.json();
+  return apiRequest<SystemSettings>('/api/v1/admin/settings');
 }
 
 async function fetchPlatformSettings(): Promise<PlatformSettingsResponse> {
-  const token = getAccessToken();
-  if (!token) throw new Error('No auth token');
-
-  const response = await fetch('/api/v1/admin/settings/platform', {
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error('Failed to fetch platform URL settings');
-  }
-
-  return response.json();
+  return apiRequest<PlatformSettingsResponse>('/api/v1/admin/settings/platform');
 }
 
 async function updatePlatformSettings(canonicalUrl: string): Promise<void> {
-  const token = getAccessToken();
-  if (!token) throw new Error('No auth token');
-
-  const response = await fetch('/api/v1/admin/settings/platform', {
+  await apiRequest('/api/v1/admin/settings/platform', {
     method: 'PUT',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
     body: JSON.stringify({ canonicalUrl }),
   });
-
-  if (!response.ok) {
-    throw new Error('Failed to update platform URL settings');
-  }
 }
 
 async function updateSystemSettings(settings: Partial<SystemSettings>): Promise<void> {
-  const token = getAccessToken();
-  if (!token) throw new Error('No auth token');
-
-  const response = await fetch('/api/v1/admin/settings', {
+  await apiRequest('/api/v1/admin/settings', {
     method: 'PUT',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
     body: JSON.stringify(settings),
   });
-
-  if (!response.ok) {
-    throw new Error('Failed to update system settings');
-  }
 }
 
 async function fetchSystemHealth(): Promise<SystemHealth> {
-  const token = getAccessToken();
-  if (!token) throw new Error('No auth token');
-
-  const response = await fetch('/api/v1/admin/system/health', {
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error('Failed to fetch system health');
-  }
-
-  return response.json();
+  return apiRequest<SystemHealth>('/api/v1/admin/system/health');
 }
 
 function StatusBadge({ status }: { readonly status: HealthStatus }) {
@@ -658,14 +595,7 @@ function SMTPSettings() {
   const { data: smtpData, isLoading } = useQuery({
     queryKey: ['smtp-settings'],
     queryFn: async () => {
-      const token = getAccessToken();
-      const response = await fetch('/api/v1/admin/settings/smtp', {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      });
-      if (!response.ok) throw new Error('Failed to fetch SMTP settings');
-      const data = await response.json();
+      const data = await apiRequest<{ settings: Record<string, string> }>('/api/v1/admin/settings/smtp');
       return data.settings;
     },
   });
@@ -688,55 +618,63 @@ function SMTPSettings() {
   // Мутация для сохранения настроек
   const saveMutation = useMutation({
     mutationFn: async (settings: typeof localSettings) => {
-      const token = getAccessToken();
-      const response = await fetch('/api/v1/admin/settings/smtp', {
+      return apiRequest('/api/v1/admin/settings/smtp', {
         method: 'PUT',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
         body: JSON.stringify(settings),
       });
-      if (!response.ok) throw new Error('Failed to save SMTP settings');
-      return response.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['smtp-settings'] });
-      alert('SMTP настройки успешно сохранены');
+      void modalAlert({
+        title: "SMTP настройки сохранены",
+        description: "Изменения успешно применены.",
+      });
     },
     onError: (error: Error) => {
-      alert(`Ошибка: ${error.message}`);
+      void modalAlert({
+        title: "Ошибка сохранения",
+        description: error.message,
+        variant: "destructive",
+      });
     },
   });
 
   // Функция отправки тестового письма
   const handleTestEmail = async () => {
     if (!testEmail) {
-      alert('Введите email для теста');
+      void modalAlert({
+        title: "Укажите email",
+        description: "Введите email для отправки тестового письма.",
+        variant: "destructive",
+      });
       return;
     }
 
     setIsTesting(true);
     try {
-      const token = getAccessToken();
-      const response = await fetch('/api/v1/admin/settings/smtp/test', {
+      const data = await apiRequest<{ success: boolean; message?: string }>('/api/v1/admin/settings/smtp/test', {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
         body: JSON.stringify({ testEmail }),
       });
-
-      const data = await response.json();
       if (data.success) {
-        alert(`Тестовое письмо отправлено на ${testEmail}`);
+        void modalAlert({
+          title: "Тестовое письмо отправлено",
+          description: `Письмо отправлено на ${testEmail}.`,
+        });
       } else {
-        alert(`Ошибка: ${data.message}`);
+        void modalAlert({
+          title: "Ошибка отправки",
+          description: data.message || "Не удалось отправить тестовое письмо.",
+          variant: "destructive",
+        });
       }
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      alert(`Ошибка отправки: ${errorMessage}`);
+      void modalAlert({
+        title: "Ошибка отправки",
+        description: errorMessage,
+        variant: "destructive",
+      });
     } finally {
       setIsTesting(false);
     }

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { MessageCircle, X, Minimize2, Trash2, Eraser, Smile } from "lucide-react";
 import { useChat } from "@/hooks/use-chat";
 import { useAuth } from "@/hooks/use-auth";
+import { modalConfirm } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
@@ -67,9 +68,13 @@ export function ChatWidget({ clubId, channel = "general", onCleanupDeleted, canC
 
   const handleCleanupDeleted = async () => {
     if (!onCleanupDeleted) return;
-    const confirmed = confirm(
-      "Очистить все удалённые сообщения из чата? Это действие необратимо."
-    );
+    const confirmed = await modalConfirm({
+      title: "Очистить удалённые сообщения?",
+      description: "Очистить все удалённые сообщения из чата? Это действие необратимо.",
+      confirmLabel: "Очистить",
+      cancelLabel: "Отмена",
+      variant: "destructive",
+    });
     if (confirmed) {
       await onCleanupDeleted();
       // Перезагружаем историю чата после очистки

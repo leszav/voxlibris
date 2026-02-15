@@ -3,6 +3,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { 
@@ -11,7 +13,6 @@ import {
   Download,
   BookOpen,
   Upload,
-  Eye,
   Ban,
   CheckCircle,
   AlertTriangle,
@@ -24,6 +25,14 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -33,7 +42,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { getAccessToken } from "@/lib/token-store";
+import { apiRequest } from "@/lib/queryClient";
+import { modalAlert } from "@/hooks/use-toast";
 
 interface Book {
   id: string;
@@ -73,9 +83,6 @@ interface BooksFilters {
 }
 
 async function fetchBooks(filters: BooksFilters): Promise<BooksResponse> {
-  const token = getAccessToken();
-  if (!token) throw new Error('No auth token');
-
   const params = new URLSearchParams();
   if (filters.search) params.append('search', filters.search);
   if (filters.status && filters.status !== 'all') params.append('status', filters.status);
@@ -83,53 +90,25 @@ async function fetchBooks(filters: BooksFilters): Promise<BooksResponse> {
   params.append('page', filters.page.toString());
   params.append('limit', filters.limit.toString());
 
-  const response = await fetch(`/api/v1/admin/books?${params.toString()}`, {
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error('Failed to fetch books');
-  }
-
-  return response.json();
+  return apiRequest<BooksResponse>(`/api/v1/admin/books?${params.toString()}`);
 }
 
 async function deleteBook(bookId: string, source: string): Promise<void> {
-  const token = getAccessToken();
-  if (!token) throw new Error('No auth token');
-
-  const response = await fetch(`/api/v1/admin/books/${bookId}?source=${source}`, {
+  await apiRequest(`/api/v1/admin/books/${bookId}?source=${source}`, {
     method: 'DELETE',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
   });
-
-  if (!response.ok) {
-    throw new Error('Failed to delete book');
-  }
 }
 
-async function updateBookStatus(bookId: string, status: string, source: string): Promise<void> {
-  const token = getAccessToken();
-  if (!token) throw new Error('No auth token');
-
-  const response = await fetch(`/api/v1/admin/books/${bookId}/status`, {
+async function updateBookStatus(bookId: string, status: string, source: string, reason?: string): Promise<void> {
+  await apiRequest(`/api/v1/admin/books/${bookId}/status`, {
     method: 'PUT',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ status, source }),
+    body: JSON.stringify({ status, source, reason }),
   });
+}
 
-  if (!response.ok) {
-    throw new Error('Failed to update book status');
-  }
+function buildBookDownloadUrl(book: Book): string {
+  const params = new URLSearchParams({ source: book.source });
+  return `/api/v1/admin/books/${book.id}/download?${params.toString()}`;
 }
 
 function BookStatusBadge({ status }: Readonly<{ status: Book['status'] }>) {
@@ -163,22 +142,87 @@ function BookStatusBadge({ status }: Readonly<{ status: Book['status'] }>) {
 function BookActionsMenu({ book }: Readonly<{ book: Book }>) {
   const queryClient = useQueryClient();
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [showBlockDialog, setShowBlockDialog] = useState(false);
+  const [blockReason, setBlockReason] = useState("");
 
   const deleteBookMutation = useMutation({
     mutationFn: ({ bookId, source }: { bookId: string; source: string }) => deleteBook(bookId, source),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin-books'] });
       setShowDeleteDialog(false);
+      void modalAlert({
+        title: "Книга удалена",
+        description: "Книга была удалена из системы",
+      });
+    },
+    onError: (error: Error) => {
+      void modalAlert({
+        title: "Ошибка удаления",
+        description: error.message,
+        variant: "destructive",
+      });
     },
   });
 
   const updateStatusMutation = useMutation({
-    mutationFn: ({ bookId, status, source }: { bookId: string; status: string; source: string }) =>
-      updateBookStatus(bookId, status, source),
-    onSuccess: () => {
+    mutationFn: ({ bookId, status, source, reason }: { bookId: string; status: string; source: string; reason?: string }) =>
+      updateBookStatus(bookId, status, source, reason),
+    onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['admin-books'] });
+      if (variables.status === 'blocked') {
+        setShowBlockDialog(false);
+        setBlockReason("");
+        void modalAlert({
+          title: "Книга заблокирована",
+          description: variables.source === 'books'
+            ? "Книга заблокирована"
+            : "Книга заблокирована, пользователь уведомлен по email",
+        });
+        return;
+      }
+
+      if (variables.status === 'active' && book.status === 'pending') {
+        void modalAlert({
+          title: "Книга одобрена",
+          description: "Книга переведена в активный статус",
+        });
+        return;
+      }
+
+      if (variables.status === 'active') {
+        void modalAlert({
+          title: "Книга разблокирована",
+          description: "Книга снова доступна",
+        });
+      }
+    },
+    onError: (error: Error) => {
+      void modalAlert({
+        title: "Ошибка",
+        description: error.message,
+        variant: "destructive",
+      });
     },
   });
+
+  const handleConfirmBlock = () => {
+    const normalizedReason = blockReason.trim();
+    if (!normalizedReason) {
+      void modalAlert({
+        title: "Причина обязательна",
+        description: "Укажите причину блокировки книги",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    updateStatusMutation.mutate({
+      bookId: book.id,
+      status: 'blocked',
+      source: book.source,
+      reason: normalizedReason,
+    });
+  };
 
   return (
     <>
@@ -190,9 +234,9 @@ function BookActionsMenu({ book }: Readonly<{ book: Book }>) {
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
           <DropdownMenuItem asChild>
-            <a href={book.file_url} target="_blank" rel="noopener noreferrer">
-              <Eye className="w-4 h-4 mr-2" />
-              Просмотреть файл
+            <a href={buildBookDownloadUrl(book)} target="_blank" rel="noopener noreferrer">
+              <Download className="w-4 h-4 mr-2" />
+              Скачать для проверки
             </a>
           </DropdownMenuItem>
           {book.status === 'pending' && (
@@ -206,11 +250,17 @@ function BookActionsMenu({ book }: Readonly<{ book: Book }>) {
             </DropdownMenuItem>
           )}
           <DropdownMenuItem
-            onClick={() => updateStatusMutation.mutate({ 
-              bookId: book.id, 
-              status: book.status === 'blocked' ? 'active' : 'blocked',
-              source: book.source
-            })}
+            onClick={() => {
+              if (book.status === 'blocked') {
+                updateStatusMutation.mutate({
+                  bookId: book.id,
+                  status: 'active',
+                  source: book.source,
+                });
+                return;
+              }
+              setShowBlockDialog(true);
+            }}
             disabled={updateStatusMutation.isPending}
             className={book.status === 'blocked' ? 'text-green-600' : 'text-red-600'}
           >
@@ -236,6 +286,57 @@ function BookActionsMenu({ book }: Readonly<{ book: Book }>) {
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+
+      <Dialog
+        open={showBlockDialog}
+        onOpenChange={(open) => {
+          setShowBlockDialog(open);
+          if (!open) {
+            setBlockReason("");
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Заблокировать книгу?</DialogTitle>
+            <DialogDescription>
+              Укажите причину блокировки книги "{book.title}".
+              {book.source !== 'books' ? " Пользователю будет отправлено email-уведомление." : ""}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-2">
+            <Label htmlFor={`book-block-reason-${book.id}`}>Причина блокировки</Label>
+            <Textarea
+              id={`book-block-reason-${book.id}`}
+              value={blockReason}
+              onChange={(event) => setBlockReason(event.target.value)}
+              placeholder="Например: нарушение авторских прав, запрещенный контент, нарушение законодательства РФ..."
+              rows={5}
+              disabled={updateStatusMutation.isPending}
+            />
+          </div>
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setShowBlockDialog(false)}
+              disabled={updateStatusMutation.isPending}
+            >
+              Отмена
+            </Button>
+            <Button
+              type="button"
+              onClick={handleConfirmBlock}
+              className="bg-red-600 hover:bg-red-700"
+              disabled={updateStatusMutation.isPending}
+            >
+              {updateStatusMutation.isPending ? 'Блокировка...' : 'Заблокировать'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
         <AlertDialogContent>

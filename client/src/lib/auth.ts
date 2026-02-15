@@ -1,5 +1,5 @@
 import { User } from '../../../shared/schema';
-import { getAccessToken, setAccessToken, isTokenExpired } from './token-store';
+import { getAccessToken, isTokenExpired, syncTokenFromCookie } from './token-store';
 import { apiRequest } from './queryClient';
 
 interface LoginRequest {
@@ -141,13 +141,14 @@ class AuthAPI {
         body: JSON.stringify(data),
       });
 
-      // Cookie-only auth: track activity, but do not store access token in JS.
+      // Синхронизируем токен из cookie в память
+      syncTokenFromCookie();
       this.startActivityTracking();
 
       return result;
     } catch (error) {
-      // Очищаем состояние при ошибке
-      setAccessToken(null);
+      // При ошибке регистрации очищаем локальное состояние
+      this.clearTokens();
       throw error;
     }
   }
@@ -159,21 +160,25 @@ class AuthAPI {
         body: JSON.stringify(data),
       });
 
-      // Cookie-only auth: track activity, but do not store access token in JS.
+      // Синхронизируем токен из cookie в память
+      syncTokenFromCookie();
       this.startActivityTracking();
 
       return result;
     } catch (error) {
-      // Очищаем состояние при ошибке
-      setAccessToken(null);
+      // При ошибке логина очищаем локальное состояние
+      this.clearTokens();
       throw error;
     }
   }
 
   async logout(): Promise<void> {
     try {
-      await apiRequest(`${this.baseURL}/auth/logout`, {
+      // Важно: logout не должен триггерить авто-refresh/retry.
+      // Поэтому используем прямой fetch вместо apiRequest.
+      await fetch(`${this.baseURL}/auth/logout`, {
         method: 'POST',
+        credentials: 'include',
       });
     } catch (error) {
       // Игнорируем ошибки logout на сервере
@@ -192,7 +197,8 @@ class AuthAPI {
 
   // Очистить токены (для выхода)
   clearTokens(): void {
-    setAccessToken(null);
+    // При httpOnly cookies токены очищаются на сервере при logout
+    // Здесь очищаем только клиентское состояние
     this.clearTokenRefreshTimer();
     this.stopActivityTracking();
   }
@@ -229,11 +235,13 @@ class AuthAPI {
         method: 'POST',
       });
 
-      setAccessToken(null);
+      // Синхронизируем обновленный токен из cookie
+      syncTokenFromCookie();
       this.startActivityTracking();
       return true;
-    } catch {
-      setAccessToken(null);
+    } catch (error) {
+      console.error('Force refresh token failed:', error);
+      this.clearTokens();
       return false;
     }
   }

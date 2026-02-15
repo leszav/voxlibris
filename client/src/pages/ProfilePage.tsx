@@ -23,7 +23,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import { getAccessToken, getUserFromToken } from "@/lib/token-store";
+import { useAuth } from "@/hooks/use-auth";
 import { authFetch } from "@/lib/queryClient";
 
 // Helper function для рендеринга контента клубов
@@ -151,15 +151,10 @@ export default function ProfilePage() {
   const { id } = useParams();
   const { toast } = useToast();
   const [, setLocation] = useLocation();
+  const { user } = useAuth();
 
   // Если ID не указан, используем ID текущего пользователя
-  const profileId =
-    id ||
-    (() => {
-      // Пытаемся получить ID из разных источников
-      const userId = getUserFromToken(getAccessToken() || '')?.userId || null;
-      return userId || "current";
-    })();
+  const profileId = id || user?.id || "current";
   const queryClient = useQueryClient();
 
   const updateProfileMutation = useMutation({
@@ -236,7 +231,7 @@ export default function ProfilePage() {
   const [newGoal, setNewGoal] = React.useState(12);
 
   // Определяем isOwnProfile здесь, перед использованием
-  const currentUserId = getUserFromToken(getAccessToken() || '')?.userId || null;
+  const currentUserId = user?.id || null;
   const isOwnProfile = !id || currentUserId === id || profileId === "current";
 
   // Получить цель чтения на текущий год

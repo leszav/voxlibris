@@ -3,6 +3,8 @@ import { jwtAuth, requireAdmin } from './jwt-middleware.js';
 import { storage } from './repositories/index.js';
 import { authService } from './auth-service.js';
 import { emailService } from './services/email-service.js';
+import { fileStorage } from './file-storage.js';
+import { CryptoService } from './crypto-service.js';
 import type { UserRole, UserStatus, AdminActionType, AdminActionTargetType } from '../shared/schema.js';
 import { db } from './db.js';
 import postgres from 'postgres';
@@ -87,6 +89,109 @@ const logAction = (
 
 const DEFAULT_ADMIN_PAGE_LIMIT = 20;
 const MAX_ADMIN_PAGE_LIMIT = 100;
+const ADMIN_CLUB_STATUSES = ['pending', 'recruiting', 'active', 'completed', 'archived'] as const;
+type AdminClubStatus = (typeof ADMIN_CLUB_STATUSES)[number];
+type AdminBookSource = 'books' | 'personal_books' | 'club_books';
+type AdminBookStatus = 'active' | 'blocked' | 'pending';
+
+const BOOK_BLOCK_REASON_MAX_LENGTH = 1000;
+
+interface DownloadPayload {
+  fileBuffer: Buffer;
+  fileName: string;
+  mimeType: string;
+}
+
+function isAdminClubStatus(status: unknown): status is AdminClubStatus {
+  return typeof status === 'string' && ADMIN_CLUB_STATUSES.includes(status as AdminClubStatus);
+}
+
+function isAdminBookSource(source: unknown): source is AdminBookSource {
+  return source === 'books' || source === 'personal_books' || source === 'club_books';
+}
+
+function isAdminBookStatus(status: unknown): status is AdminBookStatus {
+  return status === 'active' || status === 'blocked' || status === 'pending';
+}
+
+function normalizeStorageKey(rawPath: string): string {
+  const trimmed = rawPath.trim();
+  if (!trimmed) {
+    return '';
+  }
+
+  if (/^https?:\/\//i.test(trimmed)) {
+    try {
+      const url = new URL(trimmed);
+      const normalizedPath = url.pathname.replace(/^\/+/, '');
+      if (normalizedPath.startsWith('api/storage/')) {
+        return normalizedPath.replace(/^api\/storage\//, '');
+      }
+
+      const segments = normalizedPath.split('/').filter(Boolean);
+      if (segments.length >= 2) {
+        return segments.slice(1).join('/');
+      }
+
+      return normalizedPath;
+    } catch {
+      // Fall through to plain path normalization
+    }
+  }
+
+  const plainPath = trimmed.replace(/^\/+/, '');
+  if (plainPath.startsWith('api/storage/')) {
+    return plainPath.replace(/^api\/storage\//, '');
+  }
+
+  return plainPath;
+}
+
+function sanitizeFileNameBase(value: string): string {
+  const normalized = value
+    .normalize('NFKD')
+    .replace(/[^\p{L}\p{N}\s._-]/gu, '')
+    .trim()
+    .replace(/\s+/g, '_');
+
+  return normalized.length > 0 ? normalized.slice(0, 120) : 'book';
+}
+
+function getFormatMeta(format: string | null | undefined): { ext: string; mimeType: string } {
+  const normalized = (format || '').toLowerCase();
+  if (normalized === 'epub') {
+    return { ext: 'epub', mimeType: 'application/epub+zip' };
+  }
+  if (normalized === 'fb2') {
+    return { ext: 'fb2', mimeType: 'application/x-fictionbook+xml' };
+  }
+  return { ext: 'bin', mimeType: 'application/octet-stream' };
+}
+
+function buildAttachmentFileName(baseName: string, ext: string): string {
+  const normalizedExt = ext.replace(/^\./, '').trim() || 'bin';
+  return `${sanitizeFileNameBase(baseName)}.${normalizedExt}`;
+}
+
+function buildAttachmentHeader(fileName: string): string {
+  const fallback = fileName.replace(/[^\x20-\x7E]/g, '_').replace(/"/g, '');
+  const utf8FileName = encodeURIComponent(fileName)
+    .replace(/['()]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`)
+    .replace(/\*/g, '%2A');
+
+  return `attachment; filename="${fallback || 'book.bin'}"; filename*=UTF-8''${utf8FileName}`;
+}
+
+function getDisplayBookStatusForRegularBook(status: string): AdminBookStatus {
+  if (status === 'active' || status === 'blocked') {
+    return status;
+  }
+  return 'pending';
+}
+
+function normalizeReason(reasonRaw: unknown): string {
+  return typeof reasonRaw === 'string' ? reasonRaw.trim() : '';
+}
 
 function parsePositiveInt(value: unknown, fallback: number, max?: number): number {
   const parsed = Number(value);
@@ -988,86 +1093,337 @@ router.get('/books', jwtAuth, requireAdmin, async (req, res) => {
   }
 });
 
-// Вспомогательные функции для изменения статуса книг
-async function updatePersonalBookStatus(id: string, status: string): Promise<{ success: boolean; error?: string }> {
+async function buildPersonalBookDownloadPayload(
+  id: string,
+): Promise<{ payload?: DownloadPayload; error?: string; statusCode?: number }> {
   const book = await storage.getPersonalBook(id);
   if (!book) {
-    return { success: false, error: 'Personal book not found' };
+    return { statusCode: 404, error: 'Personal book not found' };
   }
-  
-  let success = false;
-  if (status === 'blocked') {
-    success = await storage.deletePersonalBook(id);
-  } else if (status === 'active') {
-    success = await storage.restorePersonalBook(id);
+
+  if (!book.storagePath) {
+    return { statusCode: 400, error: 'Book file path is missing' };
   }
-  
-  return { success };
+
+  if (!book.encryptedContentKey) {
+    return { statusCode: 400, error: 'Book encryption key is missing' };
+  }
+
+  const encryptedFile = await fileStorage.getFile(book.storagePath);
+  const cek = CryptoService.decryptKey(book.encryptedContentKey);
+  const decryptedFile = CryptoService.decryptFile(encryptedFile, cek);
+  const formatMeta = getFormatMeta(book.format);
+
+  return {
+    payload: {
+      fileBuffer: decryptedFile,
+      fileName: buildAttachmentFileName(book.title, formatMeta.ext),
+      mimeType: formatMeta.mimeType,
+    },
+  };
 }
 
-async function updateClubBookStatus(id: string, status: string): Promise<{ success: boolean; error?: string }> {
+async function buildClubBookDownloadPayload(
+  id: string,
+): Promise<{ payload?: DownloadPayload; error?: string; statusCode?: number }> {
   const book = await storage.getClubBook(id);
   if (!book) {
-    return { success: false, error: 'Club book not found' };
+    return { statusCode: 404, error: 'Club book not found' };
   }
-  
-  let success = false;
-  if (status === 'blocked') {
-    success = await storage.deleteClubBook(id);
-  } else if (status === 'active') {
-    success = await storage.restoreClubBook(id);
+
+  if (!book.storagePath) {
+    return { statusCode: 400, error: 'Book file path is missing' };
   }
-  
-  return { success };
+
+  if (!book.encryptedContentKey) {
+    return { statusCode: 400, error: 'Book encryption key is missing' };
+  }
+
+  const encryptedFile = await fileStorage.getFile(book.storagePath);
+  const cek = CryptoService.decryptKey(book.encryptedContentKey);
+  const decryptedFile = CryptoService.decryptFile(encryptedFile, cek);
+  const formatMeta = getFormatMeta(book.format);
+
+  return {
+    payload: {
+      fileBuffer: decryptedFile,
+      fileName: buildAttachmentFileName(book.title, formatMeta.ext),
+      mimeType: formatMeta.mimeType,
+    },
+  };
 }
 
-async function updateRegularBookStatus(id: string, status: string, userId: string): Promise<{ success: boolean; error?: string }> {
+async function buildRegularBookDownloadPayload(
+  id: string,
+): Promise<{ payload?: DownloadPayload; error?: string; statusCode?: number }> {
   const book = await storage.getBook(id);
   if (!book) {
-    return { success: false, error: 'Book not found' };
+    return { statusCode: 404, error: 'Book not found' };
   }
 
-  const statusMap: { [key: string]: 'draft' | 'published' | 'archived' } = {
-    'active': 'published',
-    'blocked': 'archived',
-    'pending': 'draft'
-  };
+  if (!book.contentPath) {
+    return { statusCode: 400, error: 'Book file is not available for download' };
+  }
 
-  const newStatus = statusMap[status] || 'draft';
-  const success = await storage.updateBookStatus(id, newStatus, userId);
-  
-  return { success };
+  const storageKey = normalizeStorageKey(book.contentPath);
+  if (!storageKey) {
+    return { statusCode: 400, error: 'Book file path is invalid' };
+  }
+
+  const fileBuffer = await fileStorage.getFile(storageKey);
+  const formatMeta = getFormatMeta(book.contentType);
+  const originalExtension = book.originalFilename?.split('.').pop() || formatMeta.ext;
+
+  return {
+    payload: {
+      fileBuffer,
+      fileName: buildAttachmentFileName(book.title, originalExtension),
+      mimeType: formatMeta.mimeType,
+    },
+  };
+}
+
+// Скачать книгу для постмодерации (с расшифровкой для personal/club books)
+router.get('/books/:id/download', jwtAuth, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const sourceRaw = req.query.source;
+    const source = isAdminBookSource(sourceRaw) ? sourceRaw : 'books';
+
+    let result: { payload?: DownloadPayload; error?: string; statusCode?: number };
+    if (source === 'personal_books') {
+      result = await buildPersonalBookDownloadPayload(id);
+    } else if (source === 'club_books') {
+      result = await buildClubBookDownloadPayload(id);
+    } else {
+      result = await buildRegularBookDownloadPayload(id);
+    }
+
+    if (!result.payload) {
+      return res.status(result.statusCode || 500).json({
+        message: result.error || 'Failed to prepare book for download',
+      });
+    }
+
+    res.setHeader('Content-Type', result.payload.mimeType);
+    res.setHeader('Content-Length', result.payload.fileBuffer.length.toString());
+    res.setHeader('Content-Disposition', buildAttachmentHeader(result.payload.fileName));
+    res.setHeader('Cache-Control', 'no-store');
+
+    return res.send(result.payload.fileBuffer);
+  } catch (error) {
+    console.error('Error downloading book for moderation:', error);
+    return res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+interface BookBlockNotificationParams {
+  source: 'personal_books' | 'club_books';
+  uploaderUserId: string;
+  bookTitle: string;
+  reason: string;
+  clubId?: string;
+}
+
+async function sendBookBlockNotification(
+  params: BookBlockNotificationParams,
+): Promise<{ success: boolean; error?: string }> {
+  const user = await storage.getUser(params.uploaderUserId);
+  if (!user?.email) {
+    return { success: false, error: 'Book uploader email not found' };
+  }
+
+  const clubTitle = params.clubId ? (await storage.getClub(params.clubId))?.title : undefined;
+  const emailSent = await emailService.sendBookBlockedNotification({
+    email: user.email,
+    username: user.username,
+    bookTitle: params.bookTitle,
+    reason: params.reason,
+    source: params.source,
+    clubTitle,
+  });
+
+  if (!emailSent) {
+    return { success: false, error: 'Failed to send notification email to book uploader' };
+  }
+
+  return { success: true };
 }
 
 // Изменить статус книги (поддерживает все типы: books, personal_books, club_books)
 router.put('/books/:id/status', jwtAuth, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const { status, source } = req.body;
+    const statusRaw = req.body?.status;
+    const sourceRaw = req.body?.source;
+    const reason = normalizeReason(req.body?.reason);
+    const source = isAdminBookSource(sourceRaw) ? sourceRaw : 'books';
 
-    if (!['active', 'blocked', 'pending'].includes(status)) {
+    if (!isAdminBookStatus(statusRaw)) {
       return res.status(400).json({ message: 'Invalid book status' });
     }
+    const status = statusRaw;
 
-    let result: { success: boolean; error?: string };
+    const requiresReasonForBlock = source !== 'books' && status === 'blocked';
+    if (requiresReasonForBlock && !reason) {
+      return res.status(400).json({ message: 'Block reason is required' });
+    }
+    if (reason.length > BOOK_BLOCK_REASON_MAX_LENGTH) {
+      return res.status(400).json({
+        message: `Block reason is too long (max ${BOOK_BLOCK_REASON_MAX_LENGTH} chars)`,
+      });
+    }
 
     if (source === 'personal_books') {
-      result = await updatePersonalBookStatus(id, status);
-    } else if (source === 'club_books') {
-      result = await updateClubBookStatus(id, status);
-    } else {
-      result = await updateRegularBookStatus(id, status, req.user!.userId);
+      if (status === 'pending') {
+        return res.status(400).json({ message: 'Pending status is not supported for personal books' });
+      }
+
+      const personalBook = await storage.getPersonalBook(id);
+      if (!personalBook) {
+        return res.status(404).json({ message: 'Personal book not found' });
+      }
+
+      const previousStatus: AdminBookStatus = personalBook.isDeleted ? 'blocked' : 'active';
+      if (status === previousStatus) {
+        return res.json({ message: 'Book status unchanged', status });
+      }
+
+      if (status === 'blocked') {
+        const notificationResult = await sendBookBlockNotification({
+          source: 'personal_books',
+          uploaderUserId: personalBook.userId,
+          bookTitle: personalBook.title,
+          reason,
+        });
+        if (!notificationResult.success) {
+          return res.status(500).json({ message: notificationResult.error });
+        }
+      }
+
+      const updated = status === 'blocked'
+        ? await storage.deletePersonalBook(id)
+        : await storage.restorePersonalBook(id);
+
+      if (!updated) {
+        return res.status(500).json({ message: 'Failed to update personal book status' });
+      }
+
+      await logAction(
+        req,
+        status === 'blocked' ? 'block_book' : 'unblock_book',
+        'book',
+        id,
+        status === 'blocked' ? reason : undefined,
+        previousStatus,
+        status,
+      );
+
+      return res.json({
+        message: status === 'blocked'
+          ? 'Book blocked successfully and uploader notified'
+          : 'Book unblocked successfully',
+        status,
+      });
     }
 
-    if (!result.success) {
-      const statusCode = result.error?.includes('not found') ? 404 : 500;
-      return res.status(statusCode).json({ message: result.error || 'Failed to update book status' });
+    if (source === 'club_books') {
+      if (status === 'pending') {
+        return res.status(400).json({ message: 'Pending status is not supported for club books' });
+      }
+
+      const clubBook = await storage.getClubBook(id);
+      if (!clubBook) {
+        return res.status(404).json({ message: 'Club book not found' });
+      }
+
+      const previousStatus: AdminBookStatus = clubBook.isDeleted ? 'blocked' : 'active';
+      if (status === previousStatus) {
+        return res.json({ message: 'Book status unchanged', status });
+      }
+
+      if (status === 'blocked') {
+        const notificationResult = await sendBookBlockNotification({
+          source: 'club_books',
+          uploaderUserId: clubBook.uploadedByUserId,
+          bookTitle: clubBook.title,
+          reason,
+          clubId: clubBook.clubId,
+        });
+        if (!notificationResult.success) {
+          return res.status(500).json({ message: notificationResult.error });
+        }
+      }
+
+      const updated = status === 'blocked'
+        ? await storage.deleteClubBook(id)
+        : await storage.restoreClubBook(id);
+
+      if (!updated) {
+        return res.status(500).json({ message: 'Failed to update club book status' });
+      }
+
+      await logAction(
+        req,
+        status === 'blocked' ? 'block_book' : 'unblock_book',
+        'book',
+        id,
+        status === 'blocked' ? reason : undefined,
+        previousStatus,
+        status,
+      );
+
+      return res.json({
+        message: status === 'blocked'
+          ? 'Book blocked successfully and uploader notified'
+          : 'Book unblocked successfully',
+        status,
+      });
     }
 
-    res.json({ message: 'Book status updated successfully', status });
+    const regularBook = await storage.getBook(id);
+    if (!regularBook) {
+      return res.status(404).json({ message: 'Book not found' });
+    }
+
+    const previousStatus = getDisplayBookStatusForRegularBook(regularBook.status);
+    if (status === previousStatus) {
+      return res.json({ message: 'Book status unchanged', status });
+    }
+
+    const [updatedRegularBook] = await db
+      .update(books)
+      .set({
+        status: status as unknown as typeof books.$inferInsert.status,
+        blockedAt: status === 'blocked' ? new Date() : null,
+        blockReason: status === 'blocked' ? reason || null : null,
+        updatedAt: new Date(),
+      })
+      .where(eq(books.id, id))
+      .returning({ id: books.id });
+
+    if (!updatedRegularBook) {
+      return res.status(500).json({ message: 'Failed to update regular book status' });
+    }
+
+    await logAction(
+      req,
+      status === 'blocked'
+        ? 'block_book'
+        : status === 'active'
+          ? 'unblock_book'
+          : 'update_book_status',
+      'book',
+      id,
+      status === 'blocked' ? reason : undefined,
+      previousStatus,
+      status,
+    );
+
+    return res.json({ message: 'Book status updated successfully', status });
   } catch (error) {
     console.error('Error updating book status:', error);
-    res.status(500).json({ message: 'Internal server error' });
+    return res.status(500).json({ message: 'Internal server error' });
   }
 });
 
@@ -1155,7 +1511,7 @@ router.get('/clubs', jwtAuth, requireAdmin, async (req, res) => {
     const status = typeof req.query.status === 'string' ? req.query.status : undefined;
     const { page, limit, offset } = parseAdminPagination(req.query.page, req.query.limit);
 
-    const conditions: SQL<unknown>[] = [sql`${clubs.status} != 'pending'`];
+    const conditions: SQL<unknown>[] = [];
     if (search) {
       conditions.push(sql`LOWER(${clubs.title}) LIKE ${`%${search.toLowerCase()}%`}`);
     }
@@ -1163,7 +1519,11 @@ router.get('/clubs', jwtAuth, requireAdmin, async (req, res) => {
       conditions.push(eq(clubs.status, status as typeof clubs.$inferSelect['status']));
     }
 
-    const whereClause = conditions.length === 1 ? conditions[0] : (and(...conditions) as SQL<unknown>);
+    const whereClause = conditions.length === 0
+      ? sql`true`
+      : conditions.length === 1
+        ? conditions[0]
+        : (and(...conditions) as SQL<unknown>);
 
     const [totalRows, rows] = await Promise.all([
       db
@@ -1269,6 +1629,76 @@ router.put('/clubs/:id', jwtAuth, requireAdmin, async (req, res) => {
     res.json({ message: 'Club updated successfully', club: updatedClub });
   } catch (error) {
     console.error('Error updating club:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+// Обновить статус клуба
+// Переход из pending в non-pending должен идти через approve/reject для сохранения модерационного flow.
+router.put('/clubs/:id/status', jwtAuth, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body as { status?: unknown };
+
+    if (!isAdminClubStatus(status)) {
+      return res.status(400).json({
+        message: 'Invalid club status',
+        allowed: ADMIN_CLUB_STATUSES,
+      });
+    }
+
+    const club = await storage.getClub(id);
+    if (!club) {
+      return res.status(404).json({ message: 'Club not found' });
+    }
+
+    if (club.status === 'pending' && status !== 'pending') {
+      return res.status(400).json({
+        message: 'Pending clubs must be moderated via approve/reject endpoints',
+      });
+    }
+
+    if (club.status === status) {
+      return res.json({ message: 'Club status unchanged', club });
+    }
+
+    const updates: Partial<typeof clubs.$inferInsert> = { status };
+
+    if (status === 'archived') {
+      updates.archivedAt = new Date();
+    } else if (club.status === 'archived') {
+      updates.archivedAt = null;
+    }
+
+    const [updatedClub] = await db
+      .update(clubs)
+      .set({
+        ...updates,
+        updatedAt: new Date(),
+      })
+      .where(eq(clubs.id, id))
+      .returning();
+
+    if (!updatedClub) {
+      return res.status(500).json({ message: 'Failed to update club status' });
+    }
+
+    await logAction(
+      req,
+      'update_club',
+      'club',
+      id,
+      `Changed club status from ${club.status} to ${status}`,
+      club.status,
+      status
+    );
+
+    res.json({
+      message: 'Club status updated successfully',
+      club: updatedClub,
+    });
+  } catch (error) {
+    console.error('Error updating club status:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 });
@@ -1436,7 +1866,7 @@ router.put('/clubs/:id/approve', jwtAuth, requireAdmin, async (req, res) => {
 router.put('/clubs/:id/reject', jwtAuth, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const { reason } = req.body;
+    const rawReason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
     
     const club = await storage.getClub(id);
     if (!club) {
@@ -1449,33 +1879,52 @@ router.put('/clubs/:id/reject', jwtAuth, requireAdmin, async (req, res) => {
         currentStatus: club.status
       });
     }
-    
-    const rejectedClub = await storage.rejectClub(id, reason);
-    
-    if (!rejectedClub) {
-      return res.status(500).json({ message: 'Failed to reject club' });
+
+    if (!rawReason) {
+      return res.status(400).json({ message: 'Rejection reason is required' });
+    }
+
+    const clubOwner = await storage.getUser(club.ownerId);
+    if (!clubOwner?.email) {
+      return res.status(400).json({ message: 'Cannot reject club: owner email not found' });
+    }
+
+    const emailSent = await emailService.sendClubRejectionNotification({
+      email: clubOwner.email,
+      username: clubOwner.username,
+      clubTitle: club.title,
+      reason: rawReason,
+    });
+
+    if (!emailSent) {
+      return res.status(500).json({ message: 'Failed to send rejection email to club owner' });
+    }
+
+    const deleted = await storage.deleteClub(id);
+    if (!deleted) {
+      return res.status(500).json({ message: 'Failed to delete rejected club' });
     }
     
     await logAction(
       req,
-      'update_club',
+      'delete_club',
       'club',
       id,
-      reason || 'Club rejected by moderator',
+      rawReason,
       'pending',
-      'archived'
+      'deleted'
     );
     
     logger.info({
       clubId: id,
-      clubTitle: rejectedClub.title,
-      reason,
+      clubTitle: club.title,
+      ownerEmail: clubOwner.email,
+      reason: rawReason,
       moderator: req.user?.username
-    }, 'Club rejected');
+    }, 'Club rejected and deleted');
     
     res.json({ 
-      message: 'Club rejected successfully',
-      club: rejectedClub
+      message: 'Club rejected and deleted successfully'
     });
   } catch (error) {
     console.error('Error rejecting club:', error);

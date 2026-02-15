@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChatWebSocketClient, type ChatWebSocketConfig } from "../lib/chat-websocket";
 import type { ChatMessageWithUser } from "@shared/schema";
-import { getAccessToken, setAccessToken } from "@/lib/token-store";
+import { getAccessToken } from "@/lib/token-store";
 
 interface UseChatOptions {
   clubId: string;
@@ -28,79 +28,12 @@ export function useChat(options: UseChatOptions) {
     participants: [],
   });
 
-  const getToken = () => {
-    if (globalThis.window === undefined) return "";
-    const token = getAccessToken();
-    if (!token) {
-      console.warn("[useChat] No authentication token found");
-      return "";
-    }
-    
-    // Проверим базовую валидность токена (формат)
-    try {
-      const parts = token.split('.');
-      if (parts.length !== 3) {
-        console.warn("[useChat] Invalid token format");
-        return "";
-      }
-      // Декодируем payload для проверки срока действия
-      const payload = JSON.parse(atob(parts[1]));
-      const now = Math.floor(Date.now() / 1000);
-      if (payload.exp && payload.exp < now) {
-        console.warn("[useChat] Token expired");
-        setAccessToken(null);
-        return "";
-      }
-    } catch (e) {
-      console.warn("[useChat] Token validation failed:", e);
-      setAccessToken(null);
-      return "";
-    }
-    
-    return token;
-  };
-  
-  const getFreshToken = () => {
-    const token = getToken();
-    if (!token) return token;
-    
-    // Проверяем свежесть токена перед каждым WebSocket подключением
-    try {
-      const parts = token.split('.');
-      if (parts.length === 3) {
-        const payload = JSON.parse(atob(parts[1]));
-        const now = Math.floor(Date.now() / 1000);
-        const expThreshold = 60; // 60 секунд запаса
-        
-        if (payload.exp && payload.exp < (now - expThreshold)) {
-          console.warn("[useChat] Token too old for WebSocket, removing...");
-          setAccessToken(null);
-          return "";
-        }
-      }
-    } catch (e) {
-      console.warn("[useChat] Token validation failed:", e);
-      setAccessToken(null);
-      return "";
-    }
-    
-    return token;
-  };
-
-  const token = getFreshToken();
+  // Cookie-only auth: JWT в памяти может отсутствовать.
+  // Передаем токен если он есть, иначе сервер возьмет accessToken из cookie.
+  const token = getAccessToken() ?? "";
 
   useEffect(() => {
-    if (!token || !autoConnect) return;
-    
-    // Проверим аутентификацию перед подключением
-    const currentToken = getToken();
-    if (!currentToken) {
-      setState((prev) => ({ 
-        ...prev, 
-        error: new Error("Требуется авторизация. Войдите в систему.")
-      }));
-      return;
-    }
+    if (!autoConnect || !clubId) return;
 
     const config: ChatWebSocketConfig = {
       token,

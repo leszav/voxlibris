@@ -5,7 +5,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { UserCog, AlertTriangle } from "lucide-react";
-import { useToast } from "@/hooks/use-toast";
+import { modalConfirm, useToast } from "@/hooks/use-toast";
 import { getAccessToken } from "@/lib/token-store";
 import type { ClubMemberWithUser } from "@/hooks/use-clubs";
 
@@ -47,14 +47,19 @@ export function TransferOwnershipDialog({
     const selectedMember = members.find(m => m.id === selectedMemberId);
     if (!selectedMember) return;
 
-    const confirmed = confirm(
-      `Вы уверены, что хотите передать права владельца клуба "${clubTitle}" участнику ${selectedMember.username}?\n\n` +
-      `После этого:\n` +
-      `• ${selectedMember.username} станет владельцем клуба\n` +
-      `• Вы станете обычным участником\n` +
-      `• Вы сможете покинуть клуб\n\n` +
-      `Это действие необратимо!`
-    );
+    const confirmed = await modalConfirm({
+      title: "Передача прав владельца",
+      description:
+        `Вы уверены, что хотите передать права владельца клуба "${clubTitle}" участнику ${selectedMember.username}?\n\n` +
+        `После этого:\n` +
+        `• ${selectedMember.username} станет владельцем клуба\n` +
+        `• Вы станете обычным участником\n` +
+        `• Вы сможете покинуть клуб\n\n` +
+        `Это действие необратимо!`,
+      confirmLabel: "Передать права",
+      cancelLabel: "Отмена",
+      variant: "destructive",
+    });
 
     if (!confirmed) return;
 

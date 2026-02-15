@@ -137,7 +137,7 @@ export function VoxLibrisUpload({
         </Button>
       </DialogTrigger>
 
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="sm:max-w-2xl max-w-[calc(100vw-2rem)]">
         <DialogHeader>
           <DialogTitle>
             {scenario === 'personal' ? 'Загрузка книги в личную библиотеку' : 'Загрузка книги для клуба'}

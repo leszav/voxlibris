@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { Note } from "@shared/schema";
 import { useAddNote, useUpdateNote, useDeleteNote } from "../../hooks/use-reader";
+import { modalConfirm } from "../../hooks/use-toast";
 import { Button } from "../ui/button";
 import { Textarea } from "../ui/textarea";
 import { Trash2, Plus, Edit2, Check, X } from "lucide-react";
@@ -75,8 +76,16 @@ export function NotesPanel({ bookId, notes }: NotesPanelProps) {
     );
   };
 
-  const handleDelete = (noteId: string) => {
-    if (confirm("Удалить заметку?")) {
+  const handleDelete = async (noteId: string) => {
+    const confirmed = await modalConfirm({
+      title: "Удалить заметку?",
+      description: "Это действие необратимо.",
+      confirmLabel: "Удалить",
+      cancelLabel: "Отмена",
+      variant: "destructive",
+    });
+
+    if (confirmed) {
       deleteNote(noteId);
     }
   };

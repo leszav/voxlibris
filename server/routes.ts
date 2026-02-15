@@ -1438,7 +1438,7 @@ export async function registerRoutes(
   app.use("/api/recordings", jwtAuth, recordingsRouter);
 
   // ===== SESSION ANALYTICS API (Phase 8) =====
-  app.use("/api", jwtAuth, sessionAnalyticsRouter);
+  app.use("/api/session-analytics", jwtAuth, sessionAnalyticsRouter);
 
   // ===== READER QUALITY API (Phase 10) =====
   app.use("/api/reader-quality", jwtAuth, readerQualityRouter);

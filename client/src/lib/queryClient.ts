@@ -1,5 +1,5 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
-import { getAccessToken, setAccessToken, isTokenExpired } from "./token-store";
+import { getAccessToken, syncTokenFromCookie, isTokenExpired } from "./token-store";
 
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
@@ -33,14 +33,15 @@ async function refreshAccessToken(): Promise<void> {
         throw new Error('Failed to refresh token');
       }
 
-      // Cookie-only auth model: server rotates httpOnly cookies.
-      setAccessToken(null);
+      // Синхронизируем обновленный accessToken из cookie в память
+      syncTokenFromCookie();
       
       // Уведомляем приложение об успешном обновлении токена
       globalThis.dispatchEvent(new CustomEvent('token-refreshed'));
     } catch (error) {
-      // При ошибке обновления очищаем токен
-      setAccessToken(null);
+      // При ошибке обновления уведомляем об ошибке авторизации
+      console.error('Token refresh failed:', error);
+      globalThis.dispatchEvent(new CustomEvent('auth-error'));
       throw error;
     } finally {
       isRefreshing = false;
@@ -157,17 +158,21 @@ async function handleErrorResponse(res: Response, url?: string): Promise<never> 
 }
 
 // Попытка обновить токен перед запросом
+// Проверяем только если токен есть и истек
 async function tryRefreshTokenBeforeRequest(): Promise<void> {
   const token = getAccessToken();
-  if (!token || !isTokenExpired(token)) {
+  if (!token) {
+    // Нет токена - пользователь не авторизован, пропускаем проверку
     return;
   }
-
-  try {
-    await refreshAccessToken();
-  } catch (error) {
-    console.error('Token refresh failed:', error);
-    setAccessToken(null);
+  
+  if (isTokenExpired(token)) {
+    try {
+      await refreshAccessToken();
+    } catch (error) {
+      console.error('Token refresh failed before request:', error);
+      // При ошибке продолжаем, запрос вернет 401 и повторится
+    }
   }
 }
 
@@ -177,8 +182,16 @@ async function retryRequestAfter401(
   options: RequestInit | undefined,
   isFormData: boolean
 ): Promise<Response | null> {
+  // Не пытаемся refresh для самого refresh endpoint (избегаем бесконечных циклов)
+  if (url.includes('/api/auth/refresh') || url.includes('/api/auth/login') || url.includes('/api/auth/register')) {
+    return null;
+  }
+
   try {
     await refreshAccessToken();
+    
+    // Синхронизируем обновленный токен
+    syncTokenFromCookie();
     
     const newHeaders = createAuthHeaders(
       !isFormData && options?.body ? { "Content-Type": "application/json" } : {}
@@ -195,7 +208,7 @@ async function retryRequestAfter401(
     });
   } catch (error) {
     console.error('Token refresh failed on 401:', error);
-    setAccessToken(null);
+    // При ошибке обновления токен будет автоматически очищен на сервере
     return null;
   }
 }
@@ -206,7 +219,8 @@ export async function apiRequest<T = unknown>(
 ): Promise<T> {
   const isFormData = options?.body instanceof FormData;
 
-  await tryRefreshTokenBeforeRequest();
+  // Убираем предварительную проверку токена - используем только retry после 401
+  // Это устраняет race condition и избыточные запросы
 
   const headers = createAuthHeaders(
     !isFormData && options?.body ? { "Content-Type": "application/json" } : {}
@@ -247,18 +261,8 @@ export const getQueryFn: <T>(options: {
 }) => QueryFunction<T> =
   ({ on401: unauthorizedBehavior }) =>
     async ({ queryKey }) => {
-      // Проверяем токен перед запросом
-      const token = getAccessToken();
-      if (token && isTokenExpired(token)) {
-        try {
-          await refreshAccessToken();
-        } catch (error) {
-          if (unauthorizedBehavior === "returnNull") {
-            return null;
-          }
-          throw error;
-        }
-      }
+      // При httpOnly cookies токен автоматически передается с запросом
+      // и проверяется на сервере. Не нужно дополнительных проверок.
 
       const headers = createAuthHeaders();
 
@@ -272,7 +276,7 @@ export const getQueryFn: <T>(options: {
         try {
           await refreshAccessToken();
           
-          // Повторяем запрос с новым токеном
+          // Повторяем запрос с обновленным токеном (в cookie)
           const newHeaders = createAuthHeaders();
           res = await fetch(queryKey.join("/"), {
             headers: newHeaders,

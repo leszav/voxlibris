@@ -6,6 +6,7 @@ import Color from "@tiptap/extension-color";
 import Link from "@tiptap/extension-link";
 import TextAlign from "@tiptap/extension-text-align";
 import { cn } from "@/lib/utils";
+import { modalPrompt } from "@/hooks/use-toast";
 import {
   Bold, Italic, Strikethrough,
   List, ListOrdered, Quote, Undo, Redo,
@@ -188,8 +189,14 @@ export const RichTextEditor = React.forwardRef<RichTextEditorRef, RichTextEditor
           <MenuButton onClick={() => editor.chain().focus().toggleStrike().run()} active={editor.isActive("strike")} title="Зачеркнутый">
             <Strikethrough className="w-4 h-4" />
           </MenuButton>
-          <MenuButton onClick={() => {
-            const url = window.prompt("Введите URL:");
+          <MenuButton onClick={async () => {
+            const url = await modalPrompt({
+              title: "Добавить ссылку",
+              description: "Введите URL:",
+              placeholder: "https://example.com",
+              confirmLabel: "Добавить",
+              cancelLabel: "Отмена",
+            });
             if (url) {
               editor.chain().focus().setLink({ href: url }).run();
             }

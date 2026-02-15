@@ -43,7 +43,7 @@ import { VoxLibrisUpload } from "@/components/ui/voxlibris-upload";
 import { useAuth } from "@/hooks/use-auth";
 import { useDeleteClubBook } from "@/hooks/use-books-v2";
 import { useClub, useClubMembers, useRemoveMember, type ClubMemberWithUser } from "@/hooks/use-clubs";
-import { useToast } from "@/hooks/use-toast";
+import { modalConfirm, useToast } from "@/hooks/use-toast";
 import { getAccessToken } from "@/lib/token-store";
 import DOMPurify from "dompurify";
 
@@ -255,7 +255,15 @@ function useClubActions({
   deleteBookMutation: DeleteBookMutation;
 }) {
   const handleRemoveMember = async (memberId: string, memberName: string) => {
-    if (!confirm(`Удалить участника «${memberName}» из клуба?`)) return;
+    const confirmed = await modalConfirm({
+      title: "Удалить участника?",
+      description: `Удалить участника «${memberName}» из клуба?`,
+      confirmLabel: "Удалить",
+      cancelLabel: "Отмена",
+      variant: "destructive",
+    });
+    if (!confirmed) return;
+
     try {
       await removeMemberMutation.mutateAsync({ clubId, userId: memberId });
       toast({ title: "Участник удалён", description: `${memberName} больше не состоит в клубе.` });
@@ -271,7 +279,14 @@ function useClubActions({
 
   const handleDeleteBook = async () => {
     if (!club?.book?.id) return;
-    if (!confirm(`Удалить книгу «${club.book.title}» из клуба? Это действие необратимо.`)) return;
+    const confirmed = await modalConfirm({
+      title: "Удалить книгу из клуба?",
+      description: `Удалить книгу «${club.book.title}» из клуба? Это действие необратимо.`,
+      confirmLabel: "Удалить",
+      cancelLabel: "Отмена",
+      variant: "destructive",
+    });
+    if (!confirmed) return;
 
     try {
       await deleteBookMutation.mutateAsync(club.book.id);
@@ -320,11 +335,16 @@ function useClubActions({
 
   const handleCleanupChat = async (olderThanDays: number) => {
     if (!isOwner) return;
-    const confirmed = confirm(
-      olderThanDays > 0
-        ? `Очистить все удалённые сообщения чата старше ${olderThanDays} дней? Это действие необратимо.`
-        : "Очистить ВСЕ удалённые сообщения чата (включая свежие)? Это действие необратимо.",
-    );
+    const confirmed = await modalConfirm({
+      title: "Очистка удалённых сообщений",
+      description:
+        olderThanDays > 0
+          ? `Очистить все удалённые сообщения чата старше ${olderThanDays} дней? Это действие необратимо.`
+          : "Очистить ВСЕ удалённые сообщения чата (включая свежие)? Это действие необратимо.",
+      confirmLabel: "Очистить",
+      cancelLabel: "Отмена",
+      variant: "destructive",
+    });
     if (!confirmed) return;
 
     try {
@@ -887,11 +907,12 @@ export default function ClubDetails() {
   const [, params] = useRoute("/clubs/:id");
   const clubId = params?.id || "";
   const [, setLocation] = useLocation();
-  const { user } = useAuth();
+  const { user, isAuthenticated, isLoading: authLoading } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const { data: clubData, isLoading, error } = useClub(clubId);
-  const { data: membersData, isLoading: membersLoading } = useClubMembers(clubId);
+  const canLoadClubData = !!clubId && isAuthenticated && !authLoading;
+  const { data: clubData, isLoading, error } = useClub(clubId, canLoadClubData);
+  const { data: membersData, isLoading: membersLoading } = useClubMembers(clubId, canLoadClubData);
   const removeMemberMutation = useRemoveMember();
   const deleteBookMutation = useDeleteClubBook(clubId);
 
@@ -915,6 +936,8 @@ export default function ClubDetails() {
 
   // Теперь обрабатываем условия после всех хуков
   if (!clubId) return <ClubNotFound />;
+  if (authLoading) return <ClubLoading />;
+  if (!isAuthenticated) return <ClubAuthRequired />;
   if (isLoading) return <ClubLoading />;
   if (errorComponent) return errorComponent;
 

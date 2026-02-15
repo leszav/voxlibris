@@ -36,8 +36,8 @@ import {
 } from "@/components/ui/dialog";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { getAccessToken } from "@/lib/token-store";
-import { useToast } from "@/hooks/use-toast";
+import { apiRequest } from "@/lib/queryClient";
+import { modalAlert, modalConfirm } from "@/hooks/use-toast";
 
 interface Club {
   id: string;
@@ -75,117 +75,46 @@ interface ClubsFilters {
 }
 
 async function fetchClubs(filters: ClubsFilters): Promise<ClubsResponse> {
-  const token = getAccessToken();
-  if (!token) throw new Error('No auth token');
-
   const params = new URLSearchParams();
   if (filters.search) params.append('search', filters.search);
   if (filters.status && filters.status !== 'all') params.append('status', filters.status);
   params.append('page', filters.page.toString());
   params.append('limit', filters.limit.toString());
 
-  const response = await fetch(`/api/v1/admin/clubs?${params.toString()}`, {
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error('Failed to fetch clubs');
-  }
-
-  return response.json();
+  return apiRequest<ClubsResponse>(`/api/v1/admin/clubs?${params.toString()}`);
 }
 
 async function deleteClub(clubId: string): Promise<void> {
-  const token = getAccessToken();
-  if (!token) throw new Error('No auth token');
-
-  const response = await fetch(`/api/v1/admin/clubs/${clubId}`, {
+  await apiRequest(`/api/v1/admin/clubs/${clubId}`, {
     method: 'DELETE',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
   });
-
-  if (!response.ok) {
-    throw new Error('Failed to delete club');
-  }
 }
 
 async function updateClubStatus(clubId: string, status: string): Promise<void> {
-  const token = getAccessToken();
-  if (!token) throw new Error('No auth token');
-
-  const response = await fetch(`/api/v1/admin/clubs/${clubId}/status`, {
+  await apiRequest(`/api/v1/admin/clubs/${clubId}/status`, {
     method: 'PUT',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
     body: JSON.stringify({ status }),
   });
-
-  if (!response.ok) {
-    throw new Error('Failed to update club status');
-  }
 }
 
 async function updateClubMaxMembers(clubId: string, maxMembers: number): Promise<void> {
-  const token = getAccessToken();
-  if (!token) throw new Error('No auth token');
-
-  const response = await fetch(`/api/v1/admin/clubs/${clubId}`, {
+  await apiRequest(`/api/v1/admin/clubs/${clubId}`, {
     method: 'PUT',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
     body: JSON.stringify({ maxMembers }),
   });
-
-  if (!response.ok) {
-    throw new Error('Failed to update club');
-  }
 }
 
 async function approveClub(clubId: string): Promise<void> {
-  const token = getAccessToken();
-  if (!token) throw new Error('No auth token');
-
-  const response = await fetch(`/api/v1/admin/clubs/${clubId}/approve`, {
+  await apiRequest(`/api/v1/admin/clubs/${clubId}/approve`, {
     method: 'PUT',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
   });
-
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.message || 'Failed to approve club');
-  }
 }
 
 async function rejectClub(clubId: string, reason: string): Promise<void> {
-  const token = getAccessToken();
-  if (!token) throw new Error('No auth token');
-
-  const response = await fetch(`/api/v1/admin/clubs/${clubId}/reject`, {
+  await apiRequest(`/api/v1/admin/clubs/${clubId}/reject`, {
     method: 'PUT',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
     body: JSON.stringify({ reason }),
   });
-
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.message || 'Failed to reject club');
-  }
 }
 
 interface ClubMember {
@@ -199,40 +128,14 @@ interface ClubMember {
 }
 
 async function fetchClubMembers(clubId: string): Promise<ClubMember[]> {
-  const token = getAccessToken();
-  if (!token) throw new Error('No auth token');
-
-  const response = await fetch(`/api/clubs/${clubId}/members`, {
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error('Failed to fetch club members');
-  }
-
-  return response.json();
+  return apiRequest<ClubMember[]>(`/api/clubs/${clubId}/members`);
 }
 
 async function transferClubOwnership(clubId: string, newOwnerId: string): Promise<void> {
-  const token = getAccessToken();
-  if (!token) throw new Error('No auth token');
-
-  const response = await fetch(`/api/clubs/${clubId}/transfer-ownership`, {
+  await apiRequest(`/api/clubs/${clubId}/transfer-ownership`, {
     method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
     body: JSON.stringify({ newOwnerId }),
   });
-
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.message || 'Failed to transfer ownership');
-  }
 }
 
 function ClubStatusBadge({ status }: Readonly<{ status: Club['status'] }>) {
@@ -287,7 +190,6 @@ function ClubActionsMenu({
   onTransferOwnership: (club: Club) => void;
 }>) {
   const queryClient = useQueryClient();
-  const { toast } = useToast();
   const [rejectDialogOpen, setRejectDialogOpen] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
 
@@ -310,13 +212,13 @@ function ClubActionsMenu({
     mutationFn: (clubId: string) => approveClub(clubId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin-clubs'] });
-      toast({
+      void modalAlert({
         title: "Клуб одобрен",
         description: "Клуб успешно одобрен и теперь доступен для пользователей",
       });
     },
     onError: (error: Error) => {
-      toast({
+      void modalAlert({
         title: "Ошибка",
         description: error.message,
         variant: "destructive",
@@ -331,13 +233,13 @@ function ClubActionsMenu({
       queryClient.invalidateQueries({ queryKey: ['admin-clubs'] });
       setRejectDialogOpen(false);
       setRejectReason("");
-      toast({
+      void modalAlert({
         title: "Клуб отклонён",
-        description: "Клуб был отклонён и перемещён в архив",
+        description: "Клуб отклонён, владелец уведомлён по email, клуб удалён",
       });
     },
     onError: (error: Error) => {
-      toast({
+      void modalAlert({
         title: "Ошибка",
         description: error.message,
         variant: "destructive",
@@ -347,7 +249,7 @@ function ClubActionsMenu({
 
   const handleRejectSubmit = () => {
     if (!rejectReason.trim()) {
-      toast({
+      void modalAlert({
         title: "Ошибка",
         description: "Пожалуйста, укажите причину отклонения",
         variant: "destructive",
@@ -366,9 +268,11 @@ function ClubActionsMenu({
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          <DropdownMenuItem>
-            <Eye className="w-4 h-4 mr-2" />
-            Просмотреть детали
+          <DropdownMenuItem asChild>
+            <a href={`/clubs/${club.id}`} target="_blank" rel="noopener noreferrer">
+              <Eye className="w-4 h-4 mr-2" />
+              Просмотреть детали
+            </a>
           </DropdownMenuItem>
           
           {/* Кнопки модерации для pending клубов */}
@@ -403,6 +307,14 @@ function ClubActionsMenu({
               <DropdownMenuItem onClick={() => onTransferOwnership(club)}>
                 <UserCog className="w-4 h-4 mr-2" />
                 Передать владельца
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => updateStatusMutation.mutate({ clubId: club.id, status: 'pending' })}
+                disabled={updateStatusMutation.isPending}
+                className="text-amber-600"
+              >
+                <AlertTriangle className="w-4 h-4 mr-2" />
+                Отправить на модерацию
               </DropdownMenuItem>
             </>
           )}
@@ -679,7 +591,6 @@ function ClubsTableSkeleton() {
 
 export default function AdminClubs() {
   const queryClient = useQueryClient();
-  const { toast } = useToast();
   const [filters, setFilters] = useState<ClubsFilters>({
     search: '',
     status: 'all',
@@ -729,13 +640,13 @@ export default function AdminClubs() {
       queryClient.invalidateQueries({ queryKey: ['admin-clubs'] });
       setTransferringClub(null);
       setSelectedMemberId(null);
-      toast({
+      void modalAlert({
         title: "Владелец передан",
         description: "Права владельца клуба успешно переданы",
       });
     },
     onError: (error) => {
-      toast({
+      void modalAlert({
         title: "Ошибка",
         description: error instanceof Error ? error.message : "Не удалось передать права",
         variant: "destructive",
@@ -749,9 +660,15 @@ export default function AdminClubs() {
     const selectedMember = clubMembers?.find(m => m.id === selectedMemberId);
     if (!selectedMember) return;
 
-    const confirmed = confirm(
-      `Вы уверены, что хотите передать права владельца клуба "${transferringClub.name}" пользователю ${selectedMember.username}?\n\nЭто действие нельзя отменить. Текущий владелец станет обычным участником.`
-    );
+    const confirmed = await modalConfirm({
+      title: "Передача прав владельца",
+      description:
+        `Вы уверены, что хотите передать права владельца клуба "${transferringClub.name}" пользователю ${selectedMember.username}?\n\n` +
+        "Это действие нельзя отменить. Текущий владелец станет обычным участником.",
+      confirmLabel: "Передать права",
+      cancelLabel: "Отмена",
+      variant: "destructive",
+    });
 
     if (!confirmed) return;
 
@@ -827,7 +744,7 @@ export default function AdminClubs() {
         </div>
 
         {/* Statistics Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
           <Card>
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
@@ -849,6 +766,19 @@ export default function AdminClubs() {
                   </p>
                 </div>
                 <CheckCircle className="h-8 w-8 text-green-500" />
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-gray-600">На модерации</p>
+                  <p className="text-2xl font-bold text-amber-600">
+                    {data?.clubs.filter(c => c.status === 'pending').length || 0}
+                  </p>
+                </div>
+                <AlertTriangle className="h-8 w-8 text-amber-500" />
               </div>
             </CardContent>
           </Card>

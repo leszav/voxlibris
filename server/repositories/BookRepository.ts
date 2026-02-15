@@ -1,6 +1,6 @@
 import { BaseRepository } from './BaseRepository.js';
 import { eq, desc, and, like, or } from 'drizzle-orm';
-import { books, bookContent } from '../../shared/schema.js';
+import { books, bookContent, clubReadingStatus } from '../../shared/schema.js';
 import type {
   Book,
   InsertBook,
@@ -167,21 +167,26 @@ export class BookRepository extends BaseRepository {
 
   /**
    * Безопасное удаление книги
-   * Архитектурное решение: каскадное удаление связанного контента
+   * Архитектурное решение: удаляем зависимые записи в рамках транзакции
    */
   async deleteBook(id: string): Promise<void> {
     this.validateRequired(id, 'id');
     
     try {
-      // Сначала удаляем связанный контент
-      await this.db
-        .delete(bookContent)
-        .where(eq(bookContent.bookId, id));
-      
-      // Затем удаляем саму книгу
-      await this.db
-        .delete(books)
-        .where(eq(books.id, id));
+      await this.db.transaction(async (tx) => {
+        // Для club_reading_status нет ON DELETE CASCADE, удаляем вручную.
+        await tx
+          .delete(clubReadingStatus)
+          .where(eq(clubReadingStatus.bookId, id));
+
+        await tx
+          .delete(bookContent)
+          .where(eq(bookContent.bookId, id));
+
+        await tx
+          .delete(books)
+          .where(eq(books.id, id));
+      });
         
     } catch (error) {
       this.logError('deleteBook', error);

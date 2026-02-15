@@ -427,6 +427,91 @@ class EmailService {
   }
 
   /**
+   * Отправка уведомления владельцу об отклонении клуба с причиной
+   */
+  async sendClubRejectionNotification(params: {
+    email: string;
+    username: string;
+    clubTitle: string;
+    reason: string;
+    baseUrl?: string;
+  }): Promise<boolean> {
+    try {
+      const template = await this.loadTemplate('club-rejection-notification');
+
+      const baseUrl = await resolveTrustedBaseUrl(params.baseUrl);
+      const catalogUrl = `${baseUrl}/catalog`;
+
+      const html = this.replaceVariables(template, {
+        username: params.username,
+        clubTitle: params.clubTitle,
+        reason: params.reason,
+        catalogUrl,
+      });
+
+      return await this.sendEmail({
+        to: params.email,
+        subject: `Ваш клуб "${params.clubTitle}" не прошел модерацию`,
+        html,
+      });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.error({ error: errorMessage }, '[EmailService] Error sending club rejection notification');
+      return false;
+    }
+  }
+
+  /**
+   * Отправка уведомления владельцу о блокировке книги по результатам постмодерации
+   */
+  async sendBookBlockedNotification(params: {
+    email: string;
+    username: string;
+    bookTitle: string;
+    reason: string;
+    source: 'personal_books' | 'club_books';
+    clubTitle?: string;
+    baseUrl?: string;
+  }): Promise<boolean> {
+    try {
+      const template = await this.loadTemplate('book-blocked-notification');
+      const baseUrl = await resolveTrustedBaseUrl(params.baseUrl);
+      const libraryUrl = `${baseUrl}/library`;
+
+      const escapeHtml = (value: string): string =>
+        value
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#39;');
+
+      const escapedReason = escapeHtml(params.reason).replace(/\n/g, '<br>');
+      const sourceLabel = params.source === 'club_books'
+        ? `клубной библиотеки${params.clubTitle ? ` клуба "${escapeHtml(params.clubTitle)}"` : ''}`
+        : 'личной библиотеки';
+
+      const html = this.replaceVariables(template, {
+        username: escapeHtml(params.username),
+        bookTitle: escapeHtml(params.bookTitle),
+        sourceLabel,
+        reason: escapedReason,
+        libraryUrl,
+      });
+
+      return await this.sendEmail({
+        to: params.email,
+        subject: `Ваша книга "${params.bookTitle}" заблокирована`,
+        html,
+      });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.error({ error: errorMessage }, '[EmailService] Error sending book blocked notification');
+      return false;
+    }
+  }
+
+  /**
    * Отправка тестового письма
    */
   async sendTestEmail(email: string): Promise<{ success: boolean; messageId?: string; error?: string }> {

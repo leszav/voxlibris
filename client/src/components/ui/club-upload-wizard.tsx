@@ -10,12 +10,12 @@ import { toast } from "@/hooks/use-toast";
 import { DuplicateWarningModal } from "@/components/ui/duplicate-warning-modal";
 
 interface ClubUploadWizardProps {
-    clubId: string;
-    onSuccess: () => void;
-    onCancel: () => void;
+    readonly clubId: string;
+    readonly onSuccess: () => void;
+    readonly onCancel: () => void;
 }
 
-export function ClubUploadWizard({ clubId, onSuccess, onCancel }: ClubUploadWizardProps) {
+export function ClubUploadWizard({ clubId, onSuccess, onCancel }: Readonly<ClubUploadWizardProps>) {
     const [step, setStep] = useState<'upload' | 'metadata' | 'processing'>('upload');
     const [sessionId, setSessionId] = useState<string | null>(null);
     type BookUploadMetadata = UploadMetadata & {
@@ -23,7 +23,6 @@ export function ClubUploadWizard({ clubId, onSuccess, onCancel }: ClubUploadWiza
         recommendedReadingOrder?: number;
     };
     const [metadata, setMetadata] = useState<BookUploadMetadata>({ title: "", author: "" });
-    const [file, setFile] = useState<File | null>(null);
     const [duplicates, setDuplicates] = useState<DuplicateMatch[]>([]);
     const [showDuplicateModal, setShowDuplicateModal] = useState(false);
 
@@ -31,7 +30,6 @@ export function ClubUploadWizard({ clubId, onSuccess, onCancel }: ClubUploadWiza
 
     const handleFileSelect = async (selectedFile: File) => {
         setStep('processing');
-        setFile(selectedFile);
 
         try {
             const result = await upload.mutateAsync(selectedFile);
@@ -85,7 +83,6 @@ export function ClubUploadWizard({ clubId, onSuccess, onCancel }: ClubUploadWiza
         setShowDuplicateModal(false);
         // Возвращаемся к началу
         setStep('upload');
-        setFile(null);
         setSessionId(null);
         setMetadata({ title: "", author: "" });
         setDuplicates([]);
@@ -172,7 +169,7 @@ export function ClubUploadWizard({ clubId, onSuccess, onCancel }: ClubUploadWiza
                             </div>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div className="space-y-2">
                                 <Label htmlFor="title">Название</Label>
                                 <Input
@@ -201,7 +198,7 @@ export function ClubUploadWizard({ clubId, onSuccess, onCancel }: ClubUploadWiza
                             />
                         </div>
 
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div className="space-y-2">
                                 <Label htmlFor="readingOrder">Порядок чтения (опционально)</Label>
                                 <Input
@@ -267,7 +264,7 @@ export function ClubUploadWizard({ clubId, onSuccess, onCancel }: ClubUploadWiza
             </div>
 
             <Card className="border-2 border-dashed border-green-200 bg-green-50/30">
-                <CardContent className="p-8 text-center space-y-4">
+                <CardContent className="p-4 sm:p-8 text-center space-y-4">
                     <div className="flex justify-center">
                         <Upload className="w-12 h-12 text-green-600/50" />
                     </div>

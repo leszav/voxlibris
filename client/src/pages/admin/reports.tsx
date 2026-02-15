@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { 
+import {
   MoreHorizontal, 
   Search, 
   AlertTriangle,
@@ -21,7 +21,7 @@ import {
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { getAccessToken } from "@/lib/token-store";
+import { apiRequest } from "@/lib/queryClient";
 
 interface Report {
   id: string;
@@ -57,9 +57,6 @@ interface ReportsFilters {
 }
 
 async function fetchReports(filters: ReportsFilters): Promise<ReportsResponse> {
-  const token = getAccessToken();
-  if (!token) throw new Error('No auth token');
-
   const params = new URLSearchParams();
   if (filters.search) params.append('search', filters.search);
   if (filters.type && filters.type !== 'all') params.append('type', filters.type);
@@ -67,36 +64,14 @@ async function fetchReports(filters: ReportsFilters): Promise<ReportsResponse> {
   params.append('page', filters.page.toString());
   params.append('limit', filters.limit.toString());
 
-  const response = await fetch(`/api/v1/admin/reports?${params.toString()}`, {
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error('Failed to fetch reports');
-  }
-
-  return response.json();
+  return apiRequest<ReportsResponse>(`/api/v1/admin/reports?${params.toString()}`);
 }
 
 async function updateReportStatus(reportId: string, status: string, notes?: string): Promise<void> {
-  const token = getAccessToken();
-  if (!token) throw new Error('No auth token');
-
-  const response = await fetch(`/api/v1/admin/reports/${reportId}/status`, {
+  await apiRequest(`/api/v1/admin/reports/${reportId}/status`, {
     method: 'PUT',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
     body: JSON.stringify({ status, admin_notes: notes }),
   });
-
-  if (!response.ok) {
-    throw new Error('Failed to update report status');
-  }
 }
 
 function ReportStatusBadge({ status }: Readonly<{ status: Report['status'] }>) {

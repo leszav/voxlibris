@@ -13,7 +13,7 @@ import {
   bookReadingStatus,
   analyticsEvents,
 } from "../../shared/schema.js";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, isNull } from "drizzle-orm";
 import { sanitizeBookContent } from "../content-sanitizer.js";
 import {
   generateShortLivedToken,
@@ -200,39 +200,68 @@ router.put("/:id/progress", async (req: Request, res: Response) => {
     const { id: bookId } = req.params;
     const userId = req.user?.id;
     const { currentChapter, currentPosition, progress, clubId } = req.body;
+    const normalizedClubId = typeof clubId === 'string' && clubId.length > 0 ? clubId : null;
+    const normalizedCurrentChapter = typeof currentChapter === 'number' && currentChapter > 0 ? currentChapter : 1;
+    const normalizedCurrentPosition = typeof currentPosition === 'string'
+      ? currentPosition
+      : JSON.stringify(currentPosition || {});
+    const normalizedProgress = typeof progress === 'number' ? progress : 0;
+
+    logger.debug({
+      bookId,
+      userId,
+      currentChapter: normalizedCurrentChapter,
+      currentPosition: normalizedCurrentPosition ? 'present' : 'missing',
+      progress: normalizedProgress,
+      clubId: normalizedClubId
+    }, '[Reader API] Progress update request');
 
     if (!userId) {
+      logger.error('[Reader API] No userId in request');
       return res.status(401).json({ error: "Unauthorized" });
     }
 
-    await db
-      .insert(readingProgress)
-      .values({
-        userId,
-        bookId,
-        clubId: clubId || null,
-        currentChapter: currentChapter || 1,
-        currentPosition: currentPosition || "0",
-        progress: progress || 0,
-        lastReadAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .onConflictDoUpdate({
-        target: [readingProgress.userId, readingProgress.bookId],
-        set: {
-          currentChapter,
-          currentPosition,
-          progress,
-          clubId: clubId || null,
+    const [existingProgress] = await db
+      .select({ id: readingProgress.id })
+      .from(readingProgress)
+      .where(and(
+        eq(readingProgress.userId, userId),
+        eq(readingProgress.bookId, bookId),
+        normalizedClubId ? eq(readingProgress.clubId, normalizedClubId) : isNull(readingProgress.clubId),
+      ))
+      .limit(1);
+
+    if (existingProgress) {
+      await db
+        .update(readingProgress)
+        .set({
+          currentChapter: normalizedCurrentChapter,
+          currentPosition: normalizedCurrentPosition,
+          progress: normalizedProgress,
+          clubId: normalizedClubId,
           lastReadAt: new Date(),
           updatedAt: new Date(),
-        },
-      });
+        })
+        .where(eq(readingProgress.id, existingProgress.id));
+    } else {
+      await db
+        .insert(readingProgress)
+        .values({
+          userId,
+          bookId,
+          clubId: normalizedClubId,
+          currentChapter: normalizedCurrentChapter,
+          currentPosition: normalizedCurrentPosition,
+          progress: normalizedProgress,
+          lastReadAt: new Date(),
+          updatedAt: new Date(),
+        });
+    }
 
-    await updateBookReadingStatus(userId, bookId, progress, clubId);
+    await updateBookReadingStatus(userId, bookId, normalizedProgress, normalizedClubId);
 
-    if (progress === 100) {
-      await addToReadingHistory(userId, bookId, clubId);
+    if (normalizedProgress === 100) {
+      await addToReadingHistory(userId, bookId, normalizedClubId);
     }
 
     res.json({ success: true });

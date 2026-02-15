@@ -46,8 +46,8 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { getAccessToken } from "@/lib/token-store";
-import { useToast } from "@/hooks/use-toast";
+import { apiRequest } from "@/lib/queryClient";
+import { modalAlert } from "@/hooks/use-toast";
 
 interface User {
   id: string;
@@ -79,9 +79,6 @@ interface UsersFilters {
 }
 
 async function fetchUsers(filters: UsersFilters): Promise<UsersResponse> {
-  const token = getAccessToken();
-  if (!token) throw new Error("No auth token");
-
   const params = new URLSearchParams();
   if (filters.search) params.append("search", filters.search);
   if (filters.role && filters.role !== "all") params.append("role", filters.role);
@@ -89,144 +86,49 @@ async function fetchUsers(filters: UsersFilters): Promise<UsersResponse> {
   params.append("page", filters.page.toString());
   params.append("limit", filters.limit.toString());
 
-  const response = await fetch(`/api/v1/admin/users?${params.toString()}`, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error("Failed to fetch users");
-  }
-
-  return response.json();
+  return apiRequest<UsersResponse>(`/api/v1/admin/users?${params.toString()}`);
 }
 
 async function updateUserRole(username: string, role: string): Promise<void> {
-  const token = getAccessToken();
-  if (!token) throw new Error("No auth token");
-
-  const response = await fetch(`/api/v1/admin/users/${username}/role`, {
+  await apiRequest(`/api/v1/admin/users/${username}/role`, {
     method: "PUT",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
     body: JSON.stringify({ role }),
   });
-
-  if (!response.ok) {
-    throw new Error("Failed to update user role");
-  }
 }
 
 async function updateUserStatus(username: string, status: string): Promise<void> {
-  const token = getAccessToken();
-  if (!token) throw new Error("No auth token");
-
-  const response = await fetch(`/api/v1/admin/users/${username}/status`, {
+  await apiRequest(`/api/v1/admin/users/${username}/status`, {
     method: "PUT",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
     body: JSON.stringify({ status }),
   });
-
-  if (!response.ok) {
-    throw new Error("Failed to update user status");
-  }
 }
 
 async function deleteUser(userId: string): Promise<void> {
-  const token = getAccessToken();
-  if (!token) throw new Error("No auth token");
-
-  const response = await fetch(`/api/v1/admin/users/${userId}`, {
+  await apiRequest(`/api/v1/admin/users/${userId}`, {
     method: "DELETE",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
   });
-
-  if (!response.ok) {
-    const data = await response.json();
-    throw new Error(data.message || "Failed to delete user");
-  }
 }
 
 async function restoreUser(userId: string): Promise<void> {
-  const token = getAccessToken();
-  if (!token) throw new Error("No auth token");
-
-  const response = await fetch(`/api/v1/admin/users/${userId}/restore`, {
+  await apiRequest(`/api/v1/admin/users/${userId}/restore`, {
     method: "PUT",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
   });
-
-  if (!response.ok) {
-    const data = await response.json();
-    throw new Error(data.message || "Failed to restore user");
-  }
 }
 
 async function permanentDeleteUser(userId: string): Promise<void> {
-  const token = getAccessToken();
-  if (!token) throw new Error("No auth token");
-
-  const response = await fetch(`/api/v1/admin/users/${userId}/permanent`, {
+  await apiRequest(`/api/v1/admin/users/${userId}/permanent`, {
     method: "DELETE",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
   });
-
-  if (!response.ok) {
-    const data = await response.json();
-    throw new Error(data.message || "Failed to permanently delete user");
-  }
 }
 
 async function resetUserPassword(userId: string): Promise<void> {
-  const token = getAccessToken();
-  if (!token) throw new Error("No auth token");
-
-  const response = await fetch(`/api/v1/admin/users/${userId}/reset-password`, {
+  await apiRequest(`/api/v1/admin/users/${userId}/reset-password`, {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
   });
-
-  if (!response.ok) {
-    const data = await response.json();
-    throw new Error(data.message || "Failed to reset user password");
-  }
 }
 
 async function fetchDeletedUsers(): Promise<UsersResponse> {
-  const token = getAccessToken();
-  if (!token) throw new Error("No auth token");
-
-  const response = await fetch("/api/v1/admin/users/deleted", {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error("Failed to fetch deleted users");
-  }
-
-  const data = await response.json();
+  const data = await apiRequest<{ users: User[] }>("/api/v1/admin/users/deleted");
   return {
     users: data.users,
     total: data.users.length,
@@ -300,7 +202,6 @@ function UserRoleBadge({ role }: Readonly<{ role: User["role"] }>) {
 
 function UserActionsMenu({ user }: Readonly<{ user: User }>) {
   const queryClient = useQueryClient();
-  const { toast } = useToast();
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [showPermanentDeleteDialog, setShowPermanentDeleteDialog] = useState(false);
   const [showResetDialog, setShowResetDialog] = useState(false);
@@ -315,13 +216,13 @@ function UserActionsMenu({ user }: Readonly<{ user: User }>) {
         moderator: "Модератор",
         user: "Пользователь"
       };
-      toast({
+      void modalAlert({
         title: "Роль изменена",
         description: `Пользователь ${variables.username} теперь ${roleNames[variables.role as keyof typeof roleNames]}.`,
       });
     },
     onError: (error: unknown) => {
-      toast({
+      void modalAlert({
         title: "Не удалось изменить роль",
         description: error instanceof Error ? error.message : "Произошла ошибка при изменении роли",
         variant: "destructive",
@@ -367,13 +268,13 @@ function UserActionsMenu({ user }: Readonly<{ user: User }>) {
     mutationFn: (userId: string) => resetUserPassword(userId),
     onSuccess: () => {
       setShowResetDialog(false);
-      toast({
+      void modalAlert({
         title: "Письмо отправлено",
         description: `Инструкция по сбросу пароля отправлена пользователю ${user.username}.`,
       });
     },
     onError: (error: unknown) => {
-      toast({
+      void modalAlert({
         title: "Не удалось отправить письмо",
         description: error instanceof Error ? error.message : "Ошибка сброса пароля",
         variant: "destructive",

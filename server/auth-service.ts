@@ -95,6 +95,9 @@ export class AuthService {
   private readonly REFRESH_TOKEN_LONG = '30d';     // Remember Me сессия
   private readonly EMAIL_CONFIRMATION_EXPIRY = '24h'; // Срок действия токена подтверждения
   private readonly PASSWORD_RESET_EXPIRY_MINUTES = 60;
+  
+  // Защита от одновременных refresh операций
+  private readonly activeRefreshOperations = new Map<string, Promise<{ newTokens: AuthTokens; sessionType: SessionType } | null>>();
 
   private get JWT_SECRET(): string {
     if (!this._jwtSecret) {
@@ -177,6 +180,7 @@ export class AuthService {
 
   /**
    * Обновляет токены по refresh token
+   * Защищено от одновременных операций для одного пользователя
    */
   async refreshTokens(refreshToken: string): Promise<{ newTokens: AuthTokens; sessionType: SessionType } | null> {
     try {
@@ -187,39 +191,76 @@ export class AuthService {
         return null;
       }
 
-      // Получаем пользователя
-      const user = await storage.getUser(tokenRecord.userId);
-      if (!user) {
-        await storage.revokeRefreshToken(refreshToken);
-        return null;
+      const userId = tokenRecord.userId;
+      
+      // Проверяем, есть ли уже активная refresh операция для этого пользователя
+      const existingOperation = this.activeRefreshOperations.get(userId);
+      if (existingOperation) {
+        // Ждем завершения существующей операции
+        return await existingOperation;
       }
 
-      // Блокируем обновление токенов для неактивных/неподтвержденных аккаунтов
-      if (user.status !== 'active' || !user.emailConfirmed) {
-        await storage.revokeAllUserRefreshTokens(user.id);
-        return null;
+      // Создаем новую refresh операцию
+      const refreshOperation = this.performRefreshOperation(refreshToken, tokenRecord, userId);
+      this.activeRefreshOperations.set(userId, refreshOperation);
+
+      try {
+        const result = await refreshOperation;
+        return result;
+      } finally {
+        // Очищаем операцию после завершения
+        this.activeRefreshOperations.delete(userId);
       }
-
-      // Определяем тип сессии по сроку действия токена
-      const now = new Date();
-      const daysLeft = Math.ceil((tokenRecord.expiresAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-      const sessionType: SessionType = daysLeft > 14 ? 'remember_me' : 'normal';
-
-      // Отзываем старый refresh token
-      await storage.revokeRefreshToken(refreshToken);
-
-      // Генерируем новые токены с тем же типом сессии
-      const rememberMe = sessionType === 'remember_me';
-      const newTokens = await this.generateTokens(user, rememberMe);
-
-      // Обновляем время последней активности
-      await storage.updateUserLastActivity(user.id);
-
-      return { newTokens, sessionType };
     } catch (error) {
       console.error('Error refreshing tokens:', error);
       return null;
     }
+  }
+
+  /**
+   * Выполняет фактическое обновление токенов
+   * ВАЖНО: токен отзывается ПЕРЕД проверкой пользователя для предотвращения race condition
+   */
+  private async performRefreshOperation(
+    refreshToken: string, 
+    tokenRecord: any, 
+    userId: string
+  ): Promise<{ newTokens: AuthTokens; sessionType: SessionType } | null> {
+    // ШАГ 1: Сначала отзываем старый токен (ПРЕДОТВРАЩАЕТ race condition)
+    // Это гарантирует что только ОДИН запрос может создать новые токены
+    await storage.revokeRefreshToken(refreshToken);
+
+    // ШАГ 2: Получаем пользователя после отзыва токена
+    // Если пользователь не существует - возвращаем null (токен уже отозван)
+    const user = await storage.getUser(userId);
+    if (!user) {
+      // Токен отозван, пользователь не найден - это состояние ошибки
+      return null;
+    }
+
+    // ШАГ 3: Проверяем статус пользователя
+    // Блокируем обновление токенов для неактивных/неподтвержденных аккаунтов
+    // Исключение для админов и модераторов
+    if (!['admin', 'moderator'].includes(user.role)) {
+      if (user.status !== 'active' || !user.emailConfirmed) {
+        // Токен уже отозван, новые токены не создаем
+        return null;
+      }
+    }
+
+    // ШАГ 4: Определяем тип сессии по сроку действия исходного токена
+    const now = new Date();
+    const daysLeft = Math.ceil((tokenRecord.expiresAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+    const sessionType: SessionType = daysLeft > 14 ? 'remember_me' : 'normal';
+
+    // ШАГ 5: Генерируем новые токены
+    const rememberMe = sessionType === 'remember_me';
+    const newTokens = await this.generateTokens(user, rememberMe);
+
+    // ШАГ 6: Обновляем время последней активности
+    await storage.updateUserLastActivity(user.id);
+
+    return { newTokens, sessionType };
   }
 
   /**
@@ -302,8 +343,8 @@ export class AuthService {
         throw new Error('Пользователь с таким email уже существует');
       }
 
-      // Хэшируем пароль
-      const saltRounds = 12;
+      // Хэшируем пароль (оптимизировано для production)
+      const saltRounds = 10;
       const hashedPassword = await bcrypt.hash(password, saltRounds);
 
       // Генерируем токен подтверждения email
@@ -665,7 +706,7 @@ async resetPassword(token: string, newPassword: string): Promise<{ success: bool
       return { success: false, message: 'Пользователь не найден' };
     }
 
-    const saltRounds = 12;
+    const saltRounds = 10;
     const hashedPassword = await bcrypt.hash(newPassword, saltRounds);
 
     await storage.updateUserPassword(user.id, hashedPassword);

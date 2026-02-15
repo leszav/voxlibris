@@ -11,18 +11,17 @@ import { DuplicateWarningModal } from "@/components/ui/duplicate-warning-modal";
 import { useAuth } from "@/hooks/use-auth";
 
 interface PersonalUploadWizardProps {
-    onSuccess: () => void;
-    onCancel: () => void;
+    readonly onSuccess: () => void;
+    readonly onCancel: () => void;
 }
 
-export function PersonalUploadWizard({ onSuccess, onCancel }: PersonalUploadWizardProps) {
+export function PersonalUploadWizard({ onSuccess, onCancel }: Readonly<PersonalUploadWizardProps>) {
     const [step, setStep] = useState<'upload' | 'metadata' | 'processing'>('upload');
     const [sessionId, setSessionId] = useState<string | null>(null);
     type BookUploadMetadata = UploadMetadata & {
         coverPreview?: string | null;
     };
     const [metadata, setMetadata] = useState<BookUploadMetadata>({ title: "", author: "" });
-    const [file, setFile] = useState<File | null>(null);
     const [duplicates, setDuplicates] = useState<DuplicateMatch[]>([]);
     const [showDuplicateModal, setShowDuplicateModal] = useState(false);
 
@@ -31,7 +30,6 @@ export function PersonalUploadWizard({ onSuccess, onCancel }: PersonalUploadWiza
 
     const handleFileSelect = async (selectedFile: File) => {
         setStep('processing');
-        setFile(selectedFile);
 
         try {
             const result = await upload.mutateAsync(selectedFile);
@@ -101,7 +99,6 @@ export function PersonalUploadWizard({ onSuccess, onCancel }: PersonalUploadWiza
         setShowDuplicateModal(false);
         // Возвращаемся к началу
         setStep('upload');
-        setFile(null);
         setSessionId(null);
         setMetadata({ title: "", author: "" });
         setDuplicates([]);
@@ -188,7 +185,7 @@ export function PersonalUploadWizard({ onSuccess, onCancel }: PersonalUploadWiza
                             </div>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div className="space-y-2">
                                 <Label htmlFor="title">Название</Label>
                                 <Input
@@ -217,7 +214,7 @@ export function PersonalUploadWizard({ onSuccess, onCancel }: PersonalUploadWiza
                             />
                         </div>
 
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div className="space-y-2">
                                 <Label htmlFor="genre">Жанр</Label>
                                 <Input
@@ -272,7 +269,7 @@ export function PersonalUploadWizard({ onSuccess, onCancel }: PersonalUploadWiza
             </div>
 
             <Card className="border-2 border-dashed">
-                <CardContent className="p-8 text-center space-y-4">
+                <CardContent className="p-4 sm:p-8 text-center space-y-4">
                     <div className="flex justify-center">
                         <Upload className="w-12 h-12 text-muted-foreground" />
                     </div>

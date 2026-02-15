@@ -103,13 +103,13 @@ export function useUserClubs() {
 }
 
 // Получить конкретный клуб
-export function useClub(clubId: string) {
+export function useClub(clubId: string, enabled: boolean = true) {
   return useQuery({
     queryKey: ["club", clubId],
     queryFn: async (): Promise<ClubWithDetails> => {
       return apiRequest<ClubWithDetails>(`/api/clubs/${clubId}`);
     },
-    enabled: !!clubId,
+    enabled: !!clubId && enabled,
   });
 }
 
@@ -171,13 +171,13 @@ export function useDeleteClub() {
 }
 
 // Получить участников клуба
-export function useClubMembers(clubId: string) {
+export function useClubMembers(clubId: string, enabled: boolean = true) {
   return useQuery({
     queryKey: ["club-members", clubId],
     queryFn: async (): Promise<ClubMemberWithUser[]> => {
       return apiRequest<ClubMemberWithUser[]>(`/api/clubs/${clubId}/members`);
     },
-    enabled: !!clubId,
+    enabled: !!clubId && enabled,
   });
 }
 

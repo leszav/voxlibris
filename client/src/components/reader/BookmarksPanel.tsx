@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { Bookmark } from "@shared/schema";
 import { useAddBookmark, useDeleteBookmark } from "../../hooks/use-reader";
+import { modalConfirm } from "../../hooks/use-toast";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Trash2, Plus, BookmarkPlus, Navigation } from "lucide-react";
@@ -44,8 +45,16 @@ export function BookmarksPanel({ bookId, bookmarks, onNavigateToBookmark }: Book
     );
   };
 
-  const handleDelete = (bookmarkId: string) => {
-    if (confirm("Удалить закладку?")) {
+  const handleDelete = async (bookmarkId: string) => {
+    const confirmed = await modalConfirm({
+      title: "Удалить закладку?",
+      description: "Это действие необратимо.",
+      confirmLabel: "Удалить",
+      cancelLabel: "Отмена",
+      variant: "destructive",
+    });
+
+    if (confirmed) {
       deleteBookmark(bookmarkId);
     }
   };

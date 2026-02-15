@@ -18,8 +18,8 @@ import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/hooks/use-auth";
-import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
+import { useEffect, useState } from "react";
 
 interface AdminLayoutProps {
   children: React.ReactNode;
@@ -37,24 +37,21 @@ const navigation = [
 ];
 
 function AdminSidebar({ mobile = false }: { mobile?: boolean }) {
-  const [location] = useLocation();
-  const { user, logout } = useAuth();
-  const { toast } = useToast();
+  const [location, setLocation] = useLocation();
+  const { user, logout, isAuthenticated } = useAuth();
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+
+  useEffect(() => {
+    if (!isAuthenticated && isLoggingOut) {
+      setIsLoggingOut(false);
+    }
+  }, [isAuthenticated, isLoggingOut]);
 
   const handleLogout = async () => {
-    try {
-      await logout();
-      toast({
-        title: "Успешный выход",
-        description: "Вы вышли из админ-панели",
-      });
-    } catch {
-      toast({
-        title: "Ошибка выхода",
-        description: "Не удалось выйти из системы",
-        variant: "destructive",
-      });
-    }
+    if (isLoggingOut) return;
+    setIsLoggingOut(true);
+    await logout();
+    setLocation("/");
   };
 
   const sidebarContent = (
@@ -119,11 +116,12 @@ function AdminSidebar({ mobile = false }: { mobile?: boolean }) {
           <Button 
             variant="ghost" 
             size="sm" 
-            onClick={handleLogout}
+            onClick={() => void handleLogout()}
+            disabled={isLoggingOut}
             className="w-full justify-start gap-2 text-red-600 hover:text-red-700 hover:bg-red-50"
           >
             <LogOut className="h-4 w-4" />
-            Выйти
+            {isLoggingOut ? "Выходим..." : "Выйти"}
           </Button>
         </div>
       </div>
