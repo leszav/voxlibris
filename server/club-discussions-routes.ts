@@ -124,8 +124,12 @@ router.post('/clubs/:clubId/discussions/:discussionId/warn', jwtAuth, requireAct
 
     // Проверяем, является ли пользователь владельцем клуба
     const club = await storage.getClub(clubId);
-    if (club?.ownerId !== req.user.userId) {
-      return res.status(403).json({ message: 'Only club owner can send warnings' });
+    if (!club) {
+      return res.status(404).json({ message: 'Клуб не найден' });
+    }
+    
+    if (club.ownerId !== req.user.userId) {
+      return res.status(403).json({ message: 'Только владелец клуба может отправлять предупреждения' });
     }
 
     const warning = await storage.createClubDiscussion({
@@ -157,16 +161,21 @@ router.delete('/clubs/:clubId/discussions/:discussionId', jwtAuth, requireActive
 
     // Проверяем, является ли пользователь владельцем клуба
     const club = await storage.getClub(clubId);
-    if (club?.ownerId !== req.user.userId) {
-      return res.status(403).json({ message: 'Only club owner can delete discussions' });
+    
+    if (!club) {
+      return res.status(404).json({ message: 'Клуб не найден' });
+    }
+    
+    if (club.ownerId !== req.user.userId) {
+      return res.status(403).json({ message: 'Только владелец клуба может удалять сообщения' });
     }
 
     const success = await storage.deleteClubDiscussion(discussionId);
     if (!success) {
-      return res.status(404).json({ message: 'Discussion not found' });
+      return res.status(404).json({ message: 'Сообщение не найдено' });
     }
 
-    res.json({ message: 'Discussion deleted successfully' });
+    res.json({ message: 'Сообщение удалено' });
   } catch (error) {
     logger.error({ error }, 'Error deleting discussion');
     res.status(500).json({ message: 'Failed to delete discussion' });

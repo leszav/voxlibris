@@ -9,13 +9,13 @@ import { Input } from "@/components/ui/input";
 import type { ChatMessageWithUser } from "@shared/schema";
 
 interface ChatWidgetProps {
-  clubId: string;
-  channel?: string;
-  onCleanupDeleted?: () => Promise<void>;
-  canCleanup?: boolean;
+  readonly clubId: string;
+  readonly channel?: string;
+  readonly onCleanupDeleted?: () => Promise<void>;
+  readonly canCleanup?: boolean;
 }
 
-export function ChatWidget({ clubId, channel = "general", onCleanupDeleted, canCleanup = false }: ChatWidgetProps) {
+export function ChatWidget({ clubId, channel = "general", onCleanupDeleted, canCleanup = false }: Readonly<ChatWidgetProps>) {
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState("");
   const [hasUnread, setHasUnread] = useState(false);
@@ -245,7 +245,7 @@ export function ChatWidget({ clubId, channel = "general", onCleanupDeleted, canC
       [...messages].sort((a, b) => {
         const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
         const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-        return aTime - bTime;
+        return aTime - bTime; // Старые сообщения первыми
       }),
     [messages],
   );
@@ -263,6 +263,7 @@ export function ChatWidget({ clubId, channel = "general", onCleanupDeleted, canC
           <div 
             className="absolute top-0 left-0 w-4 h-4 cursor-nw-resize bg-muted/20 hover:bg-muted/40 transition-colors"
             onMouseDown={handleMouseDown}
+            aria-hidden="true"
             title="Потяните для изменения размера"
           />
           <div className="flex items-center justify-between px-3 py-2 border-b bg-muted/60">

@@ -1083,6 +1083,9 @@ router.post('/:clubId/transfer-ownership', jwtAuth, async (req, res) => {
     // 2. Новый участник становится владельцем
     await storage.updateMemberRole(clubId, newOwnerId, 'owner');
 
+    // 3. Обновляем owner_id в таблице clubs
+    await storage.updateClub(clubId, { ownerId: newOwnerId });
+
     const club = await storage.getClub(clubId);
     
     logger.info(

@@ -52,6 +52,13 @@ export function ClubDiscussionBoard({ clubId, isOwner, currentUserId }: Readonly
     refetchInterval: 5000, // Обновляем каждые 5 секунд
   });
 
+  // Сортируем сообщения: новые первыми
+  const sortedDiscussions = [...discussions].sort((a, b) => {
+    const aTime = new Date(a.createdAt).getTime();
+    const bTime = new Date(b.createdAt).getTime();
+    return bTime - aTime; // Новые сверху
+  });
+
   // Создать новое сообщение
   const createMessageMutation = useMutation({
     mutationFn: (content: string) =>
@@ -62,7 +69,6 @@ export function ClubDiscussionBoard({ clubId, isOwner, currentUserId }: Readonly
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["club-discussions", clubId] });
       setNewMessage("");
-      toast({ title: "Сообщение отправлено" });
     },
     onError: (error: Error) => {
       toast({
@@ -84,7 +90,6 @@ export function ClubDiscussionBoard({ clubId, isOwner, currentUserId }: Readonly
       queryClient.invalidateQueries({ queryKey: ["club-discussions", clubId] });
       setReplyingTo(null);
       setReplyContent("");
-      toast({ title: "Ответ отправлен" });
     },
     onError: (error: Error) => {
       toast({
@@ -127,7 +132,6 @@ export function ClubDiscussionBoard({ clubId, isOwner, currentUserId }: Readonly
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["club-discussions", clubId] });
       setMessageToDelete(null);
-      toast({ title: "Сообщение удалено" });
     },
     onError: (error: Error) => {
       toast({
@@ -194,6 +198,12 @@ export function ClubDiscussionBoard({ clubId, isOwner, currentUserId }: Readonly
         <Textarea
           value={newMessage}
           onChange={(e) => setNewMessage(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+              e.preventDefault();
+              handleSendMessage();
+            }
+          }}
           placeholder="Написать сообщение..."
           rows={3}
           className="mb-3"
@@ -220,14 +230,14 @@ export function ClubDiscussionBoard({ clubId, isOwner, currentUserId }: Readonly
       </Card>
 
       {/* Список сообщений */}
-      <div className="space-y-4">
-        {discussions.length === 0 ? (
+      <div className="space-y-4 max-h-[600px] overflow-y-auto border rounded-lg p-4 bg-background">
+        {sortedDiscussions.length === 0 ? (
           <div className="text-center py-12 text-muted-foreground">
             <MessageCircle className="h-12 w-12 mx-auto mb-4 opacity-50" />
             <p>Пока нет сообщений. Начните обсуждение!</p>
           </div>
         ) : (
-          discussions.map((message) => (
+          sortedDiscussions.map((message) => (
             <Card key={message.id} className={`p-4 ${message.isWarning ? 'border-red-500 bg-red-50' : ''}`}>
               <div className="flex items-start justify-between mb-2">
                 <div>
@@ -325,6 +335,12 @@ export function ClubDiscussionBoard({ clubId, isOwner, currentUserId }: Readonly
                   <Textarea
                     value={replyContent}
                     onChange={(e) => setReplyContent(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                        e.preventDefault();
+                        handleSendReply();
+                      }
+                    }}
                     placeholder="Ваш ответ..."
                     rows={2}
                     className="text-sm"
