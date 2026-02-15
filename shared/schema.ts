@@ -633,7 +633,7 @@ export const moderationReports = pgTable("moderation_reports", {
 export const adminActionTypes = [
   "block_user", "unblock_user", "change_user_role", "change_user_status", "delete_user", "restore_user", "permanent_delete_user",
   "reset_password",
-  "archive_club", "delete_club", "block_club", "unblock_club", "update_club",
+  "archive_club", "delete_club", "block_club", "unblock_club", "update_club", "update_club_privacy",
   "delete_book", "block_book", "unblock_book", "update_book_status",
   "delete_message", "block_message",
   "resolve_report", "dismiss_report", "assign_report", "update_report_status",

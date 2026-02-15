@@ -3,6 +3,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { RichTextEditor, type RichTextEditorRef } from "@/components/ui/rich-text-editor";
@@ -47,6 +48,7 @@ export function ClubSettingsModal({ club }: ClubSettingsModalProps) {
   const [welcomeHtml, setWelcomeHtml] = useState("");
   const [rulesHtml, setRulesHtml] = useState("");
   const [shortDescription, setShortDescription] = useState("");
+  const [isPrivate, setIsPrivate] = useState(false);
   const [schedule, setSchedule] = useState<ScheduleItem[]>([]);
   const [newSchedule, setNewSchedule] = useState<ScheduleItem>({
     id: "",
@@ -71,6 +73,7 @@ export function ClubSettingsModal({ club }: ClubSettingsModalProps) {
       setWelcomeHtml(parsedSettings?.welcomeHtml || "");
       setRulesHtml(parsedSettings?.rulesHtml || "");
       setShortDescription(parsedSettings?.shortDescription || "");
+      setIsPrivate(club.isPrivate || false);
       setSchedule(parsedSchedule);
       setNewSchedule({
         id: "",
@@ -172,9 +175,10 @@ export function ClubSettingsModal({ club }: ClubSettingsModalProps) {
       });
       const scheduleJson = JSON.stringify(schedule);
 
-      const updateData: { settings: string; schedule: string; coverImage?: string | null } = {
+      const updateData: { settings: string; schedule: string; coverImage?: string | null; isPrivate?: boolean } = {
         settings: settingsJson,
         schedule: scheduleJson,
+        isPrivate,
       };
 
       if (coverImage && coverImage !== club.coverImage) {
@@ -225,20 +229,20 @@ export function ClubSettingsModal({ club }: ClubSettingsModalProps) {
           Настройки
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
+      <DialogContent className="sm:max-w-2xl md:max-w-3xl max-h-[85vh] flex flex-col">
         <DialogHeader>
           <DialogTitle>Настройки клуба</DialogTitle>
         </DialogHeader>
 
-        <Tabs defaultValue="appearance" className="w-full flex-1 overflow-hidden flex flex-col">
-          <TabsList className="grid grid-cols-4 w-full h-auto">
+        <Tabs defaultValue="appearance" className="flex-1 flex flex-col min-h-0">
+          <TabsList className="grid grid-cols-4 w-full shrink-0">
             <TabsTrigger value="appearance">Оформление</TabsTrigger>
             <TabsTrigger value="welcome">Приветствие</TabsTrigger>
             <TabsTrigger value="rules">Правила</TabsTrigger>
             <TabsTrigger value="schedule">Расписание</TabsTrigger>
           </TabsList>
 
-          <ScrollArea className="flex-1 p-4">
+          <ScrollArea className="flex-1 -mx-4 px-4">
             <TabsContent value="appearance" className="space-y-6 mt-0">
               <div className="space-y-4">
                 <Label>Фон клуба</Label>
@@ -246,7 +250,7 @@ export function ClubSettingsModal({ club }: ClubSettingsModalProps) {
                 <div className="space-y-4">
                   <div className="relative group">
                     <div
-                      className={`relative w-full h-64 rounded-lg border-2 border-dashed overflow-hidden ${
+                      className={`relative w-full h-48 rounded-lg border-2 border-dashed overflow-hidden ${
                         coverPreview ? "border-transparent" : "border-muted-foreground/25 hover:border-muted-foreground/50"
                       }`}
                     >
@@ -282,15 +286,10 @@ export function ClubSettingsModal({ club }: ClubSettingsModalProps) {
                     )}
                   </div>
 
-                  <div className="flex items-center justify-between p-4 bg-muted/50 rounded-lg">
-                    <div>
-                      <p className="font-medium text-sm">
-                        {coverPreview ? "Изображение загружено" : "Изображение не выбрано"}
-                      </p>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        Рекомендуемый размер: 1920x640 пикселей. Форматы: JPG, PNG, WebP. Максимум 5 МБ.
-                      </p>
-                    </div>
+                  <div className="flex items-center justify-between gap-4 p-3 bg-muted/50 rounded-lg text-sm">
+                    <p className="text-muted-foreground">
+                      {coverPreview ? "Изображение выбрано" : "Файл не выбран"}
+                    </p>
                     <Button variant="outline" size="sm" asChild>
                       <label htmlFor="cover-upload" className="cursor-pointer flex items-center gap-2">
                         <Upload className="w-4 h-4" />
@@ -306,35 +305,31 @@ export function ClubSettingsModal({ club }: ClubSettingsModalProps) {
                     />
                   </div>
 
-                  {coverPreview && (
-                    <div className="flex items-center gap-3 p-3 bg-green-50 dark:bg-green-950/20 rounded-lg border border-green-200 dark:border-green-800">
-                      <div className="w-16 h-10 rounded overflow-hidden border">
-                        <img
-                          src={coverPreview}
-                          alt="Миниатюра"
-                          className="w-full h-full object-cover"
-                        />
-                      </div>
-                      <div className="flex-1">
-                        <p className="text-sm font-medium text-green-800 dark:text-green-200">
-                          Изображение готово к сохранению
-                        </p>
-                        <p className="text-xs text-green-700 dark:text-green-300">
-                          Миниатюра фона (будет отображаться в шапке клуба)
-                        </p>
-                      </div>
-                    </div>
-                  )}
+
 
                   <div className="space-y-2">
                     <Label htmlFor="club-short-description">Краткое описание клуба</Label>
                     <p className="text-xs text-muted-foreground">Это описание будет отображаться в каталоге клубов.</p>
                     <textarea
                       id="club-short-description"
-                      className="w-full rounded-md border bg-background p-3 text-sm min-h-[90px]"
+                      className="w-full rounded-md border bg-background p-3 text-sm min-h-[60px] resize-none"
                       placeholder="Коротко опишите идею и атмосферу клуба"
                       value={shortDescription}
                       onChange={(e) => setShortDescription(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between p-4 bg-muted/50 rounded-lg">
+                    <div>
+                      <Label htmlFor="club-privacy" className="text-base">Тип клуба</Label>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {isPrivate ? "Закрытый клуб — только по приглашению" : "Публичный клуб — виден в каталоге"}
+                      </p>
+                    </div>
+                    <Switch
+                      id="club-privacy"
+                      checked={isPrivate}
+                      onCheckedChange={setIsPrivate}
                     />
                   </div>
                 </div>

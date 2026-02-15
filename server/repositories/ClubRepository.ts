@@ -819,4 +819,33 @@ export class ClubRepository extends BaseRepository {
       return false;
     }
   }
+
+  /**
+   * Обновить статус приватности клуба (isPrivate)
+   * @param clubId ID клуба
+   * @param isPrivate Новое значение приватности (true = закрытый, false = публичный)
+   */
+  async updateClubPrivacy(clubId: string, isPrivate: boolean): Promise<Club | undefined> {
+    this.validateRequired(clubId, 'clubId');
+    
+    try {
+      const result = await this.db
+        .update(clubs)
+        .set({ 
+          isPrivate,
+          updatedAt: new Date()
+        })
+        .where(eq(clubs.id, clubId))
+        .returning();
+      
+      const updated = this.getFirstResult(result);
+      if (updated) {
+        logger.info({ clubId, isPrivate }, 'Club privacy updated');
+      }
+      return updated;
+    } catch (error) {
+      this.logError('updateClubPrivacy', error);
+      return undefined;
+    }
+  }
 }

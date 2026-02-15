@@ -150,9 +150,9 @@ function normalizeStorageKey(rawPath: string): string {
 function sanitizeFileNameBase(value: string): string {
   const normalized = value
     .normalize('NFKD')
-    .replace(/[^\p{L}\p{N}\s._-]/gu, '')
+    .replaceAll(/[^\p{L}\p{N}\s._-]/gu, '')
     .trim()
-    .replace(/\s+/g, '_');
+    .replaceAll(/\s+/g, '_');
 
   return normalized.length > 0 ? normalized.slice(0, 120) : 'book';
 }
@@ -174,10 +174,10 @@ function buildAttachmentFileName(baseName: string, ext: string): string {
 }
 
 function buildAttachmentHeader(fileName: string): string {
-  const fallback = fileName.replace(/[^\x20-\x7E]/g, '_').replace(/"/g, '');
+  const fallback = fileName.replaceAll(/[^\x20-\x7E]/g, '_').replaceAll('"', '');
   const utf8FileName = encodeURIComponent(fileName)
-    .replace(/['()]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`)
-    .replace(/\*/g, '%2A');
+    .replaceAll(/['()]/g, (char) => `%${char.codePointAt(0)!.toString(16).toUpperCase()}`)
+    .replaceAll('*', '%2A');
 
   return `attachment; filename="${fallback || 'book.bin'}"; filename*=UTF-8''${utf8FileName}`;
 }
@@ -231,7 +231,8 @@ function buildAdminUsersWhere(params: {
   }
 
   if (params.search) {
-    conditions.push(sql`LOWER(${users.username}) LIKE ${`%${params.search.toLowerCase()}%`}`);
+    const searchPattern = `%${params.search.toLowerCase()}%`;
+    conditions.push(sql`LOWER(${users.username}) LIKE ${searchPattern}`);
   }
 
   if (params.role) {
@@ -278,13 +279,15 @@ async function queryAdminUsersWithStats(params: {
   limit?: number;
   offset?: number;
 }) {
-  const whereClause =
-    params.conditions.length === 0
-      ? sql`true`
-      : params.conditions.length === 1
-        ? params.conditions[0]
-        : (and(...params.conditions) as SQL<unknown>);
-
+  let whereClause: SQL<unknown>;
+  if (params.conditions.length === 0) {
+    whereClause = sql`true`;
+  } else if (params.conditions.length === 1) {
+    whereClause = params.conditions[0];
+  } else {
+    whereClause = and(...params.conditions) as SQL<unknown>;
+  }
+  
   const [totalRow] = await db
     .select({
       count: sql<number>`COUNT(*)::int`,
@@ -820,6 +823,289 @@ async function buildUsersMap(booksToFormat: BookWithSource[]): Promise<Map<strin
   return new Map(usersData.map((user) => [user.id, user.username]));
 }
 
+// Вспомогательные функции для GET /books - снижение когнитивной сложности
+interface BookFilters {
+  search: string;
+  status?: string;
+}
+
+interface BookConditions {
+  booksWhere?: SQL<unknown>;
+  personalWhere?: SQL<unknown>;
+  clubWhere?: SQL<unknown>;
+}
+
+function buildBookConditions(filters: BookFilters): BookConditions {
+  const { search, status } = filters;
+  const searchPattern = search ? `%${search}%` : null;
+
+  const sourceWhere = (conditions: SQL<unknown>[]): SQL<unknown> | undefined => {
+    if (conditions.length === 0) return undefined;
+    if (conditions.length === 1) return conditions[0];
+    return and(...conditions) as SQL<unknown>;
+  };
+
+  const booksConditions: SQL<unknown>[] = [];
+  if (searchPattern) {
+    booksConditions.push(
+      sql`(LOWER(${books.title}) LIKE ${searchPattern} OR LOWER(${books.author}) LIKE ${searchPattern})`
+    );
+  }
+  if (status === 'active') {
+    booksConditions.push(eq(books.status, 'active'));
+  } else if (status === 'blocked') {
+    booksConditions.push(eq(books.status, 'blocked'));
+  } else if (status === 'pending') {
+    booksConditions.push(sql`${books.status} NOT IN ('active', 'blocked')`);
+  }
+
+  const personalConditions: SQL<unknown>[] = [];
+  if (searchPattern) {
+    personalConditions.push(
+      sql`(LOWER(${personalBooks.title}) LIKE ${searchPattern} OR LOWER(${personalBooks.author}) LIKE ${searchPattern})`
+    );
+  }
+  if (status === 'active') {
+    personalConditions.push(eq(personalBooks.isDeleted, false));
+  } else if (status === 'blocked') {
+    personalConditions.push(eq(personalBooks.isDeleted, true));
+  } else if (status === 'pending') {
+    personalConditions.push(sql`false`);
+  }
+
+  const clubConditions: SQL<unknown>[] = [];
+  if (searchPattern) {
+    clubConditions.push(
+      sql`(LOWER(${clubBooks.title}) LIKE ${searchPattern} OR LOWER(${clubBooks.author}) LIKE ${searchPattern})`
+    );
+  }
+  if (status === 'active') {
+    clubConditions.push(eq(clubBooks.isDeleted, false));
+  } else if (status === 'blocked') {
+    clubConditions.push(eq(clubBooks.isDeleted, true));
+  } else if (status === 'pending') {
+    clubConditions.push(sql`false`);
+  }
+
+  return {
+    booksWhere: sourceWhere(booksConditions),
+    personalWhere: sourceWhere(personalConditions),
+    clubWhere: sourceWhere(clubConditions),
+  };
+}
+
+async function fetchBookCounts(conditions: BookConditions) {
+  const { booksWhere, personalWhere, clubWhere } = conditions;
+
+  const [booksCountRows, personalCountRows, clubCountRows] = await Promise.all([
+    booksWhere
+      ? db.select({ count: sql<number>`COUNT(*)::int` }).from(books).where(booksWhere)
+      : db.select({ count: sql<number>`COUNT(*)::int` }).from(books),
+    personalWhere
+      ? db.select({ count: sql<number>`COUNT(*)::int` }).from(personalBooks).where(personalWhere)
+      : db.select({ count: sql<number>`COUNT(*)::int` }).from(personalBooks),
+    clubWhere
+      ? db.select({ count: sql<number>`COUNT(*)::int` }).from(clubBooks).where(clubWhere)
+      : db.select({ count: sql<number>`COUNT(*)::int` }).from(clubBooks),
+  ]);
+
+  return {
+    booksCount: Number(booksCountRows[0]?.count || 0),
+    personalCount: Number(personalCountRows[0]?.count || 0),
+    clubCount: Number(clubCountRows[0]?.count || 0),
+  };
+}
+
+interface BookWindow {
+  skip: number;
+  take: number;
+}
+
+function calculateBookWindows(counts: { booksCount: number; personalCount: number; clubCount: number }, offset: number, limit: number) {
+  let remainingOffset = offset;
+  let remainingLimit = limit;
+
+  const calculateWindow = (segmentCount: number): BookWindow => {
+    if (remainingLimit <= 0) return { skip: 0, take: 0 };
+    if (remainingOffset >= segmentCount) {
+      remainingOffset -= segmentCount;
+      return { skip: 0, take: 0 };
+    }
+
+    const skip = remainingOffset;
+    const take = Math.min(remainingLimit, segmentCount - skip);
+    remainingOffset = 0;
+    remainingLimit -= take;
+    return { skip, take };
+  };
+
+  return {
+    booksWindow: calculateWindow(counts.booksCount),
+    personalWindow: calculateWindow(counts.personalCount),
+    clubWindow: calculateWindow(counts.clubCount),
+  };
+}
+
+async function executeBookQueries(
+  conditions: BookConditions,
+  windows: { booksWindow: BookWindow; personalWindow: BookWindow; clubWindow: BookWindow }
+) {
+  const { booksWhere, personalWhere, clubWhere } = conditions;
+  const { booksWindow, personalWindow, clubWindow } = windows;
+
+  const booksQuery = db
+    .select({
+      id: books.id,
+      title: books.title,
+      author: books.author,
+      isbn: books.isbn,
+      coverUrl: books.coverUrl,
+      fileUrl: books.contentPath,
+      uploadedBy: users.username,
+      uploadedAt: books.uploadedAt,
+      createdAt: books.createdAt,
+      fileSize: books.fileSize,
+      downloadsCount: books.downloadCount,
+      description: books.description,
+      status: sql<string>`CASE
+        WHEN ${books.status} = 'active' THEN 'active'
+        WHEN ${books.status} = 'blocked' THEN 'blocked'
+        ELSE 'pending'
+      END`,
+    })
+    .from(books)
+    .leftJoin(users, eq(books.uploadedBy, users.id))
+    .orderBy(desc(books.createdAt));
+
+  const personalQuery = db
+    .select({
+      id: personalBooks.id,
+      title: personalBooks.title,
+      author: personalBooks.author,
+      genre: personalBooks.genre,
+      coverUrl: personalBooks.coverUrl,
+      fileUrl: personalBooks.storagePath,
+      uploadedBy: users.username,
+      uploadedAt: personalBooks.uploadedAt,
+      fileSize: personalBooks.fileSizeBytes,
+      description: personalBooks.description,
+      status: sql<string>`CASE
+        WHEN ${personalBooks.isDeleted} = true THEN 'blocked'
+        ELSE 'active'
+      END`,
+    })
+    .from(personalBooks)
+    .leftJoin(users, eq(personalBooks.userId, users.id))
+    .orderBy(desc(personalBooks.createdAt));
+
+  const clubQuery = db
+    .select({
+      id: clubBooks.id,
+      title: clubBooks.title,
+      author: clubBooks.author,
+      genre: clubBooks.genre,
+      coverUrl: clubBooks.coverUrl,
+      fileUrl: clubBooks.storagePath,
+      uploadedBy: users.username,
+      uploadedAt: clubBooks.uploadedAt,
+      fileSize: clubBooks.fileSizeBytes,
+      description: clubBooks.description,
+      clubId: clubBooks.clubId,
+      status: sql<string>`CASE
+        WHEN ${clubBooks.isDeleted} = true THEN 'blocked'
+        ELSE 'active'
+      END`,
+    })
+    .from(clubBooks)
+    .leftJoin(users, eq(clubBooks.uploadedByUserId, users.id))
+    .orderBy(desc(clubBooks.createdAt));
+
+  let getBooksRows: Promise<any[]>;
+  if (booksWindow.take > 0) {
+    getBooksRows = booksWhere 
+      ? booksQuery.where(booksWhere).limit(booksWindow.take).offset(booksWindow.skip)
+      : booksQuery.limit(booksWindow.take).offset(booksWindow.skip);
+  } else {
+    getBooksRows = Promise.resolve([]);
+  }
+
+  let getPersonalRows: Promise<any[]>;
+  if (personalWindow.take > 0) {
+    getPersonalRows = personalWhere
+      ? personalQuery.where(personalWhere).limit(personalWindow.take).offset(personalWindow.skip)
+      : personalQuery.limit(personalWindow.take).offset(personalWindow.skip);
+  } else {
+    getPersonalRows = Promise.resolve([]);
+  }
+
+  let getClubRows: Promise<any[]>;
+  if (clubWindow.take > 0) {
+    getClubRows = clubWhere
+      ? clubQuery.where(clubWhere).limit(clubWindow.take).offset(clubWindow.skip)
+      : clubQuery.limit(clubWindow.take).offset(clubWindow.skip);
+  } else {
+    getClubRows = Promise.resolve([]);
+  }
+
+  return Promise.all([getBooksRows, getPersonalRows, getClubRows]);
+}
+
+function formatBookResults(booksRows: any[], personalRows: any[], clubRows: any[]) {
+  return [
+    ...booksRows.map((book) => ({
+      id: book.id,
+      title: book.title,
+      author: book.author,
+      isbn: book.isbn || null,
+      genre: null,
+      cover_url: book.coverUrl || null,
+      file_url: book.fileUrl || '',
+      status: book.status,
+      uploaded_by: book.uploadedBy || 'System',
+      upload_date: (book.uploadedAt || book.createdAt).toISOString(),
+      file_size: book.fileSize || 0,
+      downloads_count: book.downloadsCount || 0,
+      description: book.description || null,
+      source: 'books',
+      club_id: null,
+    })),
+    ...personalRows.map((book) => ({
+      id: book.id,
+      title: book.title,
+      author: book.author,
+      isbn: null,
+      genre: book.genre || null,
+      cover_url: book.coverUrl || null,
+      file_url: book.fileUrl || '',
+      status: book.status,
+      uploaded_by: book.uploadedBy || 'System',
+      upload_date: book.uploadedAt.toISOString(),
+      file_size: book.fileSize || 0,
+      downloads_count: 0,
+      description: book.description || null,
+      source: 'personal_books',
+      club_id: null,
+    })),
+    ...clubRows.map((book) => ({
+      id: book.id,
+      title: book.title,
+      author: book.author,
+      isbn: null,
+      genre: book.genre || null,
+      cover_url: book.coverUrl || null,
+      file_url: book.fileUrl || '',
+      status: book.status,
+      uploaded_by: book.uploadedBy || 'System',
+      upload_date: book.uploadedAt.toISOString(),
+      file_size: book.fileSize || 0,
+      downloads_count: 0,
+      description: book.description || null,
+      source: 'club_books',
+      club_id: book.clubId,
+    })),
+  ];
+}
+
 // Получить список всех книг (refactored for low cognitive complexity)
 router.get('/books', jwtAuth, requireAdmin, async (req, res) => {
   try {
@@ -830,253 +1116,16 @@ router.get('/books', jwtAuth, requireAdmin, async (req, res) => {
     if (status && !['active', 'blocked', 'pending'].includes(status)) {
       return res.json({
         books: [],
-        pagination: {
-          page,
-          limit,
-          total: 0,
-          pages: 0,
-        },
+        pagination: { page, limit, total: 0, pages: 0 },
       });
     }
 
-    const searchPattern = search ? `%${search}%` : null;
-
-    const sourceWhere = (conditions: SQL<unknown>[]): SQL<unknown> | undefined => {
-      if (conditions.length === 0) {
-        return undefined;
-      }
-      if (conditions.length === 1) {
-        return conditions[0];
-      }
-      return and(...conditions) as SQL<unknown>;
-    };
-
-    const booksConditions: SQL<unknown>[] = [];
-    if (searchPattern) {
-      booksConditions.push(
-        sql`(LOWER(${books.title}) LIKE ${searchPattern} OR LOWER(${books.author}) LIKE ${searchPattern})`,
-      );
-    }
-    if (status === 'active') {
-      booksConditions.push(eq(books.status, 'active'));
-    } else if (status === 'blocked') {
-      booksConditions.push(eq(books.status, 'blocked'));
-    } else if (status === 'pending') {
-      booksConditions.push(sql`${books.status} NOT IN ('active', 'blocked')`);
-    }
-
-    const personalConditions: SQL<unknown>[] = [];
-    if (searchPattern) {
-      personalConditions.push(
-        sql`(LOWER(${personalBooks.title}) LIKE ${searchPattern} OR LOWER(${personalBooks.author}) LIKE ${searchPattern})`,
-      );
-    }
-    if (status === 'active') {
-      personalConditions.push(eq(personalBooks.isDeleted, false));
-    } else if (status === 'blocked') {
-      personalConditions.push(eq(personalBooks.isDeleted, true));
-    } else if (status === 'pending') {
-      personalConditions.push(sql`false`);
-    }
-
-    const clubConditions: SQL<unknown>[] = [];
-    if (searchPattern) {
-      clubConditions.push(
-        sql`(LOWER(${clubBooks.title}) LIKE ${searchPattern} OR LOWER(${clubBooks.author}) LIKE ${searchPattern})`,
-      );
-    }
-    if (status === 'active') {
-      clubConditions.push(eq(clubBooks.isDeleted, false));
-    } else if (status === 'blocked') {
-      clubConditions.push(eq(clubBooks.isDeleted, true));
-    } else if (status === 'pending') {
-      clubConditions.push(sql`false`);
-    }
-
-    const booksWhere = sourceWhere(booksConditions);
-    const personalWhere = sourceWhere(personalConditions);
-    const clubWhere = sourceWhere(clubConditions);
-
-    const [booksCountRows, personalCountRows, clubCountRows] = await Promise.all([
-      booksWhere
-        ? db.select({ count: sql<number>`COUNT(*)::int` }).from(books).where(booksWhere)
-        : db.select({ count: sql<number>`COUNT(*)::int` }).from(books),
-      personalWhere
-        ? db.select({ count: sql<number>`COUNT(*)::int` }).from(personalBooks).where(personalWhere)
-        : db.select({ count: sql<number>`COUNT(*)::int` }).from(personalBooks),
-      clubWhere
-        ? db.select({ count: sql<number>`COUNT(*)::int` }).from(clubBooks).where(clubWhere)
-        : db.select({ count: sql<number>`COUNT(*)::int` }).from(clubBooks),
-    ]);
-
-    const booksCount = Number(booksCountRows[0]?.count || 0);
-    const personalCount = Number(personalCountRows[0]?.count || 0);
-    const clubCount = Number(clubCountRows[0]?.count || 0);
-    const total = booksCount + personalCount + clubCount;
-
-    let remainingOffset = offset;
-    let remainingLimit = limit;
-
-    const calculateWindow = (segmentCount: number) => {
-      if (remainingLimit <= 0) {
-        return { skip: 0, take: 0 };
-      }
-      if (remainingOffset >= segmentCount) {
-        remainingOffset -= segmentCount;
-        return { skip: 0, take: 0 };
-      }
-
-      const skip = remainingOffset;
-      const take = Math.min(remainingLimit, segmentCount - skip);
-
-      remainingOffset = 0;
-      remainingLimit -= take;
-
-      return { skip, take };
-    };
-
-    const booksWindow = calculateWindow(booksCount);
-    const personalWindow = calculateWindow(personalCount);
-    const clubWindow = calculateWindow(clubCount);
-
-    const booksQuery = db
-      .select({
-        id: books.id,
-        title: books.title,
-        author: books.author,
-        isbn: books.isbn,
-        coverUrl: books.coverUrl,
-        fileUrl: books.contentPath,
-        uploadedBy: users.username,
-        uploadedAt: books.uploadedAt,
-        createdAt: books.createdAt,
-        fileSize: books.fileSize,
-        downloadsCount: books.downloadCount,
-        description: books.description,
-        status: sql<string>`CASE
-          WHEN ${books.status} = 'active' THEN 'active'
-          WHEN ${books.status} = 'blocked' THEN 'blocked'
-          ELSE 'pending'
-        END`,
-      })
-      .from(books)
-      .leftJoin(users, eq(books.uploadedBy, users.id))
-      .orderBy(desc(books.createdAt));
-
-    const personalQuery = db
-      .select({
-        id: personalBooks.id,
-        title: personalBooks.title,
-        author: personalBooks.author,
-        genre: personalBooks.genre,
-        coverUrl: personalBooks.coverUrl,
-        fileUrl: personalBooks.storagePath,
-        uploadedBy: users.username,
-        uploadedAt: personalBooks.uploadedAt,
-        fileSize: personalBooks.fileSizeBytes,
-        description: personalBooks.description,
-        status: sql<string>`CASE
-          WHEN ${personalBooks.isDeleted} = true THEN 'blocked'
-          ELSE 'active'
-        END`,
-      })
-      .from(personalBooks)
-      .leftJoin(users, eq(personalBooks.userId, users.id))
-      .orderBy(desc(personalBooks.createdAt));
-
-    const clubQuery = db
-      .select({
-        id: clubBooks.id,
-        title: clubBooks.title,
-        author: clubBooks.author,
-        genre: clubBooks.genre,
-        coverUrl: clubBooks.coverUrl,
-        fileUrl: clubBooks.storagePath,
-        uploadedBy: users.username,
-        uploadedAt: clubBooks.uploadedAt,
-        fileSize: clubBooks.fileSizeBytes,
-        description: clubBooks.description,
-        clubId: clubBooks.clubId,
-        status: sql<string>`CASE
-          WHEN ${clubBooks.isDeleted} = true THEN 'blocked'
-          ELSE 'active'
-        END`,
-      })
-      .from(clubBooks)
-      .leftJoin(users, eq(clubBooks.uploadedByUserId, users.id))
-      .orderBy(desc(clubBooks.createdAt));
-
-    const [booksRows, personalRows, clubRows] = await Promise.all([
-      booksWindow.take > 0
-        ? (booksWhere
-          ? booksQuery.where(booksWhere).limit(booksWindow.take).offset(booksWindow.skip)
-          : booksQuery.limit(booksWindow.take).offset(booksWindow.skip))
-        : Promise.resolve([]),
-      personalWindow.take > 0
-        ? (personalWhere
-          ? personalQuery.where(personalWhere).limit(personalWindow.take).offset(personalWindow.skip)
-          : personalQuery.limit(personalWindow.take).offset(personalWindow.skip))
-        : Promise.resolve([]),
-      clubWindow.take > 0
-        ? (clubWhere
-          ? clubQuery.where(clubWhere).limit(clubWindow.take).offset(clubWindow.skip)
-          : clubQuery.limit(clubWindow.take).offset(clubWindow.skip))
-        : Promise.resolve([]),
-    ]);
-
-    const formattedBooks = [
-      ...booksRows.map((book) => ({
-        id: book.id,
-        title: book.title,
-        author: book.author,
-        isbn: book.isbn || null,
-        genre: null,
-        cover_url: book.coverUrl || null,
-        file_url: book.fileUrl || '',
-        status: book.status,
-        uploaded_by: book.uploadedBy || 'System',
-        upload_date: (book.uploadedAt || book.createdAt).toISOString(),
-        file_size: book.fileSize || 0,
-        downloads_count: book.downloadsCount || 0,
-        description: book.description || null,
-        source: 'books',
-        club_id: null,
-      })),
-      ...personalRows.map((book) => ({
-        id: book.id,
-        title: book.title,
-        author: book.author,
-        isbn: null,
-        genre: book.genre || null,
-        cover_url: book.coverUrl || null,
-        file_url: book.fileUrl || '',
-        status: book.status,
-        uploaded_by: book.uploadedBy || 'System',
-        upload_date: book.uploadedAt.toISOString(),
-        file_size: book.fileSize || 0,
-        downloads_count: 0,
-        description: book.description || null,
-        source: 'personal_books',
-        club_id: null,
-      })),
-      ...clubRows.map((book) => ({
-        id: book.id,
-        title: book.title,
-        author: book.author,
-        isbn: null,
-        genre: book.genre || null,
-        cover_url: book.coverUrl || null,
-        file_url: book.fileUrl || '',
-        status: book.status,
-        uploaded_by: book.uploadedBy || 'System',
-        upload_date: book.uploadedAt.toISOString(),
-        file_size: book.fileSize || 0,
-        downloads_count: 0,
-        description: book.description || null,
-        source: 'club_books',
-        club_id: book.clubId,
-      })),
-    ];
+    const conditions = buildBookConditions({ search, status });
+    const counts = await fetchBookCounts(conditions);
+    const total = counts.booksCount + counts.personalCount + counts.clubCount;
+    const windows = calculateBookWindows(counts, offset, limit);
+    const [booksRows, personalRows, clubRows] = await executeBookQueries(conditions, windows);
+    const formattedBooks = formatBookResults(booksRows, personalRows, clubRows);
 
     res.json({
       books: formattedBooks,
@@ -1250,6 +1299,186 @@ async function sendBookBlockNotification(
   return { success: true };
 }
 
+// Вспомогательные функции для PUT /books/:id/status - снижение когнитивной сложности
+interface BookStatusUpdateResult {
+  success: boolean;
+  message: string;
+  status?: AdminBookStatus;
+  error?: boolean;
+}
+
+async function updatePersonalBookStatusHelper(
+  id: string,
+  status: AdminBookStatus,
+  reason: string,
+  req: express.Request
+): Promise<BookStatusUpdateResult> {
+  if (status === 'pending') {
+    return { success: false, message: 'Pending status is not supported for personal books', error: true };
+  }
+
+  const personalBook = await storage.getPersonalBook(id);
+  if (!personalBook) {
+    return { success: false, message: 'Personal book not found', error: true };
+  }
+
+  const previousStatus: AdminBookStatus = personalBook.isDeleted ? 'blocked' : 'active';
+  if (status === previousStatus) {
+    return { success: true, message: 'Book status unchanged', status };
+  }
+
+  if (status === 'blocked') {
+    const notificationResult = await sendBookBlockNotification({
+      source: 'personal_books',
+      uploaderUserId: personalBook.userId,
+      bookTitle: personalBook.title,
+      reason,
+    });
+    if (!notificationResult.success) {
+      return { success: false, message: notificationResult.error!, error: true };
+    }
+  }
+
+  const updated = status === 'blocked'
+    ? await storage.deletePersonalBook(id)
+    : await storage.restorePersonalBook(id);
+
+  if (!updated) {
+    return { success: false, message: 'Failed to update personal book status', error: true };
+  }
+
+  await logAction(
+    req,
+    status === 'blocked' ? 'block_book' : 'unblock_book',
+    'book',
+    id,
+    status === 'blocked' ? reason : undefined,
+    previousStatus,
+    status,
+  );
+
+  return {
+    success: true,
+    message: status === 'blocked'
+      ? 'Book blocked successfully and uploader notified'
+      : 'Book unblocked successfully',
+    status,
+  };
+}
+
+async function updateClubBookStatusHelper(
+  id: string,
+  status: AdminBookStatus,
+  reason: string,
+  req: express.Request
+): Promise<BookStatusUpdateResult> {
+  if (status === 'pending') {
+    return { success: false, message: 'Pending status is not supported for club books', error: true };
+  }
+
+  const clubBook = await storage.getClubBook(id);
+  if (!clubBook) {
+    return { success: false, message: 'Club book not found', error: true };
+  }
+
+  const previousStatus: AdminBookStatus = clubBook.isDeleted ? 'blocked' : 'active';
+  if (status === previousStatus) {
+    return { success: true, message: 'Book status unchanged', status };
+  }
+
+  if (status === 'blocked') {
+    const notificationResult = await sendBookBlockNotification({
+      source: 'club_books',
+      uploaderUserId: clubBook.uploadedByUserId,
+      bookTitle: clubBook.title,
+      reason,
+      clubId: clubBook.clubId,
+    });
+    if (!notificationResult.success) {
+      return { success: false, message: notificationResult.error!, error: true };
+    }
+  }
+
+  const updated = status === 'blocked'
+    ? await storage.deleteClubBook(id)
+    : await storage.restoreClubBook(id);
+
+  if (!updated) {
+    return { success: false, message: 'Failed to update club book status', error: true };
+  }
+
+  await logAction(
+    req,
+    status === 'blocked' ? 'block_book' : 'unblock_book',
+    'book',
+    id,
+    status === 'blocked' ? reason : undefined,
+    previousStatus,
+    status,
+  );
+
+  return {
+    success: true,
+    message: status === 'blocked'
+      ? 'Book blocked successfully and uploader notified'
+      : 'Book unblocked successfully',
+    status,
+  };
+}
+
+async function updateRegularBookStatusHelper(
+  id: string,
+  status: AdminBookStatus,
+  reason: string,
+  req: express.Request
+): Promise<BookStatusUpdateResult> {
+  const regularBook = await storage.getBook(id);
+  if (!regularBook) {
+    return { success: false, message: 'Book not found', error: true };
+  }
+
+  const previousStatus = getDisplayBookStatusForRegularBook(regularBook.status);
+  if (status === previousStatus) {
+    return { success: true, message: 'Book status unchanged', status };
+  }
+
+  const [updatedRegularBook] = await db
+    .update(books)
+    .set({
+      status: status as unknown as typeof books.$inferInsert.status,
+      blockedAt: status === 'blocked' ? new Date() : null,
+      blockReason: status === 'blocked' ? reason || null : null,
+      updatedAt: new Date(),
+    })
+    .where(eq(books.id, id))
+    .returning({ id: books.id });
+
+  if (!updatedRegularBook) {
+    return { success: false, message: 'Failed to update regular book status', error: true };
+  }
+
+  let actionType: AdminActionType;
+  if (status === 'blocked') {
+    actionType = 'block_book';
+  } else if (status === 'active') {
+    actionType = 'unblock_book';
+  } else {
+    actionType = 'update_book_status';
+  }
+
+  await logAction(
+    req,
+    actionType,
+    'book',
+    id,
+    status === 'blocked' ? reason : undefined,
+    previousStatus,
+    status,
+  );
+
+  return { success: true, message: 'Book status updated successfully', status };
+}
+
 // Изменить статус книги (поддерживает все типы: books, personal_books, club_books)
 router.put('/books/:id/status', jwtAuth, requireAdmin, async (req, res) => {
   try {
@@ -1274,153 +1503,21 @@ router.put('/books/:id/status', jwtAuth, requireAdmin, async (req, res) => {
       });
     }
 
+    let result: BookStatusUpdateResult;
+
     if (source === 'personal_books') {
-      if (status === 'pending') {
-        return res.status(400).json({ message: 'Pending status is not supported for personal books' });
-      }
-
-      const personalBook = await storage.getPersonalBook(id);
-      if (!personalBook) {
-        return res.status(404).json({ message: 'Personal book not found' });
-      }
-
-      const previousStatus: AdminBookStatus = personalBook.isDeleted ? 'blocked' : 'active';
-      if (status === previousStatus) {
-        return res.json({ message: 'Book status unchanged', status });
-      }
-
-      if (status === 'blocked') {
-        const notificationResult = await sendBookBlockNotification({
-          source: 'personal_books',
-          uploaderUserId: personalBook.userId,
-          bookTitle: personalBook.title,
-          reason,
-        });
-        if (!notificationResult.success) {
-          return res.status(500).json({ message: notificationResult.error });
-        }
-      }
-
-      const updated = status === 'blocked'
-        ? await storage.deletePersonalBook(id)
-        : await storage.restorePersonalBook(id);
-
-      if (!updated) {
-        return res.status(500).json({ message: 'Failed to update personal book status' });
-      }
-
-      await logAction(
-        req,
-        status === 'blocked' ? 'block_book' : 'unblock_book',
-        'book',
-        id,
-        status === 'blocked' ? reason : undefined,
-        previousStatus,
-        status,
-      );
-
-      return res.json({
-        message: status === 'blocked'
-          ? 'Book blocked successfully and uploader notified'
-          : 'Book unblocked successfully',
-        status,
-      });
+      result = await updatePersonalBookStatusHelper(id, status, reason, req);
+    } else if (source === 'club_books') {
+      result = await updateClubBookStatusHelper(id, status, reason, req);
+    } else {
+      result = await updateRegularBookStatusHelper(id, status, reason, req);
     }
 
-    if (source === 'club_books') {
-      if (status === 'pending') {
-        return res.status(400).json({ message: 'Pending status is not supported for club books' });
-      }
-
-      const clubBook = await storage.getClubBook(id);
-      if (!clubBook) {
-        return res.status(404).json({ message: 'Club book not found' });
-      }
-
-      const previousStatus: AdminBookStatus = clubBook.isDeleted ? 'blocked' : 'active';
-      if (status === previousStatus) {
-        return res.json({ message: 'Book status unchanged', status });
-      }
-
-      if (status === 'blocked') {
-        const notificationResult = await sendBookBlockNotification({
-          source: 'club_books',
-          uploaderUserId: clubBook.uploadedByUserId,
-          bookTitle: clubBook.title,
-          reason,
-          clubId: clubBook.clubId,
-        });
-        if (!notificationResult.success) {
-          return res.status(500).json({ message: notificationResult.error });
-        }
-      }
-
-      const updated = status === 'blocked'
-        ? await storage.deleteClubBook(id)
-        : await storage.restoreClubBook(id);
-
-      if (!updated) {
-        return res.status(500).json({ message: 'Failed to update club book status' });
-      }
-
-      await logAction(
-        req,
-        status === 'blocked' ? 'block_book' : 'unblock_book',
-        'book',
-        id,
-        status === 'blocked' ? reason : undefined,
-        previousStatus,
-        status,
-      );
-
-      return res.json({
-        message: status === 'blocked'
-          ? 'Book blocked successfully and uploader notified'
-          : 'Book unblocked successfully',
-        status,
-      });
+    if (!result.success) {
+      return res.status(result.error ? 500 : 404).json({ message: result.message });
     }
 
-    const regularBook = await storage.getBook(id);
-    if (!regularBook) {
-      return res.status(404).json({ message: 'Book not found' });
-    }
-
-    const previousStatus = getDisplayBookStatusForRegularBook(regularBook.status);
-    if (status === previousStatus) {
-      return res.json({ message: 'Book status unchanged', status });
-    }
-
-    const [updatedRegularBook] = await db
-      .update(books)
-      .set({
-        status: status as unknown as typeof books.$inferInsert.status,
-        blockedAt: status === 'blocked' ? new Date() : null,
-        blockReason: status === 'blocked' ? reason || null : null,
-        updatedAt: new Date(),
-      })
-      .where(eq(books.id, id))
-      .returning({ id: books.id });
-
-    if (!updatedRegularBook) {
-      return res.status(500).json({ message: 'Failed to update regular book status' });
-    }
-
-    await logAction(
-      req,
-      status === 'blocked'
-        ? 'block_book'
-        : status === 'active'
-          ? 'unblock_book'
-          : 'update_book_status',
-      'book',
-      id,
-      status === 'blocked' ? reason : undefined,
-      previousStatus,
-      status,
-    );
-
-    return res.json({ message: 'Book status updated successfully', status });
+    return res.json({ message: result.message, status: result.status });
   } catch (error) {
     console.error('Error updating book status:', error);
     return res.status(500).json({ message: 'Internal server error' });
@@ -1513,17 +1610,21 @@ router.get('/clubs', jwtAuth, requireAdmin, async (req, res) => {
 
     const conditions: SQL<unknown>[] = [];
     if (search) {
-      conditions.push(sql`LOWER(${clubs.title}) LIKE ${`%${search.toLowerCase()}%`}`);
+      const searchPattern = `%${search.toLowerCase()}%`;
+      conditions.push(sql`LOWER(${clubs.title}) LIKE ${searchPattern}`);
     }
     if (status) {
       conditions.push(eq(clubs.status, status as typeof clubs.$inferSelect['status']));
     }
 
-    const whereClause = conditions.length === 0
-      ? sql`true`
-      : conditions.length === 1
-        ? conditions[0]
-        : (and(...conditions) as SQL<unknown>);
+    let whereClause: SQL<unknown>;
+    if (conditions.length === 0) {
+      whereClause = sql`true`;
+    } else if (conditions.length === 1) {
+      whereClause = conditions[0];
+    } else {
+      whereClause = and(...conditions) as SQL<unknown>;
+    }
 
     const [totalRows, rows] = await Promise.all([
       db
@@ -2158,11 +2259,20 @@ router.get('/settings/platform', jwtAuth, requireAdmin, async (_req, res) => {
     const effectiveUrl = await getPublicBaseUrl();
     const envConfigured = Boolean(process.env.APP_BASE_URL || process.env.APP_BASE_URLS || process.env.CLIENT_URL);
 
+    let source: string;
+    if (canonicalUrl) {
+      source = 'database';
+    } else if (envConfigured) {
+      source = 'environment';
+    } else {
+      source = 'fallback';
+    }
+
     res.json({
       settings: {
         canonicalUrl: canonicalUrl || '',
         effectiveUrl,
-        source: canonicalUrl ? 'database' : envConfigured ? 'environment' : 'fallback',
+        source,
       },
     });
   } catch (error) {
@@ -2707,6 +2817,53 @@ router.post('/settings/smtp/test', jwtAuth, requireFullAdmin, async (req, res) =
       success: false,
       message: 'Failed to send test email'
     });
+  }
+});
+
+// ==== CLUB MANAGEMENT ====
+
+/**
+ * PUT /api/v1/admin/clubs/:id/privacy
+ * Изменить статус публичности клуба (isPrivate)
+ * Только для админов/модераторов
+ */
+router.put('/clubs/:id/privacy', jwtAuth, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { isPublic } = req.body;
+
+    if (typeof isPublic !== 'boolean') {
+      return res.status(400).json({ message: 'isPublic field is required and must be a boolean' });
+    }
+
+    // Конвертируем isPublic (client) в isPrivate (server)
+    // isPublic = false -> isPrivate = true (закрытый клуб)
+    // isPublic = true -> isPrivate = false (публичный клуб)
+    const isPrivate = !isPublic;
+
+    const updatedClub = await storage.updateClubPrivacy(id, isPrivate);
+
+    if (!updatedClub) {
+      return res.status(404).json({ message: 'Club not found' });
+    }
+
+    await logAction(
+      req,
+      'update_club_privacy',
+      'club',
+      id,
+      `Changed privacy to ${isPrivate ? 'private' : 'public'}`,
+      undefined,
+      String(isPrivate)
+    );
+
+    res.json({
+      message: 'Club privacy updated successfully',
+      is_public: isPublic
+    });
+  } catch (error) {
+    console.error('Error updating club privacy:', error);
+    res.status(500).json({ message: 'Internal server error' });
   }
 });
 

@@ -546,6 +546,10 @@ class StorageAdapter implements Partial<IStorage> {
     return this.repos.clubs.updateClub(id, updates);
   }
 
+  async updateClubPrivacy(clubId: string, isPrivate: boolean) {
+    return this.repos.clubs.updateClubPrivacy(clubId, isPrivate);
+  }
+
   async deleteClub(id: string) {
     return this.repos.clubs.deleteClub(id);
   }

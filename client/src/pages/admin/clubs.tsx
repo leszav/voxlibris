@@ -21,7 +21,9 @@ import {
   Archive,
   Settings,
   UserCog,
-  Loader2
+  Loader2,
+  Lock,
+  Unlock
 } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -114,6 +116,13 @@ async function rejectClub(clubId: string, reason: string): Promise<void> {
   await apiRequest(`/api/v1/admin/clubs/${clubId}/reject`, {
     method: 'PUT',
     body: JSON.stringify({ reason }),
+  });
+}
+
+async function updateClubPrivacy(clubId: string, isPublic: boolean): Promise<void> {
+  await apiRequest(`/api/v1/admin/clubs/${clubId}/privacy`, {
+    method: 'PUT',
+    body: JSON.stringify({ isPublic }),
   });
 }
 
@@ -247,6 +256,21 @@ function ClubActionsMenu({
     },
   });
 
+  const togglePrivacyMutation = useMutation({
+    mutationFn: ({ clubId, isPublic }: { clubId: string; isPublic: boolean }) =>
+      updateClubPrivacy(clubId, isPublic),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin-clubs'] });
+    },
+    onError: (error: Error) => {
+      void modalAlert({
+        title: "Ошибка",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
   const handleRejectSubmit = () => {
     if (!rejectReason.trim()) {
       void modalAlert({
@@ -274,7 +298,24 @@ function ClubActionsMenu({
               Просмотреть детали
             </a>
           </DropdownMenuItem>
-          
+
+          {/* Переключение приватности клуба */}
+          <DropdownMenuItem
+            onClick={() => togglePrivacyMutation.mutate({
+              clubId: club.id,
+              isPublic: !club.is_public
+            })}
+            disabled={togglePrivacyMutation.isPending}
+            className={club.is_public ? "text-amber-600" : "text-green-600"}
+          >
+            {club.is_public ? (
+              <Lock className="w-4 h-4 mr-2" />
+            ) : (
+              <Unlock className="w-4 h-4 mr-2" />
+            )}
+            {club.is_public ? "Сделать приватным" : "Сделать публичным"}
+          </DropdownMenuItem>
+
           {/* Кнопки модерации для pending клубов */}
           {club.status === 'pending' && (
             <>
