@@ -125,7 +125,7 @@ export class ReadingScheduleRepository extends BaseRepository {
           eq(readingSchedule.remindersSent, false),
           gt(readingSchedule.scheduledStart, now),
           sql`ABS(
-            EXTRACT(EPOCH FROM (${readingSchedule.scheduledStart} - ${now}))
+            EXTRACT(EPOCH FROM (${readingSchedule.scheduledStart} - ${now.toISOString()}))
             - (COALESCE(${readingSchedule.reminderMinutes}, 15) * 60)
           ) <= ${toleranceSeconds}`
         ))

@@ -155,6 +155,13 @@
       "when": 1768769147260,
       "tag": "0022_fix_reading_progress_constraint",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1768829147260,
+      "tag": "0031_add_reading_schedule",
+      "breakpoints": false
     }
   ]
 }
