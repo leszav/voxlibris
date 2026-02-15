@@ -1,167 +1,53 @@
-# xLibris - Аудиокниги платформа
+# VoxLibris
 
-![Build Status](https://img.shields.io/badge/build-passing-brightgreen)
-![License](https://img.shields.io/badge/license-MIT-blue)
-![Version](https://img.shields.io/badge/version-1.0.0-orange)
+VoxLibris — это инновационная платформа для социального чтения, позволяющая пользователям объединяться в клубы, читать книги вместе, обсуждать произведения и делиться впечатлениями. Проект включает в себя как клиентскую, так и серверную части с широким спектром функций.
 
-Современная платформа для прослушивания аудиокниг с поддержкой Spec-Driven Development.
+## Особенности
 
-## 🚀 Быстрый старт
+- Чтение книг в режиме реального времени с другими участниками
+- Возможность создавать и присоединяться к клубам
+- Поддержка различных форматов книг (EPUB, PDF, FB2)
+- Система голосового вещания для чтения вслух
+- Уведомления и напоминания о сессиях
+- Система прогресса и достижений
+- Административная панель для модерации
 
-### Предварительные требования
-- Node.js 22+
-- PostgreSQL 14+
-- pnpm
-- uv (для SDD)
+## Документация
 
-### Установка и запуск
+Полная документация проекта доступна в директории [/docs](./docs/). Для удобного навигации по документации смотрите [SUMMARY.md](./docs/SUMMARY.md).
 
-```bash
-# Клонировать репозиторий
-git clone <repository-url>
-cd xLibris
+## Технологии
 
-# Установить зависимости
-pnpm install
+- **TypeScript** – язык программирования для клиента и сервера
+- **React** – фронтенд-библиотека
+- **Express.js** – серверный фреймворк
+- **PostgreSQL** – основная база данных
+- **Drizzle ORM** – объектно-реляционное отображение
+- **Tailwind CSS** – фреймворк для стилей
+- **Vite** – инструмент сборки
+- **Multer** – обработка загрузки файлов
+- **Zustand** – менеджер состояния
+- **React Hook Form** – работа с формами
+- **Zod** – валидация данных
+- **React Email** – создание электронных писем
+- **Resend** – отправка электронных писем
+- **WebSockets** – двунаправленная связь в реальном времени
 
-# Настроить переменные окружения
-cp .env.example .env
-# Отредактировать .env с вашими настройками
+## Архитектура
 
-# Настроить базу данных
-createdb xlibris
-pnpm run db:push
+Приложение состоит из двух основных частей:
 
-# Запустить development сервер
-pnpm run dev
-```
+1. **Клиентская часть** – реализована на React с использованием TypeScript, Vite и Tailwind CSS.
+2. **Серверная часть** – Express.js приложение с использованием TypeScript, Drizzle ORM и PostgreSQL.
 
-Приложение будет доступно по адресу http://localhost:5000
+## Запуск проекта
 
-## 📸 Скриншоты
+1. Клонируйте репозиторий
+2. Установите зависимости: `pnpm install`
+3. Настройте переменные окружения (см. [.env.example](.env.example))
+4. Запустите миграции базы данных: `pnpm run db:migrate`
+5. Запустите клиент и сервер: `pnpm run dev`
 
-_Скриншоты будут добавлены в ближайшее время_
+## Лицензия
 
-## 🏗️ Архитектура
-
-### Tech Stack
-- **Frontend**: React 19 + TypeScript + Tailwind CSS + shadcn/ui
-- **Backend**: Express.js + TypeScript
-- **Database**: PostgreSQL + Drizzle ORM
-- **Build**: Vite + pnpm
-- **Development**: Spec-Driven Development (SDD)
-
-### Структура проекта
-```
-xLibris/
-├── client/                 # React frontend
-│   ├── src/
-│   │   ├── components/     # UI компоненты
-│   │   ├── pages/          # Страницы приложения
-│   │   ├── hooks/          # React hooks
-│   │   └── lib/            # Утилиты
-├── server/                 # Express backend
-│   ├── index.ts           # Главный сервер
-│   ├── routes.ts          # API маршруты
-│   └── vite.ts            # Vite middleware
-├── shared/                 # Общие типы и схемы
-├── .specify/              # SDD конфигурация
-└── migrations/            # Database migrations
-```
-
-## 📋 Spec-Driven Development
-
-Проект использует [GitHub Spec Kit](https://github.com/github/spec-kit) для структурированной разработки.
-
-### Основные команды SDD
-
-```bash
-# Установить Specify CLI (если не установлен)
-uv tool install specify-cli --from git+https://github.com/github/spec-kit.git
-
-# Проверить установку
-specify check
-```
-
-### Workflow разработки новых функций
-
-1. **Создать спецификацию**
-   ```
-   /speckit.specify <описание функции>
-   ```
-
-2. **Уточнить требования** (опционально)
-   ```
-   /speckit.clarify
-   ```
-
-3. **Создать план реализации**
-   ```
-   /speckit.plan
-   ```
-
-4. **Сгенерировать задачи**
-   ```
-   /speckit.tasks
-   ```
-
-5. **Реализовать функцию**
-   ```
-   /speckit.implement
-   ```
-
-### Принципы разработки
-
-Смотрите [Конституцию проекта](.specify/memory/constitution.md) для полного описания принципов и стандартов.
-
-## 🎵 Аудио функции
-
-### Поддерживаемые форматы
-- MP3
-- M4A
-- OGG
-- FLAC
-
-### Основные возможности
-- Streaming воспроизведение
-- Bookmarks и resume
-- Контроль скорости (0.5x - 3.0x)
-- Sleep timer
-- Chapter navigation
-- Офлайн режим
-
-## 🧪 Тестирование
-
-```bash
-# Запустить тесты
-pnpm test
-
-# Тесты с покрытием
-pnpm test:coverage
-
-# E2E тесты
-pnpm test:e2e
-```
-
-## 📦 Сборка и деплой
-
-```bash
-# Сборка для production
-pnpm run build
-
-# Запуск production сервера
-pnpm start
-```
-
-## 🤝 Вклад в проект
-
-1. Создайте feature branch от `main`
-2. Используйте SDD workflow для разработки
-3. Убедитесь, что все тесты проходят
-4. Создайте Pull Request с описанием изменений
-
-## 📄 Лицензия
-
-Этот проект лицензирован по лицензии MIT - подробности смотрите в файле [LICENSE](LICENSE).
-
-MIT License - смотрите [LICENSE](LICENSE) файл для деталей.
+MIT

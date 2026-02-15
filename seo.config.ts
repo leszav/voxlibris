@@ -7,7 +7,7 @@ export const seoConfig = {
   ogImage: "/og-image.png",
   socialLinks: {
     vk: "https://vk.com/voxlibris",
-    telegram: undefined,
+    telegram: "https://t.me/voxli_ru",
   },
 };
 
