@@ -1,6 +1,9 @@
 import express from 'express';
 import { jwtAuth, requireActiveUser } from './jwt-middleware.js';
 import { storage } from './repositories/index.js';
+import { db } from './db.js';
+import { clubs } from '../shared/schema.js';
+import { eq } from 'drizzle-orm';
 import type { InsertClub, ClubMemberRole, InsertClubInvitation, Club, UserRole } from '../shared/schema.js';
 import { emailService } from './services/email-service.js';
 import crypto from 'node:crypto';
@@ -1083,8 +1086,11 @@ router.post('/:clubId/transfer-ownership', jwtAuth, async (req, res) => {
     // 2. Новый участник становится владельцем
     await storage.updateMemberRole(clubId, newOwnerId, 'owner');
 
-    // 3. Обновляем owner_id в таблице clubs
-    await storage.updateClub(clubId, { ownerId: newOwnerId });
+    // 3. Обновляем owner_id в таблице clubs напрямую через Drizzle
+    await db
+      .update(clubs)
+      .set({ ownerId: newOwnerId })
+      .where(eq(clubs.id, clubId));
 
     const club = await storage.getClub(clubId);
     
