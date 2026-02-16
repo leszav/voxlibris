@@ -71,7 +71,7 @@ export default function MyClubs() {
         </div>
 
         <Tabs defaultValue="all" className="w-full">
-          <TabsList className="grid w-full max-w-md grid-cols-3">
+          <TabsList className="w-full max-w-md grid grid-cols-2 md:grid-cols-3 overflow-x-auto whitespace-nowrap">
             <TabsTrigger value="all">
               Все ({clubs?.length || 0})
             </TabsTrigger>

@@ -1,6 +1,7 @@
 import {
   ArrowLeft,
   Bookmark,
+  Book,
   BookOpen,
   Clock,
   Edit,
@@ -9,7 +10,6 @@ import {
   Loader2,
   LogIn,
   MoreVertical,
-  PlayCircle,
   Trash2,
 } from "lucide-react";
 import { useState } from "react";
@@ -331,10 +331,7 @@ export default function Library() {
                         className="flex-1 sm:flex-none gap-2"
                         onClick={() => handleReadBook(book)}
                       >
-                        <PlayCircle className="w-4 h-4" /> Читать
-                      </Button>
-                      <Button variant="outline" className="flex-1 sm:flex-none">
-                        Подробнее
+                        <Book className="w-4 h-4" /> Читать
                       </Button>
                     </div>
                   </div>

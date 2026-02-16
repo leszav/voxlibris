@@ -74,23 +74,27 @@ function ReaderMainContent({
     return (
       <>
         <ContentRenderer content={currentChapterContent} />
-        <div className="flex justify-between items-center mt-12 pt-8 border-t">
+        <div className="flex flex-wrap justify-between items-center gap-2 mt-12 pt-8 border-t">
           <Button
             variant="outline"
+            size="sm"
             onClick={() => setCurrentChapter(Math.max(1, chapter - 1))}
             disabled={chapter <= 1}
+            className="px-2 sm:px-4 py-1 sm:py-2 text-xs sm:text-sm"
           >
-            ← Предыдущая глава
+            ← Пред.
           </Button>
-          <span className="text-sm text-muted-foreground">
+          <span className="text-xs sm:text-sm text-muted-foreground order-first sm:order-none w-full sm:w-auto text-center sm:text-left">
             Глава {chapter} из {bookData.totalChapters}
           </span>
           <Button
             variant="outline"
+            size="sm"
             onClick={() => setCurrentChapter(Math.min(bookData.totalChapters, chapter + 1))}
             disabled={chapter >= bookData.totalChapters}
+            className="px-2 sm:px-4 py-1 sm:py-2 text-xs sm:text-sm"
           >
-            Следующая глава →
+            След. →
           </Button>
         </div>
         {chapter === bookData.totalChapters && (
@@ -140,6 +144,20 @@ function useApplyReaderSettings() {
         console.error('Ошибка применения настроек:', e);
       }
     }
+  }, []);
+
+  // Cleanup при размонтировании - удаляем классы и переменные ридера
+  useEffect(() => {
+    return () => {
+      document.body.classList.remove("reader-light", "reader-dark", "reader-sepia");
+      const root = document.documentElement;
+      root.style.removeProperty("--reader-font-size");
+      root.style.removeProperty("--reader-font-family");
+      root.style.removeProperty("--reader-line-height");
+      root.style.removeProperty("--reader-text-align");
+      root.style.removeProperty("--reader-content-width");
+      delete root.dataset.readerTheme;
+    };
   }, []);
 }
 
@@ -391,16 +409,17 @@ export function ReaderWorkspace({ bookId: propBookId, clubId, params }: Readonly
     <div className="flex flex-col h-screen bg-background text-foreground overflow-hidden">
       {/* Top Navigation Bar */}
       <header className="border-b bg-background relative z-50">
-        <div className="flex items-center justify-between p-4">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-4 p-2 sm:p-4">
           <div className="flex items-center gap-2">
             {/* Возврат в библиотеку */}
             <Button
               variant="ghost"
               size="sm"
               onClick={() => (globalThis.location.href = '/library')}
+              className="text-xs sm:text-sm"
             >
-              <ArrowLeft className="w-4 h-4 mr-2" />
-              Библиотека
+              <ArrowLeft className="w-4 h-4 mr-1 sm:mr-2" />
+              <span className="hidden xs:inline">Библиотека</span>
             </Button>
 
             {/* Оглавление */}
@@ -412,12 +431,13 @@ export function ReaderWorkspace({ bookId: propBookId, clubId, params }: Readonly
                   setTocOpen(!tocOpen);
                   setSettingsOpen(false);
                 }}
+                className="text-xs sm:text-sm"
               >
-                <List className="w-4 h-4 mr-2" />
-                Оглавление
+                <List className="w-4 h-4 mr-1 sm:mr-2" />
+                <span className="hidden xs:inline">Оглавление</span>
               </Button>
               {tocOpen && (
-                <div className="absolute left-0 top-full mt-2 w-80 max-h-96 overflow-y-auto bg-background text-foreground border rounded-md shadow-lg p-4 z-50">
+                <div className="absolute left-0 top-full mt-2 w-[85vw] max-w-[320px] sm:w-80 max-h-96 overflow-y-auto bg-background text-foreground border rounded-md shadow-lg p-3 sm:p-4 z-50">
                   <h3 className="font-semibold text-lg mb-4">Оглавление</h3>
                   <div className="space-y-2">
                     {bookData.isPersonalBook && bookData.chapters ? (
@@ -453,15 +473,20 @@ export function ReaderWorkspace({ bookId: propBookId, clubId, params }: Readonly
           </div>
 
           {/* Правая часть - информация о книге и действия */}
-          <div className="flex items-center gap-4">
-            <div className="text-right">
-              <h1 className="text-lg font-semibold">
+          <div className="flex items-center gap-2 sm:gap-4 ml-auto">
+            <div className="text-right hidden sm:block">
+              <h1 className="text-sm sm:text-lg font-semibold truncate max-w-[120px] sm:max-w-none">
                 {bookData.title}
               </h1>
-              <p className="text-sm text-muted-foreground">
+              <p className="text-xs text-muted-foreground truncate max-w-[120px] sm:max-w-none">
                 {bookData.isPersonalBook && bookData.chapters 
                   ? bookData.chapters.find((ch: Chapter) => ch.chapterNumber === currentChapter)?.title || `Глава ${currentChapter}`
                   : `Глава ${currentChapter}`}
+              </p>
+            </div>
+            <div className="text-left sm:hidden">
+              <p className="text-xs text-muted-foreground">
+                Глава {currentChapter}
               </p>
             </div>
 
@@ -475,11 +500,12 @@ export function ReaderWorkspace({ bookId: propBookId, clubId, params }: Readonly
                   setTocOpen(false);
                 }}
                 title="Настройки чтения"
+                className="w-8 h-8 sm:w-10 sm:h-10"
               >
-                <Settings className="w-5 h-5" />
+                <Settings className="w-4 h-4 sm:w-5 sm:h-5" />
               </Button>
               {settingsOpen && (
-                <div className="absolute right-0 top-full mt-2 w-80 bg-background text-foreground border rounded-md shadow-lg p-4 z-50">
+                <div className="absolute right-0 top-full mt-2 w-[85vw] max-w-[320px] sm:w-80 bg-background text-foreground border rounded-md shadow-lg p-3 sm:p-4 z-50">
                   <ReaderControls bookId={bookId} />
                 </div>
               )}
@@ -509,9 +535,9 @@ export function ReaderWorkspace({ bookId: propBookId, clubId, params }: Readonly
         className="flex-1 overflow-y-auto bg-background text-foreground"
       >
         <div 
-          className="mx-auto px-8 py-12"
+          className="mx-auto px-3 sm:px-4 md:px-8 py-8 sm:py-12"
           style={{
-            width: "var(--reader-content-width, 80%)"
+            width: "var(--reader-content-width, 90%)"
           }}
         >
           {renderMainContent()}

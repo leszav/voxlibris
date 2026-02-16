@@ -478,7 +478,7 @@ function CreatePlanForm({
         />
       </div>
 
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div>
           <Label htmlFor="orderIndex">Порядок</Label>
           <Input
@@ -583,7 +583,7 @@ function EditPlanForm({
         />
       </div>
 
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div>
           <Label htmlFor="edit-orderIndex">Порядок</Label>
           <Input

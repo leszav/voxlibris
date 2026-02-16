@@ -78,24 +78,22 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
                     <Link href="/catalog" className="text-lg font-medium hover:text-primary transition-colors">
                       Клубы
                     </Link>
-                    <Link href="/readers" className="text-lg font-medium hover:text-primary transition-colors">
-                      Топ Чтецов
-                    </Link>
                     <Link href="/library" className="text-lg font-medium hover:text-primary transition-colors">
                       Моя Библиотека
                     </Link>
                     <Link href="/clubs" className="text-lg font-medium hover:text-primary transition-colors">
                       Мои Клубы
                     </Link>
-                    <Link href="/reader-studio" className="text-lg font-medium hover:text-primary transition-colors text-accent">
-                      Студия Чтеца
+                    <Link href="/profile" className="text-lg font-medium hover:text-primary transition-colors flex items-center gap-2">
+                      <User className="h-4 w-4" />
+                      Профиль
                     </Link>
-                    <Link href="/pricing" className="text-lg font-medium hover:text-primary transition-colors">
-                      Тарифы
-                    </Link>
-                    <Link href="/become-reader" className="text-lg font-medium hover:text-primary transition-colors">
-                      Стать чтецом
-                    </Link>
+                    {user?.role === "admin" && (
+                      <Link href="/admin" className="text-lg font-medium hover:text-primary transition-colors flex items-center gap-2 text-accent">
+                        <Settings className="h-4 w-4" />
+                        Админка
+                      </Link>
+                    )}
                   </nav>
                 </div>
               </SheetContent>

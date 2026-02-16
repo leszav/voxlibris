@@ -229,13 +229,13 @@ export function ClubSettingsModal({ club }: ClubSettingsModalProps) {
           Настройки
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-2xl md:max-w-3xl max-h-[85vh] flex flex-col">
+      <DialogContent className="w-[95vw] max-w-[95%] sm:max-w-2xl md:max-w-3xl max-h-[85vh] flex flex-col">
         <DialogHeader>
           <DialogTitle>Настройки клуба</DialogTitle>
         </DialogHeader>
 
         <Tabs defaultValue="appearance" className="flex-1 flex flex-col min-h-0">
-          <TabsList className="grid grid-cols-4 w-full shrink-0">
+          <TabsList className="grid grid-cols-2 md:grid-cols-4 w-full shrink-0 overflow-x-auto whitespace-nowrap">
             <TabsTrigger value="appearance">Оформление</TabsTrigger>
             <TabsTrigger value="welcome">Приветствие</TabsTrigger>
             <TabsTrigger value="rules">Правила</TabsTrigger>

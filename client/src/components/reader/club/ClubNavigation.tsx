@@ -51,29 +51,31 @@ export function ClubNavigation({
   }
 
   return (
-    <div className="flex justify-between items-center mt-12 pt-8 border-t">
+    <div className="flex flex-wrap justify-between items-center gap-2 mt-8 sm:mt-12 pt-4 sm:pt-8 border-t">
       <Button
         variant="outline"
+        size="sm"
         onClick={handlePreviousChapter}
         disabled={currentChapter <= 1}
-        className="flex items-center gap-2"
+        className="flex items-center gap-1 px-2 sm:px-3 py-1 sm:py-2 text-xs sm:text-sm"
       >
-        <ChevronLeft className="w-4 h-4" />
-        Предыдущая глава
+        <ChevronLeft className="w-3 h-3 sm:w-4 sm:h-4" />
+        <span className="hidden xs:inline">Пред.</span>
       </Button>
       
-      <span className="text-sm text-muted-foreground">
+      <span className="text-xs sm:text-sm text-muted-foreground order-first sm:order-none w-full sm:w-auto text-center">
         Глава {currentChapter} из {totalChapters || chapters.length}
       </span>
       
       <Button
         variant="outline"
+        size="sm"
         onClick={handleNextChapter}
         disabled={currentChapter >= chapters.length}
-        className="flex items-center gap-2"
+        className="flex items-center gap-1 px-2 sm:px-3 py-1 sm:py-2 text-xs sm:text-sm"
       >
-        Следующая глава
-        <ChevronRight className="w-4 h-4" />
+        <span className="hidden xs:inline">След.</span>
+        <ChevronRight className="w-3 h-3 sm:w-4 sm:h-4" />
       </Button>
     </div>
   );

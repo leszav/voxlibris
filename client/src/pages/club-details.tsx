@@ -396,7 +396,7 @@ interface ClubHeaderProps {
 
 function ClubHeader({ club, members, isOwner, isMember, removeMemberMutation, handleLeaveClub, setLocation, user, onOwnershipTransferred }: ClubHeaderProps) {
   return (
-    <div className="relative h-64 md:h-80 w-full overflow-hidden">
+    <div className="relative h-48 md:h-64 lg:h-80 w-full overflow-hidden">
       {club.coverImage ? (
         <img
           src={club.coverImage}
@@ -524,7 +524,7 @@ function CurrentBookCard({ club, clubId, isOwner, isMember, handleDeleteBook, de
       {club.book ? (
         <div className="space-y-4">
           <div className="flex gap-4">
-            <div className="w-24 shrink-0 rounded-md overflow-hidden shadow-md">
+            <div className="w-20 md:w-24 shrink-0 rounded-md overflow-hidden shadow-md">
               {club.book.coverUrl ? (
                 <img
                   src={club.book.coverUrl}
@@ -572,7 +572,7 @@ function CurrentBookCard({ club, clubId, isOwner, isMember, handleDeleteBook, de
               </Button>
             )}
             {isOwner && (
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <EditClubBookDialog
                   book={{
                     id: club.book.id,
@@ -750,7 +750,7 @@ interface ClubContentTabsProps {
 function ClubContentTabs({ clubId, isMember, isOwner, currentUserId, settings, scheduleItems }: ClubContentTabsProps) {
   return (
     <Tabs defaultValue="about" className="w-full">
-      <TabsList className="w-full justify-start border-b rounded-none h-auto p-0 bg-transparent gap-6">
+      <TabsList className="w-full justify-start border-b rounded-none h-auto p-0 bg-transparent gap-2 sm:gap-6 overflow-x-auto whitespace-nowrap">
         <TabsTrigger
           value="about"
           className="rounded-none border-b-2 border-transparent data-[state=active]:border-accent data-[state=active]:bg-transparent data-[state=active]:shadow-none py-3 px-1 font-medium"
@@ -984,7 +984,7 @@ export default function ClubDetails() {
         }}
       />
 
-      <div className="container py-12 px-6 md:px-12 grid grid-cols-1 lg:grid-cols-3 gap-12">
+      <div className="container py-8 px-4 md:px-12 grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6 md:gap-8 lg:gap-12">
         <div className="lg:col-span-1 space-y-8">
           <CurrentBookCard
             club={club}

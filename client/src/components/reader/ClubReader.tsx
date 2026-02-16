@@ -11,7 +11,7 @@ import { ReaderProgressIndicators } from "./ReaderProgressIndicators";
 import { useKeyboardShortcuts, readerShortcuts } from "./useKeyboardShortcuts";
 import { KeyboardHelp } from "./KeyboardHelp";
 import { Button } from "../ui/button";
-import { List, Settings, ArrowLeft, HelpCircle } from "lucide-react";
+import { List, Bookmark, Settings, ArrowLeft, HelpCircle } from "lucide-react";
 import type { Bookmark as BookmarkType } from "@shared/schema";
 import {
   createReaderProgressPayload,
@@ -318,25 +318,27 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
           
           {/* Навигация по главам */}
           {chapters.length > 1 && (
-            <div className="flex justify-between items-center mt-12 pt-8 border-t">
+            <div className="flex flex-wrap justify-between items-center gap-2 mt-12 pt-8 border-t">
               <Button
                 variant="outline"
+                size="sm"
                 onClick={() => changeChapter(Math.max(1, (currentChapter ?? 1) - 1))}
                 disabled={(currentChapter ?? 1) <= 1}
-                className="px-8 py-3 text-base"
+                className="px-3 sm:px-8 py-2 text-xs sm:text-base"
               >
-                ← Предыдущая
+                ← Пред.
               </Button>
-              <span className="text-sm text-muted-foreground">
+              <span className="text-xs sm:text-sm text-muted-foreground order-first sm:order-none w-full sm:w-auto text-center sm:text-left">
                 Глава {currentChapter ?? 1} из {bookData.totalChapters}
               </span>
               <Button
                 variant="outline"
+                size="sm"
                 onClick={() => changeChapter(Math.min(bookData.totalChapters, (currentChapter ?? 1) + 1))}
                 disabled={(currentChapter ?? 1) >= bookData.totalChapters}
-                className="px-8 py-3 text-base"
+                className="px-3 sm:px-8 py-2 text-xs sm:text-base"
               >
-                Следующая →
+                След. →
               </Button>
             </div>
           )}
@@ -364,23 +366,24 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
   return (
     <div className="h-screen flex flex-col bg-background">
       {/* Верхняя панель */}
-      <section className="border-b bg-card p-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
+      <section className="border-b bg-card p-2 sm:p-4">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" onClick={() => globalThis.history.back()}>
               <ArrowLeft className="w-4 h-4" />
             </Button>
-            <div>
-              <h1 className="text-lg font-semibold">{bookData.title}</h1>
-              <p className="text-sm text-muted-foreground">Клубное чтение</p>
+            <div className="min-w-0">
+              <h1 className="text-sm sm:text-lg font-semibold truncate">{bookData.title}</h1>
+              <p className="text-xs text-muted-foreground hidden sm:block">Клубное чтение</p>
             </div>
           </div>
           
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 sm:gap-2">
             <Button
               variant="outline"
               size="sm"
               onClick={() => setTocOpen(!tocOpen)}
+              className="w-8 h-8 sm:w-10 sm:h-10 p-0"
             >
               <List className="w-4 h-4" />
             </Button>
@@ -390,15 +393,29 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
               size="sm"
               onClick={() => setSettingsOpen(!settingsOpen)}
               title="Настройки чтения"
+              className="w-8 h-8 sm:w-10 sm:h-10 p-0"
             >
               <Settings className="w-4 h-4" />
             </Button>
+            
+            {/* TODO: раскомментировать когда функционал закладок будет готов
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setBookmarksOpen(!bookmarksOpen)}
+              title="Закладки"
+              className="w-8 h-8 sm:w-10 sm:h-10 p-0"
+            >
+              <Bookmark className="w-4 h-4" />
+            </Button>
+            */}
             
             <Button
               variant="outline"
               size="sm"
               onClick={() => setHelpOpen(true)}
               title="Горячие клавиши"
+              className="w-8 h-8 sm:w-10 sm:h-10 p-0 hidden"
             >
               <HelpCircle className="w-4 h-4" />
             </Button>
@@ -412,10 +429,10 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
           className="fixed inset-0 z-50 flex items-center justify-end pointer-events-none"
         >
           <div
-            className="bg-background border rounded-lg shadow-xl w-full max-w-md max-h-[80vh] pointer-events-auto mr-4"
+            className="bg-background border rounded-lg shadow-xl w-[85vw] max-w-[320px] sm:max-w-md max-h-[80vh] pointer-events-auto mr-2 sm:mr-4"
           >
-            <div className="sticky top-0 bg-background border-b p-4 flex items-center justify-between">
-              <h2 className="text-lg font-semibold">Настройки чтения</h2>
+            <div className="sticky top-0 bg-background border-b p-3 sm:p-4 flex items-center justify-between">
+              <h2 className="text-sm sm:text-lg font-semibold">Настройки</h2>
               <Button
                 variant="ghost"
                 size="sm"
@@ -424,7 +441,7 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
                 ✕
               </Button>
             </div>
-            <div className="p-4">
+            <div className="p-3 sm:p-4">
               <ClubReaderControls clubId={clubId} bookId={bookId} />
             </div>
           </div>
@@ -437,10 +454,10 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
           className="fixed inset-0 z-50 flex items-center justify-end pointer-events-none"
         >
           <div
-            className="bg-background border rounded-lg shadow-xl w-full max-w-md max-h-[80vh] overflow-y-auto pointer-events-auto mr-4 flex flex-col"
+            className="bg-background border rounded-lg shadow-xl w-[85vw] max-w-[320px] sm:max-w-md max-h-[80vh] overflow-y-auto pointer-events-auto mr-2 sm:mr-4 flex flex-col"
           >
-            <div className="sticky top-0 bg-background border-b p-4 flex items-center justify-between flex-none">
-              <h2 className="text-lg font-semibold">Оглавление</h2>
+            <div className="sticky top-0 bg-background border-b p-3 sm:p-4 flex items-center justify-between flex-none">
+              <h2 className="text-sm sm:text-lg font-semibold">Оглавление</h2>
               <Button
                 variant="ghost"
                 size="sm"
@@ -449,7 +466,7 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
                 ✕
               </Button>
             </div>
-            <div className="p-4 flex-1">
+            <div className="p-3 sm:p-4 flex-1">
               <ClubChapterList
                 chapters={chapters}
                 currentChapter={currentChapter || 1}
@@ -471,10 +488,10 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
           className="fixed inset-0 z-50 flex items-center justify-end pointer-events-none"
         >
           <div
-            className="bg-background border rounded-lg shadow-xl w-full max-w-md max-h-[80vh] overflow-y-auto pointer-events-auto mr-4 flex flex-col"
+            className="bg-background border rounded-lg shadow-xl w-[85vw] max-w-[320px] sm:max-w-md max-h-[80vh] overflow-y-auto pointer-events-auto mr-2 sm:mr-4 flex flex-col"
           >
-            <div className="sticky top-0 bg-background border-b p-4 flex items-center justify-between flex-none">
-              <h2 className="text-lg font-semibold">Закладки</h2>
+            <div className="sticky top-0 bg-background border-b p-3 sm:p-4 flex items-center justify-between flex-none">
+              <h2 className="text-sm sm:text-lg font-semibold">Закладки</h2>
               <Button
                 variant="ghost"
                 size="sm"
@@ -483,9 +500,9 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
                 ✕
               </Button>
             </div>
-            <div className="p-4 flex-1">
+            <div className="p-3 sm:p-4 flex-1">
               {bookmarksLoading ? (
-                <LoadingIndicator message="Загрузка закладок..." />
+                <LoadingIndicator message="Загрузка..." />
               ) : (
                 <BookmarksPanel
                   bookId={bookId}
@@ -511,7 +528,7 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
             onScroll={handleScroll}
           >
             <div 
-              className="p-8"
+              className="p-4 sm:p-6 md:p-8"
               style={{
                 fontFamily: 'var(--club-reader-font-family, inherit)',
                 fontSize: `${fontSize}px`,

@@ -69,6 +69,20 @@ export function ReaderControls({ bookId: _bookId }: ReaderControlsProps) {
     document.body.classList.add(`reader-${settings.theme}`);
   };
 
+  // Cleanup при размонтировании - удаляем классы и переменные ридера
+  useEffect(() => {
+    return () => {
+      document.body.classList.remove("reader-light", "reader-dark", "reader-sepia");
+      const root = document.documentElement;
+      root.style.removeProperty("--reader-font-size");
+      root.style.removeProperty("--reader-font-family");
+      root.style.removeProperty("--reader-line-height");
+      root.style.removeProperty("--reader-text-align");
+      root.style.removeProperty("--reader-content-width");
+      root.removeAttribute('data-reader-theme');
+    };
+  }, []);
+
   // Мемоизация для оптимизации
   const updateSetting = useMemo(
     () => (key: keyof ReaderSettings, value: ReaderSettings[typeof key]) => {
