@@ -12,6 +12,7 @@ import { useKeyboardShortcuts, readerShortcuts } from "./useKeyboardShortcuts";
 import { KeyboardHelp } from "./KeyboardHelp";
 import { Button } from "../ui/button";
 import { List, Settings, ArrowLeft, HelpCircle } from "lucide-react";
+import type { Bookmark as BookmarkType } from "@shared/schema";
 import {
   createReaderProgressPayload,
   parseReaderPosition,
