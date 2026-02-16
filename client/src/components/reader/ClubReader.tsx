@@ -11,8 +11,7 @@ import { ReaderProgressIndicators } from "./ReaderProgressIndicators";
 import { useKeyboardShortcuts, readerShortcuts } from "./useKeyboardShortcuts";
 import { KeyboardHelp } from "./KeyboardHelp";
 import { Button } from "../ui/button";
-import { List, Bookmark, Settings, ArrowLeft, HelpCircle } from "lucide-react";
-import type { Bookmark as BookmarkType } from "@shared/schema";
+import { List, Settings, ArrowLeft, HelpCircle } from "lucide-react";
 import {
   createReaderProgressPayload,
   parseReaderPosition,
@@ -24,6 +23,7 @@ import {
 } from "./core/use-reader-progress-sync";
 import { useClubReaderAdapter } from "./core/use-reader-data-adapters";
 import { useReaderSyncState } from "./core/use-reader-sync-state";
+import { ChatWidget } from "@/components/chat/ChatWidget";
 
 interface ClubReaderProps {
   clubId?: string;
@@ -366,9 +366,9 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
   return (
     <div className="h-screen flex flex-col bg-background">
       {/* Верхняя панель */}
-      <section className="border-b bg-card p-2 sm:p-4">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
+      <section className="border-b bg-card p-2 sm:p-4 shrink-0">
+        <div className="flex items-center justify-between gap-2 min-w-0">
+          <div className="flex items-center gap-2 min-w-0">
             <Button variant="outline" size="sm" onClick={() => globalThis.history.back()}>
               <ArrowLeft className="w-4 h-4" />
             </Button>
@@ -378,12 +378,12 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
             </div>
           </div>
           
-          <div className="flex items-center gap-1 sm:gap-2">
+          <div className="flex items-center gap-1 sm:gap-2 shrink-0">
             <Button
               variant="outline"
               size="sm"
               onClick={() => setTocOpen(!tocOpen)}
-              className="w-8 h-8 sm:w-10 sm:h-10 p-0"
+              className="w-8 h-8 sm:w-10 sm:h-10 p-0 shrink-0"
             >
               <List className="w-4 h-4" />
             </Button>
@@ -393,7 +393,7 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
               size="sm"
               onClick={() => setSettingsOpen(!settingsOpen)}
               title="Настройки чтения"
-              className="w-8 h-8 sm:w-10 sm:h-10 p-0"
+              className="w-8 h-8 sm:w-10 sm:h-10 p-0 shrink-0"
             >
               <Settings className="w-4 h-4" />
             </Button>
@@ -555,6 +555,9 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
 
       {/* Справка по горячим клавишам */}
       <KeyboardHelp isOpen={helpOpen} onClose={() => setHelpOpen(false)} />
+
+      {/* Чат клуба */}
+      <ChatWidget clubId={clubId} />
     </div>
   );
 }

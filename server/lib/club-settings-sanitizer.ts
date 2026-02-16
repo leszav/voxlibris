@@ -26,7 +26,7 @@ const CLUB_HTML_SANITIZE_CONFIG = {
     "h6",
   ],
   ALLOWED_ATTR: ["href", "target", "rel"],
-  ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto|tel):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
+  ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto|tel):|[^a-z]|[a-z+.-]+(?:[^a-z+.-:]|$))/i,
   ALLOW_DATA_ATTR: false,
   FORBID_TAGS: ["script", "style", "iframe", "object", "embed", "form", "input", "button", "textarea", "select", "svg", "math"],
   KEEP_CONTENT: true,

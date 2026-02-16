@@ -24,9 +24,11 @@ export function ChatWidget({ clubId, channel = "general", onCleanupDeleted, canC
   const [chatSize, setChatSize] = useState({ width: 335, height: 409 });
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [isIdle, setIsIdle] = useState(false);
   const lastMessageCountRef = useRef(0);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const chatRef = useRef<HTMLDivElement | null>(null);
+  const idleTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const { user } = useAuth();
   const { messages, participants, sendMessage, deleteMessage, connected, client } = useChat({
@@ -49,6 +51,35 @@ export function ChatWidget({ clubId, channel = "general", onCleanupDeleted, canC
     }
     lastMessageCountRef.current = messages.length;
   }, [messages.length, open]);
+
+  // Idle-эффект: чат становится полупрозрачным при неактивности
+  useEffect(() => {
+    const resetIdle = () => {
+      setIsIdle(false);
+      if (idleTimeoutRef.current) {
+        clearTimeout(idleTimeoutRef.current);
+      }
+      idleTimeoutRef.current = setTimeout(() => {
+        setIsIdle(true);
+      }, 3000); // 3 секунды без активности
+    };
+
+    // Следим за активности мыши и клавиатуры
+    window.addEventListener('mousemove', resetIdle);
+    window.addEventListener('keydown', resetIdle);
+    window.addEventListener('click', resetIdle);
+
+    resetIdle();
+
+    return () => {
+      window.removeEventListener('mousemove', resetIdle);
+      window.removeEventListener('keydown', resetIdle);
+      window.removeEventListener('click', resetIdle);
+      if (idleTimeoutRef.current) {
+        clearTimeout(idleTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const handleToggle = () => {
     setOpen((prev) => !prev);
@@ -453,9 +484,9 @@ export function ChatWidget({ clubId, channel = "general", onCleanupDeleted, canC
       {/* Пузырь чата */}
       <Button
         size="icon"
-        className={`h-12 w-12 rounded-full shadow-lg relative transition-transform ${
+        className={`h-12 w-12 rounded-full shadow-lg relative transition-all duration-300 ${
           hasUnread ? "ring-2 ring-primary scale-105" : ""
-        }`}
+        } ${isIdle ? "opacity-30 hover:opacity-100" : "opacity-100"}`}
         variant="default"
         onClick={handleToggle}
       >

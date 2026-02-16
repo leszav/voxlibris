@@ -67,7 +67,7 @@ router.get('/', jwtAuth, async (req, res) => {
 
     const { status, bookType } = req.query;
 
-    let conditions = [eq(bookReadingStatus.userId, userId)];
+    const conditions = [eq(bookReadingStatus.userId, userId)];
 
     // Фильтр по статусу
     if (status && typeof status === 'string') {

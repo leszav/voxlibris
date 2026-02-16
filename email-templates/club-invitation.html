@@ -3,110 +3,163 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Приглашение в книжный клуб — VoxLibris</title>
+  <title>Приглащение в книжный клуб — VoxLibris</title>
+  <!--[if mso]>
+  <style type="text/css">
+    body, table, td, p, a, h1, h2, h3 { font-family: Arial, sans-serif !important; }
+    .email-container { width: 600px !important; }
+  </style>
+  <![endif]-->
   <style>
-    /* Reset */
+    /* Reset для современных клиентов */
     body, table, td, p, a, h1, h2, h3 { margin: 0; padding: 0; }
     table { border-spacing: 0; border-collapse: collapse; }
     img { display: block; border: 0; max-width: 100%; height: auto; }
-    body { font-family: "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; line-height: 1.6; color: #3D2B1F; background: #F5F2ED; }
-    a { color: #8B5A2B; text-decoration: underline; }
-    
-    /* Container */
-    .wrapper { width: 100%; max-width: 600px; margin: 0 auto; padding: 40px 20px; }
-    
-    /* Card */
-    .card { background: #FFFFFF; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 8px rgba(92, 64, 51, 0.08); }
-    
-    /* Header */
-    .header { background: #5C4033; padding: 32px 40px; text-align: center; }
-    .header-icon { width: 48px; height: 48px; margin: 0 auto 12px; background: rgba(255,255,255,0.15); border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 24px; }
-    .header-title { font-family: "Playfair Display", serif; font-size: 24px; font-weight: 600; color: #FFFFFF; margin: 0; }
-    .header-subtitle { font-size: 14px; color: rgba(255,255,255,0.8); margin: 8px 0 0; }
-    
-    /* Body */
-    .body { padding: 40px; }
-    .body h2 { font-family: "Playfair Display", serif; font-size: 20px; font-weight: 600; color: #5C4033; margin: 0 0 16px; }
-    .body p { margin: 0 0 16px; color: #3D2B1F; }
-    .body p:last-child { margin-bottom: 0; }
-    
-    /* Inviter card */
-    .inviter { background: #F7F3ED; border-left: 3px solid #D4A574; padding: 16px 20px; margin: 20px 0; border-radius: 0 8px 8px 0; }
-    
-    /* Club description */
-    .club-desc { color: #8B7355; margin: 12px 0 20px; font-size: 15px; }
-    
-    /* Button */
-    .button { display: inline-block; background: #5C4033; color: #FFFFFF; text-decoration: none; padding: 14px 28px; border-radius: 8px; font-weight: 600; font-size: 15px; }
-    .button:hover { background: #4A3429; }
-    .button-wrap { text-align: center; margin: 28px 0; }
-    
-    /* Info box */
-    .info { background: #F7F3ED; border-radius: 8px; padding: 16px 20px; margin: 20px 0; font-size: 14px; color: #5C4033; }
-    .info a { word-break: break-all; }
-    
-    /* Footer */
-    .footer { padding: 24px 40px; text-align: center; border-top: 1px solid #E8DFD5; background: #F7F3ED; }
-    .footer-logo { font-family: "Playfair Display", serif; font-size: 16px; font-weight: 600; color: #5C4033; margin-bottom: 8px; }
-    .footer-text { font-size: 13px; color: #5C4033; margin: 0; }
-    .footer-link { color: #C49565; }
-    
-    /* Utility */
-    .text-muted { color: #5C4033; }
-    .text-center { text-align: center; }
-    
-    /* Responsive */
-    @media (max-width: 640px) {
-      .wrapper { padding: 20px 16px; }
-      .header { padding: 24px 20px; }
-      .body { padding: 24px 20px; }
-      .footer { padding: 20px; }
+
+    /* Прогрессивное улучшение — только для современных клиентов (не mso) */
+    @media screen and (min-width: 0\0) {
+      .header-bg { background: #5C4033 !important; }
+      .button-bg { background: #5C4033 !important; }
+      .card-radius { border-radius: 12px !important; box-shadow: 0 2px 8px rgba(92, 64, 51, 0.08) !important; }
+      .inviter-bg { background: #F7F3ED !important; border-left: 3px solid #D4A574 !important; }
+      .info-bg { background: #F7F3ED !important; border-radius: 8px !important; }
+      .body-font { font-family: "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important; }
+      .header-font { font-family: "Playfair Display", Georgia, serif !important; }
+    }
+
+    @media only screen and (max-width: 640px) {
+      .wrapper { padding: 20px 16px !important; }
+      .header-padding { padding: 24px 20px !important; }
+      .body-padding { padding: 24px 20px !important; }
+      .footer-padding { padding: 20px !important; }
     }
   </style>
 </head>
-<body>
-  <div style="width: 100%; max-width: 600px; margin: 0 auto; padding: 40px 20px;">
-    <div style="background: #FFFFFF; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 8px rgba(92, 64, 51, 0.08);">
-      <div style="background: #5C4033; padding: 32px 40px; text-align: center;">
-        <div style="width: 48px; height: 48px; margin: 0 auto 12px; background: rgba(255,255,255,0.15); border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 24px;">📚</div>
-        <h1 style="font-family: 'Playfair Display', serif; font-size: 24px; font-weight: 600; color: #FFFFFF; margin: 0;">VoxLibris</h1>
-        <p style="font-size: 14px; color: rgba(255,255,255,0.8); margin: 8px 0 0;">Платформа для книжных клубов</p>
-      </div>
-      
-      <div style="padding: 40px;">
-        <h2 style="font-family: 'Playfair Display', serif; font-size: 20px; font-weight: 600; color: #5C4033; margin: 0 0 16px;">Приглашение в книжный клуб</h2>
-        
-        <p style="margin: 0 0 16px; color: #3D2B1F;">Здравствуйте!</p>
-        
-        <div style="background: #F7F3ED; border-left: 3px solid #D4A574; padding: 16px 20px; margin: 20px 0; border-radius: 0 8px 8px 0;">
-          <strong>{{inviterName}}</strong> приглашает вас присоединиться к клубу «{{clubName}}»
-        </div>
-        
-        <p style="color: #8B7355; margin: 12px 0 20px; font-size: 15px;">{{clubDescription}}</p>
-        
-        <div style="text-align: center; margin: 28px 0;">
-          <a style="display: inline-block; background: #5C4033; color: #FFFFFF; text-decoration: none; padding: 14px 28px; border-radius: 8px; font-weight: 600; font-size: 15px;" href="{{inviteUrl}}">Принять приглашение</a>
-        </div>
-        
-        <div style="background: #F7F3ED; border-radius: 8px; padding: 16px 20px; margin: 20px 0; font-size: 14px; color: #5C4033;">
-          <strong>Срок действия:</strong> приглашение действительно <strong>{{expiresIn}} дней</strong><br>
-          Если вы не ожидали это приглашение — просто проигнорируйте письмо.
-        </div>
-        
-        <p style="color: #5C4033; margin-top: 20px;">
-          Или скопируйте ссылку в браузер:<br>
-          <a href="{{inviteUrl}}" style="word-break: break-all; color: #C49565;">{{inviteUrl}}</a>
-        </p>
-      </div>
-      
-      <div style="padding: 24px 40px; text-align: center; border-top: 1px solid #E8DFD5; background: #F7F3ED;">
-        <div style="font-family: 'Playfair Display', serif; font-size: 16px; font-weight: 600; color: #5C4033; margin-bottom: 8px;">VoxLibris</div>
-        <p style="font-size: 13px; color: #5C4033; margin: 0;">
-          Это автоматическое письмо, отвечать не нужно.<br>
-          <a style="color: #C49565;" href="mailto:support@voxlibris.ru">support@voxlibris.ru</a>
-        </p>
-      </div>
-    </div>
+<body style="margin: 0; padding: 0; background: #F5F2ED; color: #3D2B1F; font-family: Arial, sans-serif;">
+  <!-- Preview text -->
+  <div style="display: none; max-height: 0; overflow: hidden;">
+    {{inviterName}} приглашает вас присоединиться к клубу «{{clubName}}»
   </div>
+
+  <!-- Wrapper table -->
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background: #F5F2ED;">
+    <tr>
+      <td align="center" style="padding: 40px 20px;">
+
+        <!--[if mso | IE]>
+        <table width="600" cellpadding="0" cellspacing="0" border="0" align="center">
+        <tr>
+        <td>
+        <![endif]-->
+
+        <!-- Email container -->
+        <table class="email-container" width="600" cellpadding="0" cellspacing="0" border="0" align="center" style="max-width: 600px; width: 100%; background: #FFFFFF;">
+
+          <!-- Header -->
+          <tr>
+            <td style="background: #5C4033; padding: 32px 40px; text-align: center;">
+              <table width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td align="center">
+                    <div style="width: 48px; height: 48px; margin: 0 auto 12px; background: rgba(255,255,255,0.15); border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 24px;">
+                      📚
+                    </div>
+                    <h1 style="font-family: Georgia, 'Times New Roman', serif; font-size: 24px; font-weight: 600; color: #FFFFFF; margin: 0;">VoxLibris</h1>
+                    <p style="font-family: Arial, sans-serif; font-size: 14px; color: rgba(255,255,255,0.8); margin: 8px 0 0;">Платформа для книжных клубов</p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Body -->
+          <tr>
+            <td style="padding: 40px; font-family: Arial, sans-serif;">
+              <table width="100%" cellpadding="0" cellspacing="0" border="0">
+
+                <!-- Greeting -->
+                <tr>
+                  <td style="padding-bottom: 16px; font-family: Georgia, 'Times New Roman', serif; font-size: 20px; font-weight: 600; color: #5C4033;">
+                    Приглашение в книжный клуб
+                  </td>
+                </tr>
+
+                <!-- Salutation -->
+                <tr>
+                  <td style="padding-bottom: 16px; font-family: Arial, sans-serif; font-size: 15px; color: #3D2B1F;">
+                    Здравствуйте!
+                  </td>
+                </tr>
+
+                <!-- Inviter card -->
+                <tr>
+                  <td style="background: #F7F3ED; border-left: 3px solid #D4A574; padding: 16px 20px; font-family: Arial, sans-serif; font-size: 15px;">
+                    <strong>{{inviterName}}</strong> приглашает вас присоединиться к клубу «{{clubName}}»
+                  </td>
+                </tr>
+
+                <!-- Club description -->
+                <tr>
+                  <td style="padding: 12px 0 20px; font-family: Arial, sans-serif; font-size: 15px; color: #8B7355;">
+                    {{clubDescription}}
+                  </td>
+                </tr>
+
+                <!-- Button -->
+                <tr>
+                  <td align="center" style="padding: 28px 0;">
+                    <!--[if mso]>
+                    <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="{{inviteUrl}}" style="height:44px;v-text-anchor:middle;width:180px;" arcsize="10%" strokecolor="#5C4033" fillcolor="#5C4033">
+                      <w:anchorlock/>
+                      <center style="color:#ffffff;font-family:Arial,sans-serif;font-size:15px;font-weight:bold;">Принять приглашение</center>
+                    </v:roundrect>
+                    <![endif]-->
+                    <!--[if !mso]><!-- -->
+                    <a href="{{inviteUrl}}" style="display: inline-block; background: #5C4033; color: #FFFFFF; text-decoration: none; padding: 14px 28px; border-radius: 8px; font-family: Arial, sans-serif; font-weight: bold; font-size: 15px;">Принять приглашение</a>
+                    <!--<![endif]-->
+                  </td>
+                </tr>
+
+                <!-- Info box -->
+                <tr>
+                  <td style="background: #F7F3ED; padding: 16px 20px; font-family: Arial, sans-serif; font-size: 14px; color: #5C4033;">
+                    <strong>Срок действия:</strong> приглашение действительно <strong>{{expiresIn}} дней</strong><br>
+                    Если вы не ожидали это приглащение — просто проигнорируйте письмо.
+                  </td>
+                </tr>
+
+                <!-- URL link -->
+                <tr>
+                  <td style="padding-top: 20px; font-family: Arial, sans-serif; font-size: 14px; color: #5C4033;">
+                    Или скопируйте ссылку в браузер:<br>
+                    <a href="{{inviteUrl}}" style="color: #C49565; word-break: break-all; text-decoration: underline;">{{inviteUrl}}</a>
+                  </td>
+                </tr>
+
+              </table>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding: 24px 40px; text-align: center; border-top: 1px solid #E8DFD5; background: #F7F3ED; font-family: Arial, sans-serif;">
+              <p style="font-family: Georgia, 'Times New Roman', serif; font-size: 16px; font-weight: 600; color: #5C4033; margin: 0 0 8px;">VoxLibris</p>
+              <p style="font-size: 13px; color: #5C4033; margin: 0;">
+                <a href="https://voxlibris.ru" style="color: #C49565; text-decoration: underline;">voxlibris.ru</a>
+              </p>
+            </td>
+          </tr>
+
+        </table>
+
+        <!--[if mso | IE]>
+        </td>
+        </tr>
+        </table>
+        <![endif]-->
+
+      </td>
+    </tr>
+  </table>
 </body>
 </html>
