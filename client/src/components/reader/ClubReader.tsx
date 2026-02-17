@@ -3,7 +3,7 @@ import { useParams } from "wouter";
 import { useClubBookmarks } from "../../hooks/use-club-reader";
 import { useAnalytics } from "../../hooks/use-analytics";
 import { ClubContentRenderer } from "./club/ClubContentRenderer";
-import { ClubReaderControls } from "./club/ClubReaderControls";
+import { ClubReaderControls, ClubReaderSettings, DEFAULT_CLUB_SETTINGS } from "./club/ClubReaderControls";
 import { ClubChapterList } from "./club/ClubNavigation";
 import { BookmarksPanel } from "./BookmarksPanel";
 import { LoadingIndicator, ChapterLoadingIndicator, ContentLoadingSkeleton } from "./LoadingIndicator";
@@ -68,6 +68,48 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
 
   // Управление шрифтом для горячих клавиш
   const [fontSize, setFontSize] = useState(16);
+
+  // Настройки ридера - загружаем из localStorage
+  const [settings, setSettings] = useState<ClubReaderSettings>(() => {
+    const saved = localStorage.getItem(`clubReaderSettings_${clubId}_${bookId}`);
+    return saved ? JSON.parse(saved) : DEFAULT_CLUB_SETTINGS;
+  });
+
+  // Применение настроек к документу
+  const applyClubSettings = (newSettings: ClubReaderSettings) => {
+    const root = document.documentElement;
+    root.style.setProperty("--club-reader-font-size", `${newSettings.fontSize}px`);
+    root.style.setProperty("--club-reader-font-family", newSettings.fontFamily);
+    root.style.setProperty("--club-reader-line-height", newSettings.lineHeight.toString());
+    root.style.setProperty("--club-reader-text-align", newSettings.textAlign);
+    root.style.setProperty("--club-reader-content-width", `${newSettings.contentWidth}%`);
+    root.setAttribute('data-club-reader-theme', newSettings.theme);
+    document.body.classList.remove("club-reader-light", "club-reader-dark", "club-reader-sepia");
+    document.body.classList.add(`club-reader-${newSettings.theme}`);
+  };
+
+  // Обработчик изменения настроек
+  const handleSettingsChange = (newSettings: ClubReaderSettings) => {
+    setSettings(newSettings);
+    applyClubSettings(newSettings);
+  };
+
+  // Применяем настройки при монтировании и очищаем только при размонтировании ридера
+  useEffect(() => {
+    applyClubSettings(settings);
+    
+    // Cleanup только при полном выходе из ридера
+    return () => {
+      document.body.classList.remove("club-reader-light", "club-reader-dark", "club-reader-sepia");
+      const root = document.documentElement;
+      root.style.removeProperty("--club-reader-font-size");
+      root.style.removeProperty("--club-reader-font-family");
+      root.style.removeProperty("--club-reader-line-height");
+      root.style.removeProperty("--club-reader-text-align");
+      root.style.removeProperty("--club-reader-content-width");
+      root.removeAttribute('data-club-reader-theme');
+    };
+  }, []);
 
   // Загрузка закладок
   const { bookmarks, isLoading: bookmarksLoading } = useClubBookmarks(clubId);
@@ -443,7 +485,12 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
               </Button>
             </div>
             <div className="p-3 sm:p-4">
-              <ClubReaderControls clubId={clubId} bookId={bookId} />
+              <ClubReaderControls
+                clubId={clubId}
+                bookId={bookId}
+                settings={settings}
+                onSettingsChange={handleSettingsChange}
+              />
             </div>
           </div>
         </div>

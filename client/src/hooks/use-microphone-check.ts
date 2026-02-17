@@ -272,7 +272,7 @@ export function useMicrophoneCheck() {
       startLevelMonitoring();
 
       if (import.meta.env.DEV) {
-        console.log('[MicCheck] Microphone initialized');
+        console.warn('[MicCheck] Microphone initialized');
       }
     } catch (err) {
       const message = mapMicError(err);
@@ -381,7 +381,7 @@ export function useMicrophoneCheck() {
       setResult(analysisResult);
 
       if (import.meta.env.DEV) {
-        console.log('[MicCheck] Test completed:', analysisResult);
+        console.warn('[MicCheck] Test completed:', analysisResult);
       }
 
       return { result: analysisResult, audioBlob };

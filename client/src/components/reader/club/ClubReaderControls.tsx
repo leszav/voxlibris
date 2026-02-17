@@ -1,18 +1,18 @@
-import { useState, useEffect, useMemo } from "react";
+import { useMemo } from "react";
 import { Button } from "../../ui/button";
 import { Slider } from "../../ui/slider";
 import { Sun, Moon, Type, AlignJustify } from "lucide-react";
 
-export interface ClubReaderSettings {
+export type ClubReaderSettings = {
   fontSize: number;
   fontFamily: string;
   theme: "light" | "dark" | "sepia";
   lineHeight: number;
   textAlign: "left" | "justify";
   contentWidth: number;
-}
+};
 
-const DEFAULT_CLUB_SETTINGS: ClubReaderSettings = {
+export const DEFAULT_CLUB_SETTINGS: ClubReaderSettings = {
   fontSize: 18,
   fontFamily: "Georgia",
   theme: "light",
@@ -32,65 +32,28 @@ const FONT_FAMILIES = [
 interface ClubReaderControlsProps {
   clubId: string;
   bookId: string;
+  settings: ClubReaderSettings;
+  onSettingsChange: (settings: ClubReaderSettings) => void;
 }
 
-export function ClubReaderControls({ clubId, bookId }: ClubReaderControlsProps) {
-  const [settings, setSettings] = useState<ClubReaderSettings>(() => {
-    const saved = localStorage.getItem(`clubReaderSettings_${clubId}_${bookId}`);
-    return saved ? JSON.parse(saved) : DEFAULT_CLUB_SETTINGS;
-  });
-
-  // Применение настроек при монтировании компонента
-  useEffect(() => {
-    const saved = localStorage.getItem(`clubReaderSettings_${clubId}_${bookId}`);
-    const initialSettings = saved ? JSON.parse(saved) : DEFAULT_CLUB_SETTINGS;
-    applyClubSettings(initialSettings);
-  }, [clubId, bookId]);
-
-  // Сохранение настроек
-  useEffect(() => {
-    localStorage.setItem(`clubReaderSettings_${clubId}_${bookId}`, JSON.stringify(settings));
-    applyClubSettings(settings);
-  }, [settings, clubId, bookId]);
-
-  // Применение настроек к документу
-  const applyClubSettings = (settings: ClubReaderSettings) => {
-    const root = document.documentElement;
-    root.style.setProperty("--club-reader-font-size", `${settings.fontSize}px`);
-    root.style.setProperty("--club-reader-font-family", settings.fontFamily);
-    root.style.setProperty("--club-reader-line-height", settings.lineHeight.toString());
-    root.style.setProperty("--club-reader-text-align", settings.textAlign);
-    root.style.setProperty("--club-reader-content-width", `${settings.contentWidth}%`);
-
-    // Тема - применяем через data-атрибут для клубного ридера
-    root.setAttribute('data-club-reader-theme', settings.theme);
-    
-    // Удаляем старые классы и добавляем новые для клубного ридера
-    document.body.classList.remove("club-reader-light", "club-reader-dark", "club-reader-sepia");
-    document.body.classList.add(`club-reader-${settings.theme}`);
-  };
-
-  // Cleanup при размонтировании - удаляем классы и переменные клубного ридера
-  useEffect(() => {
-    return () => {
-      document.body.classList.remove("club-reader-light", "club-reader-dark", "club-reader-sepia");
-      const root = document.documentElement;
-      root.style.removeProperty("--club-reader-font-size");
-      root.style.removeProperty("--club-reader-font-family");
-      root.style.removeProperty("--club-reader-line-height");
-      root.style.removeProperty("--club-reader-text-align");
-      root.style.removeProperty("--club-reader-content-width");
-      root.removeAttribute('data-club-reader-theme');
-    };
-  }, []);
-
+export function ClubReaderControls({ clubId, bookId, settings, onSettingsChange }: ClubReaderControlsProps) {
   // Мемоизация для оптимизации
   const updateSetting = useMemo(
     () => (key: keyof ClubReaderSettings, value: ClubReaderSettings[typeof key]) => {
-      setSettings((prev) => ({ ...prev, [key]: value }));
+      const newSettings = { ...settings, [key]: value };
+      // Сохраняем в localStorage
+      localStorage.setItem(`clubReaderSettings_${clubId}_${bookId}`, JSON.stringify(newSettings));
+      // Уведомляем родителя
+      onSettingsChange(newSettings);
     },
-    []
+    [settings, clubId, bookId, onSettingsChange]
   );
+
+  // Сброс настроек
+  const resetSettings = () => {
+    localStorage.setItem(`clubReaderSettings_${clubId}_${bookId}`, JSON.stringify(DEFAULT_CLUB_SETTINGS));
+    onSettingsChange(DEFAULT_CLUB_SETTINGS);
+  };
 
   return (
     <div className="space-y-4 sm:space-y-6">
@@ -239,7 +202,7 @@ export function ClubReaderControls({ clubId, bookId }: ClubReaderControlsProps) 
       <Button
         variant="outline"
         size="sm"
-        onClick={() => setSettings(DEFAULT_CLUB_SETTINGS)}
+        onClick={resetSettings}
         className="w-full mt-4"
       >
         Сбросить настройки

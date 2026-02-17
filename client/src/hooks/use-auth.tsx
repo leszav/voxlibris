@@ -31,7 +31,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const isAuthenticated = !!user;
 
   // Безопасное управление состоянием без localStorage
-  const cacheUser = (userData: User | null) => {
+  const cacheUser = () => {
     // Убрано кэширование в localStorage по соображениям безопасности
     // httpOnly cookies обеспечивают безопасность, localStorage создает XSS уязвимости
   };
@@ -54,7 +54,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       // Токен автоматически передается через cookie и Authorization header
       const response = await authAPI.getCurrentUser();
       setUser(response.user);
-      cacheUser(response.user);
+      cacheUser();
       hasExplicitLogoutRef.current = false;
     } catch (error: unknown) {
       if (import.meta.env.DEV) {
@@ -70,7 +70,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
           errorMessage.includes('Недействительный токен')) {
         authAPI.clearTokens();
         setUser(null);
-        cacheUser(null);
+        cacheUser();
       }
       // При других ошибках (сеть, таймаут) - оставляем кэшированного user
     } finally {
@@ -82,13 +82,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
     try {
       const response = await authAPI.login({ username, password, rememberMe });
       setUser(response.user);
-      cacheUser(response.user);
+      cacheUser();
       hasExplicitLogoutRef.current = false;
     } catch (error) {
       // Очищаем состояние при неудачном входе
       authAPI.clearTokens();
       setUser(null);
-      cacheUser(null);
+      cacheUser();
       throw error;
     }
   };
@@ -104,13 +104,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
       if (inviteToken) payload.invite = inviteToken;
       const response = await authAPI.register(payload);
       setUser(response.user);
-      cacheUser(response.user);
+      cacheUser();
       hasExplicitLogoutRef.current = false;
     } catch (error) {
       // Очищаем состояние при неудачной регистрации
       authAPI.clearTokens();
       setUser(null);
-      cacheUser(null);
+      cacheUser();
       throw error;
     }
   };
@@ -121,7 +121,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     hasExplicitLogoutRef.current = true;
     authAPI.clearTokens();
     setUser(null);
-    cacheUser(null);
+    cacheUser();
 
     void authAPI.logout().catch((error) => {
       if (import.meta.env.DEV) {
@@ -156,7 +156,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       if (err?.response?.status === 401 || err?.response?.status === 403) {
         authAPI.clearTokens();
         setUser(null);
-        cacheUser(null);
+        cacheUser();
       }
     } finally {
       setIsLoading(false);

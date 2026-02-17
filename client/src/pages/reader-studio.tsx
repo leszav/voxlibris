@@ -310,7 +310,7 @@ export default function ReaderStudio() {
       setMicMuted(false);
       setShowPrepModal(false);
 
-      console.log('[Studio] Reading started successfully');
+      console.warn('[Studio] Reading started successfully');
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Не удалось начать эфир';
       setStreamStartError(message);

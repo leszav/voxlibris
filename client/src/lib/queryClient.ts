@@ -1,5 +1,5 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
-import { getAccessToken, syncTokenFromCookie, isTokenExpired } from "./token-store";
+import { getAccessToken, syncTokenFromCookie } from "./token-store";
 
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
@@ -155,25 +155,6 @@ async function handleErrorResponse(res: Response, url?: string): Promise<never> 
   }
   
   throw new Error(text || res.statusText);
-}
-
-// Попытка обновить токен перед запросом
-// Проверяем только если токен есть и истек
-async function tryRefreshTokenBeforeRequest(): Promise<void> {
-  const token = getAccessToken();
-  if (!token) {
-    // Нет токена - пользователь не авторизован, пропускаем проверку
-    return;
-  }
-  
-  if (isTokenExpired(token)) {
-    try {
-      await refreshAccessToken();
-    } catch (error) {
-      console.error('Token refresh failed before request:', error);
-      // При ошибке продолжаем, запрос вернет 401 и повторится
-    }
-  }
 }
 
 // Повторить запрос после обновления токена

@@ -222,8 +222,8 @@ export class AuthService {
    * ВАЖНО: токен отзывается ПЕРЕД проверкой пользователя для предотвращения race condition
    */
   private async performRefreshOperation(
-    refreshToken: string, 
-    tokenRecord: any, 
+    refreshToken: string,
+    tokenRecord: { expiresAt: Date },
     userId: string
   ): Promise<{ newTokens: AuthTokens; sessionType: SessionType } | null> {
     // ШАГ 1: Сначала отзываем старый токен (ПРЕДОТВРАЩАЕТ race condition)

@@ -455,7 +455,6 @@ router.patch('/:id', jwtAuth, async (req, res) => {
     const updates = req.body as Record<string, unknown>;
     // Filter allowed updates
     const allowedUpdates = ['title', 'author', 'description', 'publicationYear', 'genre', 'language'] as const;
-    type AllowedUpdate = typeof allowedUpdates[number];
     const filteredUpdates: Partial<Parameters<typeof storage.updatePersonalBook>[1]> = {};
     for (const key of allowedUpdates) {
         const value = updates[key];

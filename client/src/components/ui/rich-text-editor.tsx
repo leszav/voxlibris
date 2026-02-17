@@ -5,6 +5,7 @@ import { TextStyle } from "@tiptap/extension-text-style";
 import Color from "@tiptap/extension-color";
 import Link from "@tiptap/extension-link";
 import TextAlign from "@tiptap/extension-text-align";
+import { Spoiler } from "./spoiler-extension";
 import { cn } from "@/lib/utils";
 import { modalPrompt } from "@/hooks/use-toast";
 import {
@@ -12,7 +13,7 @@ import {
   List, ListOrdered, Quote, Undo, Redo,
   AlignLeft, AlignCenter, AlignRight,
   Link as LinkIcon, ChevronDown,
-  Heading1
+  Heading1, EyeOff
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -31,10 +32,11 @@ interface RichTextEditorProps {
   onChange?: (content: string) => void;
   className?: string;
   value?: string;
+  maxLength?: number;
 }
 
 export const RichTextEditor = React.forwardRef<RichTextEditorRef, RichTextEditorProps>(
-  ({ initialValue, onChange, className = "", value }, ref) => {
+  ({ initialValue, onChange, className = "", value, maxLength = 3000 }, ref) => {
     const editor = useEditor({
       extensions: [
         StarterKit.configure({
@@ -54,6 +56,7 @@ export const RichTextEditor = React.forwardRef<RichTextEditorRef, RichTextEditor
         TextAlign.configure({
           types: ["heading", "paragraph"],
         }),
+        Spoiler,
       ],
       content: value || initialValue || "",
       editorProps: {
@@ -62,7 +65,15 @@ export const RichTextEditor = React.forwardRef<RichTextEditorRef, RichTextEditor
         },
       },
       onUpdate: ({ editor }) => {
-        onChange?.(editor.getHTML());
+        let content = editor.getHTML();
+        // Ограничиваем длину текста
+        const textContent = editor.getText();
+        if (textContent.length > maxLength) {
+          const truncatedText = textContent.substring(0, maxLength);
+          editor.commands.setContent(truncatedText);
+          content = editor.getHTML();
+        }
+        onChange?.(content);
       },
     });
 
@@ -83,6 +94,10 @@ export const RichTextEditor = React.forwardRef<RichTextEditorRef, RichTextEditor
         editor?.view.focus();
       },
     });
+
+    // Получаем текущую длину текста
+    const currentLength = editor?.getText().length || 0;
+    const isOverLimit = currentLength > maxLength;
 
     useEffect(() => {
       if (typeof ref === "function") {
@@ -177,6 +192,24 @@ export const RichTextEditor = React.forwardRef<RichTextEditorRef, RichTextEditor
             color: hsl(var(--primary));
             text-decoration: underline;
           }
+          .ProseMirror .spoiler-block {
+            background: hsl(var(--muted));
+            border: 1px dashed hsl(var(--border));
+            border-radius: 4px;
+            padding: 8px 12px;
+            margin: 4px 0;
+            position: relative;
+          }
+          .ProseMirror .spoiler-block::before {
+            content: "СПОЙЛЕР";
+            position: absolute;
+            top: 2px;
+            right: 6px;
+            font-size: 10px;
+            color: hsl(var(--muted-foreground));
+            font-weight: 600;
+            text-transform: uppercase;
+          }
         `}</style>
         <div className="flex items-center gap-1 p-2 border-b bg-muted/50 flex-wrap">
           <HeadingDropdown />
@@ -224,6 +257,10 @@ export const RichTextEditor = React.forwardRef<RichTextEditorRef, RichTextEditor
             <AlignRight className="w-4 h-4" />
           </MenuButton>
           <div className="w-px h-6 bg-border mx-1" />
+          <MenuButton onClick={() => editor.chain().focus().toggleSpoiler().run()} active={editor.isActive("spoiler")} title="Спойлер (Ctrl+Shift+S)">
+            <EyeOff className="w-4 h-4" />
+          </MenuButton>
+          <div className="w-px h-6 bg-border mx-1" />
           <MenuButton onClick={() => editor.chain().focus().undo().run()} title="Отменить (Ctrl+Z)">
             <Undo className="w-4 h-4" />
           </MenuButton>
@@ -234,6 +271,11 @@ export const RichTextEditor = React.forwardRef<RichTextEditorRef, RichTextEditor
         <div className="flex-1 overflow-hidden min-h-[200px]">
           <EditorContent editor={editor} />
         </div>
+        {maxLength && (
+          <div className={`px-3 py-1 text-xs border-t ${isOverLimit ? 'text-red-500 bg-red-50' : 'text-muted-foreground'}`}>
+            Символов: {currentLength}/{maxLength}
+          </div>
+        )}
       </div>
     );
   }

@@ -11,6 +11,8 @@ import {
   books,
   clubs,
   bookReadingStatus,
+  type BookReadingStatusRecord,
+  type InsertBookReadingStatus,
   personalBooks,
   clubBooks,
   type ReadingSession,
@@ -641,9 +643,9 @@ export class ReadingRepository extends BaseRepository {
   /**
    * Подготовка данных для обновления существующего статуса
    */
-  private prepareUpdateData(status: 'reading' | 'completed', progress: number, existingStatus: any, completedAt: Date | null) {
-    const updateData: any = {
-      status,
+  private prepareUpdateData(status: 'reading' | 'completed', progress: number, existingStatus: BookReadingStatusRecord, completedAt: Date | null) {
+    const updateData: Partial<BookReadingStatusRecord> & { updatedAt: Date } = {
+      status: status as BookReadingStatusRecord['status'],
       progress,
       updatedAt: new Date()
     };
@@ -658,8 +660,8 @@ export class ReadingRepository extends BaseRepository {
   /**
    * Подготовка данных для создания нового статуса
    */
-  private prepareInsertStatusData(userId: string, bookId: string, bookType: string, status: 'reading' | 'completed', progress: number, completedAt: Date | null) {
-    const insertData: any = {
+  private prepareInsertStatusData(userId: string, bookId: string, bookType: 'personal' | 'club', status: 'reading' | 'completed', progress: number, completedAt: Date | null) {
+    const insertData: InsertBookReadingStatus = {
       userId,
       bookId,
       bookType,

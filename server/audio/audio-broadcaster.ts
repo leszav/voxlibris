@@ -121,12 +121,12 @@ export class AudioBroadcaster {
     this.sessions.set(sessionId, session);
     this.sessionStats.set(sessionId, stats);
     
-    logger.info(`Audio session started: ${sessionId}`, {
+    logger.info({
       clubId,
       readerId,
       bookId,
       config
-    } as any);
+    }, `Audio session started: ${sessionId}`);
   }
   
   /**
@@ -152,9 +152,9 @@ export class AudioBroadcaster {
       stats.listenerCount = session.listeners.size;
     }
     
-    logger.info(`Listener joined: ${socketId} to session ${sessionId}`, {
+    logger.info({
       totalListeners: session.listeners.size
-    } as any);
+    }, `Listener joined: ${socketId} to session ${sessionId}`);
     
     return true;
   }
@@ -173,9 +173,9 @@ export class AudioBroadcaster {
         stats.listenerCount = session.listeners.size;
       }
       
-      logger.info(`Listener left: ${socketId} from session ${sessionId}`, {
+      logger.info({
         totalListeners: session.listeners.size
-      } as any);
+      }, `Listener left: ${socketId} from session ${sessionId}`);
     }
   }
   
@@ -205,12 +205,12 @@ export class AudioBroadcaster {
     }
     
     if (chunk.sequence % 100 === 0) {
-      logger.debug(`Audio chunk broadcasted (sampled)`, {
+      logger.debug({
         sessionId: chunk.sessionId,
         sequence: chunk.sequence,
         size: chunk.data.length,
         listeners: session.listeners.size
-      } as any);
+      }, `Audio chunk broadcasted (sampled)`);
     }
   }
   
@@ -223,11 +223,11 @@ export class AudioBroadcaster {
       session.isActive = false;
       
       const stats = this.sessionStats.get(sessionId);
-      logger.info(`Audio session ended: ${sessionId}`, {
+      logger.info({
         duration: stats?.duration,
         bytesTransferred: stats?.bytesTransferred,
         totalListeners: session.listeners.size
-      } as any);
+      }, `Audio session ended: ${sessionId}`);
       
       // Оставляем краткий retention, затем детерминированно удаляем
       this.scheduleEndedSessionCleanup(sessionId);

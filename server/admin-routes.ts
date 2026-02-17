@@ -8,7 +8,7 @@ import { CryptoService } from './crypto-service.js';
 import type { UserRole, UserStatus, AdminActionType, AdminActionTargetType } from '../shared/schema.js';
 import { db } from './db.js';
 import postgres from 'postgres';
-import { and, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import type { SQL } from 'drizzle-orm';
 import { books, personalBooks, clubBooks, users, clubs, clubMembers } from '../shared/schema.js';
 import { logger } from './lib/logger.js';
@@ -653,7 +653,7 @@ type BookWithSource =
   | ({ source: 'personal_books' } & typeof personalBooks.$inferSelect)
   | ({ source: 'club_books' } & typeof clubBooks.$inferSelect);
 
-function filterBooksByStatus(books: BookWithSource[], status: string): BookWithSource[] {
+function _filterBooksByStatus(books: BookWithSource[], status: string): BookWithSource[] {
   return books.filter(book => {
     if (book.source === 'personal_books' || book.source === 'club_books') {
       if (status === 'active') return !('isDeleted' in book) || !book.isDeleted;
@@ -665,7 +665,7 @@ function filterBooksByStatus(books: BookWithSource[], status: string): BookWithS
 }
 
 // Специализированные форматеры для каждого типа книг (Single Responsibility)
-function formatSystemBookForAdmin(book: { source: 'books' } & typeof books.$inferSelect, usersMap: Map<string, string>) {
+function _formatSystemBookForAdmin(book: { source: 'books' } & typeof books.$inferSelect, usersMap: Map<string, string>) {
   // Explicit status mapping for clarity
   let bookStatus: string;
   if (book.status === 'active') {
@@ -687,7 +687,7 @@ function formatSystemBookForAdmin(book: { source: 'books' } & typeof books.$infe
   };
 }
 
-function formatPersonalBookForAdmin(book: { source: 'personal_books' } & typeof personalBooks.$inferSelect, usersMap: Map<string, string>) {
+function _formatPersonalBookForAdmin(book: { source: 'personal_books' } & typeof personalBooks.$inferSelect, usersMap: Map<string, string>) {
   return {
     uploadedBy: book.userId ? usersMap.get(book.userId) || 'Unknown' : 'System',
     uploadDate: book.uploadedAt.toISOString(),
@@ -699,7 +699,7 @@ function formatPersonalBookForAdmin(book: { source: 'personal_books' } & typeof 
   };
 }
 
-function formatClubBookForAdmin(book: { source: 'club_books' } & typeof clubBooks.$inferSelect, usersMap: Map<string, string>) {
+function _formatClubBookForAdmin(book: { source: 'club_books' } & typeof clubBooks.$inferSelect, usersMap: Map<string, string>) {
   return {
     uploadedBy: book.uploadedByUserId ? usersMap.get(book.uploadedByUserId) || 'Unknown' : 'System',
     uploadDate: book.uploadedAt.toISOString(),
@@ -709,118 +709,6 @@ function formatClubBookForAdmin(book: { source: 'club_books' } & typeof clubBook
     isbn: null,
     downloadCount: 0
   };
-}
-
-// Главная функция-диспетчер (низкая когнитивная сложность)
-function formatBookForAdmin(book: BookWithSource, usersMap: Map<string, string>) {
-  let bookData;
-  
-  switch (book.source) {
-    case 'books':
-      bookData = formatSystemBookForAdmin(book, usersMap);
-      break;
-    case 'personal_books':
-      bookData = formatPersonalBookForAdmin(book, usersMap);
-      break;
-    case 'club_books':
-      bookData = formatClubBookForAdmin(book, usersMap);
-      break;
-    default:
-      bookData = {
-        uploadedBy: 'Unknown',
-        uploadDate: new Date().toISOString(),
-        fileSize: 0,
-        filePath: '',
-        bookStatus: 'pending',
-        isbn: null,
-        downloadCount: 0
-      };
-  }
-
-  return {
-    id: book.id,
-    title: book.title,
-    author: book.author,
-    isbn: bookData.isbn,
-    genre: 'genre' in book ? book.genre : null,
-    cover_url: book.coverUrl || null,
-    file_url: bookData.filePath,
-    status: bookData.bookStatus,
-    uploaded_by: bookData.uploadedBy,
-    upload_date: bookData.uploadDate,
-    file_size: bookData.fileSize,
-    downloads_count: bookData.downloadCount,
-    description: book.description || null,
-    source: book.source,
-    club_id: book.source === 'club_books' && 'clubId' in book ? book.clubId : null,
-  };
-}
-
-// Helper functions to reduce cognitive complexity
-async function fetchAllBooksFromSources(): Promise<BookWithSource[]> {
-  const [allBooks, allPersonalBooks, allClubBooks] = await Promise.all([
-    storage.getBooks(),
-    storage.getAllPersonalBooks(),
-    storage.getAllClubBooks(),
-  ]);
-
-  return [
-    ...allBooks.map(book => ({ ...book, source: 'books' as const })),
-    ...allPersonalBooks.map(book => ({ ...book, source: 'personal_books' as const })),
-    ...allClubBooks.map(book => ({ ...book, source: 'club_books' as const }))
-  ];
-}
-
-function applyBooksFiltering(books: BookWithSource[], search?: string, status?: string): BookWithSource[] {
-  let filtered = books;
-
-  if (search && typeof search === 'string') {
-    const searchStr = search.toLowerCase();
-    filtered = filtered.filter(book =>
-      book.title.toLowerCase().includes(searchStr) ||
-      book.author.toLowerCase().includes(searchStr)
-    );
-  }
-
-  if (status && typeof status === 'string') {
-    filtered = filterBooksByStatus(filtered, status);
-  }
-
-  return filtered;
-}
-
-async function buildUsersMap(booksToFormat: BookWithSource[]): Promise<Map<string, string>> {
-  const userIds = new Set<string>();
-
-  for (const book of booksToFormat) {
-    let userId: string | undefined;
-
-    if (book.source === 'books' && 'uploadedBy' in book) {
-      userId = book.uploadedBy || undefined;
-    } else if (book.source === 'personal_books' && 'userId' in book) {
-      userId = book.userId;
-    } else if (book.source === 'club_books' && 'uploadedByUserId' in book) {
-      userId = book.uploadedByUserId;
-    }
-
-    if (userId) {
-      userIds.add(userId);
-    }
-  }
-
-  if (userIds.size === 0) {
-    return new Map();
-  }
-
-  const usersData = await db
-    .select({
-      id: users.id,
-      username: users.username,
-    })
-    .from(users)
-    .where(inArray(users.id, Array.from(userIds)));
-
-  return new Map(usersData.map((user) => [user.id, user.username]));
 }
 
 // Вспомогательные функции для GET /books - снижение когнитивной сложности
@@ -946,6 +834,54 @@ function calculateBookWindows(counts: { booksCount: number; personalCount: numbe
   };
 }
 
+// Типы для результатов запросов книг
+interface BookQueryResult {
+  id: string;
+  title: string;
+  author: string;
+  isbn: string | null;
+  coverUrl: string | null;
+  fileUrl: string | null;
+  uploadedBy: string | null;
+  uploadedAt: Date | null;
+  createdAt: Date | null;
+  fileSize: number | null;
+  downloadsCount: number | null;
+  description: string | null;
+  status: string;
+}
+
+interface PersonalBookQueryResult {
+  id: string;
+  title: string;
+  author: string;
+  genre: string | null;
+  coverUrl: string | null;
+  fileUrl: string | null;
+  uploadedBy: string | null;
+  uploadedAt: Date;
+  fileSize: number | null;
+  description: string | null;
+  status: string;
+  userId: string | null;
+}
+
+interface ClubBookQueryResult {
+  id: string;
+  title: string;
+  author: string;
+  genre: string | null;
+  coverUrl: string | null;
+  fileUrl: string | null;
+  uploadedBy: string | null;
+  uploadedAt: Date;
+  fileSize: number | null;
+  description: string | null;
+  clubId: string;
+  uploadedByUserId: string | null;
+  status: string;
+}
+
 async function executeBookQueries(
   conditions: BookConditions,
   windows: { booksWindow: BookWindow; personalWindow: BookWindow; clubWindow: BookWindow }
@@ -980,6 +916,7 @@ async function executeBookQueries(
   const personalQuery = db
     .select({
       id: personalBooks.id,
+      userId: personalBooks.userId,
       title: personalBooks.title,
       author: personalBooks.author,
       genre: personalBooks.genre,
@@ -1011,6 +948,7 @@ async function executeBookQueries(
       fileSize: clubBooks.fileSizeBytes,
       description: clubBooks.description,
       clubId: clubBooks.clubId,
+      uploadedByUserId: clubBooks.uploadedByUserId,
       status: sql<string>`CASE
         WHEN ${clubBooks.isDeleted} = true THEN 'blocked'
         ELSE 'active'
@@ -1020,7 +958,7 @@ async function executeBookQueries(
     .leftJoin(users, eq(clubBooks.uploadedByUserId, users.id))
     .orderBy(desc(clubBooks.createdAt));
 
-  let getBooksRows: Promise<any[]>;
+  let getBooksRows: Promise<BookQueryResult[]>;
   if (booksWindow.take > 0) {
     getBooksRows = booksWhere 
       ? booksQuery.where(booksWhere).limit(booksWindow.take).offset(booksWindow.skip)
@@ -1029,20 +967,28 @@ async function executeBookQueries(
     getBooksRows = Promise.resolve([]);
   }
 
-  let getPersonalRows: Promise<any[]>;
+  let getPersonalRows: Promise<PersonalBookQueryResult[]>;
   if (personalWindow.take > 0) {
-    getPersonalRows = personalWhere
+    getPersonalRows = (personalWhere
       ? personalQuery.where(personalWhere).limit(personalWindow.take).offset(personalWindow.skip)
-      : personalQuery.limit(personalWindow.take).offset(personalWindow.skip);
+      : personalQuery.limit(personalWindow.take).offset(personalWindow.skip)
+    ).then(rows => rows.map(row => ({
+      ...row,
+      uploadedBy: row.uploadedBy ?? null
+    })));
   } else {
     getPersonalRows = Promise.resolve([]);
   }
 
-  let getClubRows: Promise<any[]>;
+  let getClubRows: Promise<ClubBookQueryResult[]>;
   if (clubWindow.take > 0) {
-    getClubRows = clubWhere
+    getClubRows = (clubWhere
       ? clubQuery.where(clubWhere).limit(clubWindow.take).offset(clubWindow.skip)
-      : clubQuery.limit(clubWindow.take).offset(clubWindow.skip);
+      : clubQuery.limit(clubWindow.take).offset(clubWindow.skip)
+    ).then(rows => rows.map(row => ({
+      ...row,
+      uploadedByUserId: row.uploadedByUserId ?? null
+    })));
   } else {
     getClubRows = Promise.resolve([]);
   }
@@ -1050,7 +996,7 @@ async function executeBookQueries(
   return Promise.all([getBooksRows, getPersonalRows, getClubRows]);
 }
 
-function formatBookResults(booksRows: any[], personalRows: any[], clubRows: any[]) {
+function formatBookResults(booksRows: BookQueryResult[], personalRows: PersonalBookQueryResult[], clubRows: ClubBookQueryResult[]) {
   return [
     ...booksRows.map((book) => ({
       id: book.id,
@@ -1061,8 +1007,8 @@ function formatBookResults(booksRows: any[], personalRows: any[], clubRows: any[
       cover_url: book.coverUrl || null,
       file_url: book.fileUrl || '',
       status: book.status,
-      uploaded_by: book.uploadedBy || 'System',
-      upload_date: (book.uploadedAt || book.createdAt).toISOString(),
+      uploaded_by: book.uploadedBy ?? 'System',
+      upload_date: (book.uploadedAt || book.createdAt)?.toISOString() ?? new Date().toISOString(),
       file_size: book.fileSize || 0,
       downloads_count: book.downloadsCount || 0,
       description: book.description || null,
@@ -1078,7 +1024,7 @@ function formatBookResults(booksRows: any[], personalRows: any[], clubRows: any[
       cover_url: book.coverUrl || null,
       file_url: book.fileUrl || '',
       status: book.status,
-      uploaded_by: book.uploadedBy || 'System',
+      uploaded_by: book.uploadedBy ?? 'System',
       upload_date: book.uploadedAt.toISOString(),
       file_size: book.fileSize || 0,
       downloads_count: 0,
@@ -1095,7 +1041,7 @@ function formatBookResults(booksRows: any[], personalRows: any[], clubRows: any[
       cover_url: book.coverUrl || null,
       file_url: book.fileUrl || '',
       status: book.status,
-      uploaded_by: book.uploadedBy || 'System',
+      uploaded_by: book.uploadedBy ?? 'System',
       upload_date: book.uploadedAt.toISOString(),
       file_size: book.fileSize || 0,
       downloads_count: 0,

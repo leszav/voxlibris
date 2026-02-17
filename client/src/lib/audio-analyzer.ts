@@ -27,7 +27,7 @@ export class AudioAnalyzer {
     const bufferLength = this.analyser.frequencyBinCount;
     this.dataArray = new Uint8Array(new ArrayBuffer(bufferLength));
     
-    console.log('[AudioAnalyzer] Initialized successfully');
+    console.warn('[AudioAnalyzer] Initialized successfully');
   }
   
   getLevel(): number {
@@ -83,6 +83,6 @@ export class AudioAnalyzer {
     this.analyser = null;
     this.dataArray = null;
     
-    console.log('[AudioAnalyzer] Destroyed');
+    console.warn('[AudioAnalyzer] Destroyed');
   }
 }

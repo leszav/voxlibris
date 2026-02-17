@@ -4,9 +4,10 @@ import { logger } from "./lib/logger.js";
 import { AudioBroadcaster } from "./audio/audio-broadcaster.js";
 import { authService } from "./auth-service.js";
 import type { AudioChunk } from "./audio/types.js";
-import type { 
-  SessionPositionUpdate, 
-  ListenerUpdate 
+import type { AudioSessionConfig } from "./audio/types.js";
+import type {
+  SessionPositionUpdate,
+  ListenerUpdate
 } from "../shared/schema.js";
 
 interface AuthenticatedSocket extends Socket {
@@ -278,7 +279,7 @@ export function setupWebSocketHandlers(io: SocketIOServer) {
     // ========== AUDIO STREAMING HANDLERS ==========
     
     // Чтец начинает аудио-сессию
-    socket.on("audio:start_session", async (data: { sessionId: string; clubId: string; bookId: string; config?: any }) => {
+    socket.on("audio:start_session", async (data: { sessionId: string; clubId: string; bookId: string; config?: AudioSessionConfig }) => {
       try {
         if (!socket.userId) {
           socket.emit("error", { message: "User not authenticated" });

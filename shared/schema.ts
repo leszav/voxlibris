@@ -1012,11 +1012,12 @@ export const clubBookmarks = pgTable("club_bookmarks", {
 });
 
 // Обсуждения клуба (доска обсуждений)
-export const clubDiscussions: any = pgTable("club_discussions", {
+export const clubDiscussions = pgTable("club_discussions", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   clubId: varchar("club_id").notNull().references(() => clubs.id, { onDelete: "cascade" }),
   userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   content: text("content").notNull(),
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Drizzle limitation for self-referencing tables
   parentId: varchar("parent_id").references((): any => clubDiscussions.id, { onDelete: "cascade" }), // для ответов
   quotedContent: text("quoted_content"), // цитируемое сообщение для ответов
   isWarning: boolean("is_warning").notNull().default(false), // предупреждение от владельца

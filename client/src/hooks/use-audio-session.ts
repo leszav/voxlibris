@@ -192,14 +192,14 @@ export function useAudioSession({ role, userId }: AudioSessionOptions) {
 
     socket.on('connect', () => {
       if (import.meta.env.DEV) {
-        console.log('[AudioSession] Connected to server');
+        console.warn('[AudioSession] Connected to server');
       }
       setError(null);
     });
 
     socket.on('disconnect', () => {
       if (import.meta.env.DEV) {
-        console.log('[AudioSession] Disconnected from server');
+        console.warn('[AudioSession] Disconnected from server');
       }
       setError('Соединение с аудио-сервером разорвано');
       setIsStreaming(false);
@@ -208,7 +208,7 @@ export function useAudioSession({ role, userId }: AudioSessionOptions) {
 
     socket.on('audio:session_started', (data: { sessionId: string }) => {
       if (import.meta.env.DEV) {
-        console.log('[AudioSession] Session started:', data.sessionId);
+        console.warn('[AudioSession] Session started:', data.sessionId);
       }
       setIsStreaming(true);
       setError(null);
@@ -216,7 +216,7 @@ export function useAudioSession({ role, userId }: AudioSessionOptions) {
 
     socket.on('audio:session_joined', (data: { sessionId: string; listenerCount: number }) => {
       if (import.meta.env.DEV) {
-        console.log('[AudioSession] Joined session:', data);
+        console.warn('[AudioSession] Joined session:', data);
       }
       setIsListening(true);
       setListenerCount(data.listenerCount);
@@ -225,7 +225,7 @@ export function useAudioSession({ role, userId }: AudioSessionOptions) {
 
     socket.on('audio:session_ended', (data: { sessionId: string }) => {
       if (import.meta.env.DEV) {
-        console.log('[AudioSession] Session ended:', data.sessionId);
+        console.warn('[AudioSession] Session ended:', data.sessionId);
       }
       setIsStreaming(false);
       setIsListening(false);
@@ -246,7 +246,7 @@ export function useAudioSession({ role, userId }: AudioSessionOptions) {
       socket.on('audio:chunk', (chunk: { data: ArrayBuffer; timestamp: number; sequence: number }) => {
         // Здесь будет воспроизведение через AudioPlayer
         if (import.meta.env.DEV && chunk.sequence % 200 === 0) {
-          console.log('[AudioSession] Received audio chunk:', chunk.sequence, chunk.timestamp, chunk.data.byteLength);
+          console.warn('[AudioSession] Received audio chunk:', chunk.sequence, chunk.timestamp, chunk.data.byteLength);
         }
       });
     }
@@ -389,7 +389,7 @@ export function useAudioSession({ role, userId }: AudioSessionOptions) {
       setIsStreaming(true);
 
       if (import.meta.env.DEV) {
-        console.log('[AudioSession] Started streaming:', sessionId);
+        console.warn('[AudioSession] Started streaming:', sessionId);
       }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Не удалось получить доступ к микрофону';
@@ -412,7 +412,7 @@ export function useAudioSession({ role, userId }: AudioSessionOptions) {
       sessionIdRef.current = sessionId;
 
       if (import.meta.env.DEV) {
-        console.log('[AudioSession] Started listening to:', sessionId);
+        console.warn('[AudioSession] Started listening to:', sessionId);
       }
     }
   }, [role]);
@@ -431,7 +431,7 @@ export function useAudioSession({ role, userId }: AudioSessionOptions) {
     setIsListening(false);
 
     if (import.meta.env.DEV) {
-      console.log('[AudioSession] Stopped listening');
+      console.warn('[AudioSession] Stopped listening');
     }
   }, []);
 

@@ -1,14 +1,18 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
 import { Card } from "@/components/ui/card";
+import { Textarea } from "@/components/ui/textarea";
+import { RichTextEditor, type RichTextEditorRef } from "@/components/ui/rich-text-editor";
+import { HtmlContentRenderer } from "@/components/ui/html-content-renderer";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { MessageCircle, Reply, Trash2, AlertTriangle, Send, Loader2 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { ru } from "date-fns/locale";
+
+const MAX_CHARS = 3000;
 
 interface ClubDiscussionMessage {
   id: string;
@@ -34,7 +38,19 @@ interface ClubDiscussionBoardProps {
   readonly currentUserId: string;
 }
 
-export function ClubDiscussionBoard({ clubId, isOwner, currentUserId }: Readonly<ClubDiscussionBoardProps>) {
+// Компонент для рендеринга HTML-контента сообщений
+function MessageContent({ content }: Readonly<{ content: string }>) {
+  // Если контент содержит HTML-теги, используем HtmlContentRenderer
+  if (content.includes('<') && content.includes('>')) {
+    return <HtmlContentRenderer content={content} className="text-sm" />;
+  }
+  
+  // Иначе рендерим как обычный текст
+  return <p className="text-sm whitespace-pre-wrap">{content}</p>;
+}
+
+
+export function ClubDiscussionBoard({ clubId, isOwner }: Readonly<ClubDiscussionBoardProps>) {
   const [newMessage, setNewMessage] = useState("");
   const [replyingTo, setReplyingTo] = useState<ClubDiscussionMessage | null>(null);
   const [replyContent, setReplyContent] = useState("");
@@ -42,6 +58,8 @@ export function ClubDiscussionBoard({ clubId, isOwner, currentUserId }: Readonly
   const [showWarningDialog, setShowWarningDialog] = useState(false);
   const [messageToWarn, setMessageToWarn] = useState<ClubDiscussionMessage | null>(null);
   const [messageToDelete, setMessageToDelete] = useState<ClubDiscussionMessage | null>(null);
+  const newMessageEditorRef = useRef<RichTextEditorRef>(null);
+  const replyEditorRef = useRef<RichTextEditorRef>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -49,14 +67,14 @@ export function ClubDiscussionBoard({ clubId, isOwner, currentUserId }: Readonly
   const { data: discussions = [], isLoading } = useQuery<ClubDiscussionMessage[]>({
     queryKey: ["club-discussions", clubId],
     queryFn: () => apiRequest(`/api/clubs/${clubId}/discussions`),
-    refetchInterval: 5000, // Обновляем каждые 5 секунд
+    refetchInterval: 5000,
   });
 
   // Сортируем сообщения: новые первыми
   const sortedDiscussions = [...discussions].sort((a, b) => {
     const aTime = new Date(a.createdAt).getTime();
     const bTime = new Date(b.createdAt).getTime();
-    return bTime - aTime; // Новые сверху
+    return bTime - aTime;
   });
 
   // Создать новое сообщение
@@ -143,8 +161,10 @@ export function ClubDiscussionBoard({ clubId, isOwner, currentUserId }: Readonly
   });
 
   const handleSendMessage = () => {
-    if (!newMessage.trim()) return;
-    createMessageMutation.mutate(newMessage.trim());
+    const content = newMessageEditorRef.current?.getContent();
+    if (!content?.trim()) return;
+    createMessageMutation.mutate(content);
+    newMessageEditorRef.current?.setContent('');
   };
 
   const handleReply = (message: ClubDiscussionMessage) => {
@@ -153,12 +173,15 @@ export function ClubDiscussionBoard({ clubId, isOwner, currentUserId }: Readonly
   };
 
   const handleSendReply = () => {
-    if (!replyingTo || !replyContent.trim()) return;
+    const content = replyEditorRef.current?.getContent();
+    if (!replyingTo || !content?.trim()) return;
     replyMutation.mutate({
       discussionId: replyingTo.id,
-      content: replyContent.trim(),
-      quotedContent: replyingTo.content.substring(0, 100), // Первые 100 символов
+      content: content,
+      quotedContent: replyingTo.content.substring(0, 100),
     });
+    replyEditorRef.current?.setContent('');
+    setReplyingTo(null);
   };
 
   const handleWarn = (message: ClubDiscussionMessage) => {
@@ -183,6 +206,7 @@ export function ClubDiscussionBoard({ clubId, isOwner, currentUserId }: Readonly
     deleteMutation.mutate(messageToDelete.id);
   };
 
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -195,23 +219,17 @@ export function ClubDiscussionBoard({ clubId, isOwner, currentUserId }: Readonly
     <div className="space-y-6">
       {/* Форма нового сообщения */}
       <Card className="p-4">
-        <Textarea
+        <RichTextEditor
+          ref={newMessageEditorRef}
+          placeholder="Напишите сообщение..."
+          maxLength={MAX_CHARS}
           value={newMessage}
-          onChange={(e) => setNewMessage(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-              e.preventDefault();
-              handleSendMessage();
-            }
-          }}
-          placeholder="Написать сообщение..."
-          rows={3}
-          className="mb-3"
+          onChange={setNewMessage}
         />
-        <div className="flex justify-end">
+        <div className="flex justify-end mt-2">
           <Button
             onClick={handleSendMessage}
-            disabled={!newMessage.trim() || createMessageMutation.isPending}
+            disabled={createMessageMutation.isPending}
             size="sm"
           >
             {createMessageMutation.isPending ? (
@@ -268,9 +286,7 @@ export function ClubDiscussionBoard({ clubId, isOwner, currentUserId }: Readonly
                 )}
               </div>
               
-              <p className={`text-sm whitespace-pre-wrap ${message.isWarning ? 'font-bold text-red-700' : ''}`}>
-                {message.content}
-              </p>
+              <MessageContent content={message.content} />
 
               {message.quotedContent && (
                 <div className="mt-2 pl-3 border-l-2 border-muted text-xs text-muted-foreground italic">
@@ -315,12 +331,10 @@ export function ClubDiscussionBoard({ clubId, isOwner, currentUserId }: Readonly
                       </div>
                       {reply.quotedContent && (
                         <div className="mb-1 text-xs text-muted-foreground italic opacity-70">
-                          &gt; {reply.quotedContent}...
+                          {" "}{String.fromCodePoint(62)}{" "}{reply.quotedContent}...
                         </div>
                       )}
-                      <p className={`text-xs ${reply.isWarning ? 'font-bold text-red-700' : ''}`}>
-                        {reply.content}
-                      </p>
+                      <MessageContent content={reply.content} />
                     </div>
                   ))}
                 </div>
@@ -332,23 +346,17 @@ export function ClubDiscussionBoard({ clubId, isOwner, currentUserId }: Readonly
                   <div className="text-xs text-muted-foreground mb-2">
                     Ответ на сообщение {message.user.username}:
                   </div>
-                  <Textarea
-                    value={replyContent}
-                    onChange={(e) => setReplyContent(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-                        e.preventDefault();
-                        handleSendReply();
-                      }
-                    }}
+                  <RichTextEditor
+                    ref={replyEditorRef}
                     placeholder="Ваш ответ..."
-                    rows={2}
-                    className="text-sm"
+                    maxLength={MAX_CHARS}
+                    value={replyContent}
+                    onChange={setReplyContent}
                   />
-                  <div className="flex gap-2">
+                  <div className="flex justify-end gap-2 mt-2">
                     <Button
                       onClick={handleSendReply}
-                      disabled={!replyContent.trim() || replyMutation.isPending}
+                      disabled={replyMutation.isPending}
                       size="sm"
                     >
                       {replyMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Отправить"}
@@ -379,7 +387,7 @@ export function ClubDiscussionBoard({ clubId, isOwner, currentUserId }: Readonly
           </AlertDialogHeader>
           <Textarea
             value={warningMessage}
-            onChange={(e) => setWarningMessage(e.target.value)}
+	          onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setWarningMessage(e.target.value)}
             placeholder="Текст предупреждения..."
             rows={3}
           />

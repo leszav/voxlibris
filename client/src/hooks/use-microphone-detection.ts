@@ -37,7 +37,7 @@ export function useMicrophoneDetection() {
           const permission = await navigator.permissions.query({ name: 'microphone' as PermissionName });
           permissionStatus = permission.state;
           if (import.meta.env.DEV) {
-            console.log('[MicDetection] Permission status:', permissionStatus);
+            console.warn('[MicDetection] Permission status:', permissionStatus);
           }
         } catch (err) {
           if (import.meta.env.DEV) {
@@ -66,7 +66,7 @@ export function useMicrophoneDetection() {
       }
 
       if (import.meta.env.DEV) {
-        console.log('[MicDetection] Found audio inputs:', audioInputs.length);
+        console.warn('[MicDetection] Found audio inputs:', audioInputs.length);
       }
 
       // Пытаемся получить доступ к микрофону (но сразу останавливаем)
@@ -91,7 +91,7 @@ export function useMicrophoneDetection() {
         });
 
         if (import.meta.env.DEV) {
-          console.log('[MicDetection] Microphone is available');
+          console.warn('[MicDetection] Microphone is available');
         }
 
       } catch (micError) {
@@ -152,7 +152,7 @@ export function useMicrophoneDetection() {
     // Слушаем изменения устройств
     const handleDeviceChange = () => {
       if (import.meta.env.DEV) {
-        console.log('[MicDetection] Device change detected, retrying...');
+        console.warn('[MicDetection] Device change detected, retrying...');
       }
       if (detectRetryTimeoutRef.current) {
         clearTimeout(detectRetryTimeoutRef.current);

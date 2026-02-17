@@ -1,16 +1,16 @@
 import express from 'express';
 import { jwtAuth } from './jwt-middleware.js';
 import { db } from './db.js';
-import { bookReadingStatus, userReadingGoals, personalBooks, clubBooks } from '../shared/schema.js';
+import { bookReadingStatus, userReadingGoals, personalBooks, clubBooks, type BookReadingStatusRecord, type InsertBookReadingStatus, type BookType, type BookReadingStatus } from '../shared/schema.js';
 import { eq, and, or, sql, isNull, gte, lte, inArray } from 'drizzle-orm';
 import { logger } from './lib/logger.js';
 
 const router = express.Router();
 
 // Helper functions для уменьшения когнитивной сложности
-function prepareUpdateData(status: string, existingStatus: any, progress: number, notes?: string, rating?: number) {
-  const updateData: any = {
-    status,
+function prepareUpdateData(status: string, existingStatus: BookReadingStatusRecord, progress: number, notes?: string, rating?: number) {
+  const updateData: Partial<BookReadingStatusRecord> & { updatedAt: Date } = {
+    status: status as BookReadingStatusRecord['status'],
     progress,
     updatedAt: new Date(),
   };
@@ -31,11 +31,11 @@ function prepareUpdateData(status: string, existingStatus: any, progress: number
 }
 
 function prepareInsertData(userId: string, bookId: string, bookType: string, status: string, progress: number, notes?: string, rating?: number) {
-  const insertData: any = {
+  const insertData: InsertBookReadingStatus = {
     userId,
     bookId,
-    bookType,
-    status,
+    bookType: bookType as BookType,
+    status: status as BookReadingStatusRecord['status'],
     progress,
     notes,
     rating,
@@ -71,12 +71,12 @@ router.get('/', jwtAuth, async (req, res) => {
 
     // Фильтр по статусу
     if (status && typeof status === 'string') {
-      conditions.push(eq(bookReadingStatus.status, status as any));
+      conditions.push(eq(bookReadingStatus.status, status as BookReadingStatus));
     }
 
     // Фильтр по типу книги
     if (bookType && typeof bookType === 'string') {
-      conditions.push(eq(bookReadingStatus.bookType, bookType as any));
+      conditions.push(eq(bookReadingStatus.bookType, bookType as BookType));
     }
 
     const statuses = await db
@@ -177,7 +177,7 @@ router.get('/stats/year/:year', jwtAuth, async (req, res) => {
     const result = {
       year,
       completedBooks: Number.parseInt(completedCount?.count || '0'),
-      statusBreakdown: statusStats.reduce((acc: any, stat) => {
+      statusBreakdown: statusStats.reduce((acc: Record<string, number>, stat) => {
         acc[stat.status] = Number.parseInt(stat.count);
         return acc;
       }, {}),
@@ -333,7 +333,7 @@ router.get('/:bookId', jwtAuth, async (req, res) => {
         and(
           eq(bookReadingStatus.userId, userId),
           eq(bookReadingStatus.bookId, bookId),
-          eq(bookReadingStatus.bookType, bookType as any)
+          eq(bookReadingStatus.bookType, bookType as BookType)
         )
       )
       .limit(1);
@@ -436,7 +436,7 @@ router.delete('/:bookId', jwtAuth, async (req, res) => {
         and(
           eq(bookReadingStatus.userId, userId),
           eq(bookReadingStatus.bookId, bookId),
-          eq(bookReadingStatus.bookType, bookType as any)
+          eq(bookReadingStatus.bookType, bookType as BookType)
         )
       );
 
