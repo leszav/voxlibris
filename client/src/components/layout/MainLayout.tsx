@@ -20,7 +20,7 @@ import {
 import { useState, useEffect } from "react";
 import { useAuth } from "@/hooks/use-auth";
 
-export function MainLayout({ children }: { children: React.ReactNode }) {
+export function MainLayout({ children }: { readonly children: React.ReactNode }) {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [showComingSoon, setShowComingSoon] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
@@ -42,7 +42,7 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
     }
   }, [showComingSoon]);
 
-  const handlePlaceholderLink = (e: React.MouseEvent<HTMLAnchorElement>) => {
+  const handlePlaceholderLink = (e: React.MouseEvent<HTMLAnchorElement> | React.MouseEvent<HTMLButtonElement>) => {
     e.preventDefault();
     setShowComingSoon(true);
   };
@@ -140,13 +140,6 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
             </div>
             
             <div className="flex items-center gap-2">
-              {isAuthenticated && (
-                <Link href="/reader-studio">
-                  <Button variant="ghost" size="sm" className="hidden sm:flex">
-                    Начать чтение
-                  </Button>
-                </Link>
-              )}
               
               {isAuthenticated ? (
                 <DropdownMenu>
@@ -238,16 +231,16 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
           <div>
             <h4 className="font-semibold text-foreground mb-4">Сообщество</h4>
             <ul className="space-y-2 text-sm">
-              <li><a href="#" onClick={handlePlaceholderLink} className="hover:text-primary cursor-pointer">Правила</a></li>
+              <li><button type="button" onClick={handlePlaceholderLink} className="hover:text-primary cursor-pointer">Правила</button></li>
               <li><Link href="/become-reader" className="hover:text-primary">Стать чтецом</Link></li>
-              <li><a href="#" onClick={handlePlaceholderLink} className="hover:text-primary cursor-pointer">Помощь</a></li>
+              <li><button type="button" onClick={handlePlaceholderLink} className="hover:text-primary cursor-pointer">Помощь</button></li>
             </ul>
           </div>
           <div>
             <h4 className="font-semibold text-foreground mb-4">Легал</h4>
             <ul className="space-y-2 text-sm">
-              <li><a href="#" onClick={handlePlaceholderLink} className="hover:text-primary cursor-pointer">Приватность</a></li>
-              <li><a href="#" onClick={handlePlaceholderLink} className="hover:text-primary cursor-pointer">Условия</a></li>
+              <li><button type="button" onClick={handlePlaceholderLink} className="hover:text-primary cursor-pointer">Приватность</button></li>
+              <li><button type="button" onClick={handlePlaceholderLink} className="hover:text-primary cursor-pointer">Условия</button></li>
             </ul>
           </div>
         </div>

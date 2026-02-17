@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { MessageCircle, X, Minimize2, Trash2, Eraser, Smile } from "lucide-react";
 import { useChat } from "@/hooks/use-chat";
 import { useAuth } from "@/hooks/use-auth";
-import { modalConfirm } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
@@ -65,16 +64,16 @@ export function ChatWidget({ clubId, channel = "general", onCleanupDeleted, canC
     };
 
     // Следим за активности мыши и клавиатуры
-    window.addEventListener('mousemove', resetIdle);
-    window.addEventListener('keydown', resetIdle);
-    window.addEventListener('click', resetIdle);
+    globalThis.addEventListener('mousemove', resetIdle);
+    globalThis.addEventListener('keydown', resetIdle);
+    globalThis.addEventListener('click', resetIdle);
 
     resetIdle();
 
     return () => {
-      window.removeEventListener('mousemove', resetIdle);
-      window.removeEventListener('keydown', resetIdle);
-      window.removeEventListener('click', resetIdle);
+      globalThis.removeEventListener('mousemove', resetIdle);
+      globalThis.removeEventListener('keydown', resetIdle);
+      globalThis.removeEventListener('click', resetIdle);
       if (idleTimeoutRef.current) {
         clearTimeout(idleTimeoutRef.current);
       }
@@ -99,19 +98,11 @@ export function ChatWidget({ clubId, channel = "general", onCleanupDeleted, canC
 
   const handleCleanupDeleted = async () => {
     if (!onCleanupDeleted) return;
-    const confirmed = await modalConfirm({
-      title: "Очистить удалённые сообщения?",
-      description: "Очистить все удалённые сообщения из чата? Это действие необратимо.",
-      confirmLabel: "Очистить",
-      cancelLabel: "Отмена",
-      variant: "destructive",
-    });
-    if (confirmed) {
-      await onCleanupDeleted();
-      // Перезагружаем историю чата после очистки
-      if (client) {
-        client.loadHistory({ clubId, channel, offset: 0, limit: 50 });
-      }
+    // Тихая очистка без модалки подтверждения
+    await onCleanupDeleted();
+    // Перезагружаем историю чата после очистки
+    if (client) {
+      client.loadHistory({ clubId, channel, offset: 0, limit: 50 });
     }
   };
 

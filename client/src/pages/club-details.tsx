@@ -335,17 +335,6 @@ function useClubActions({
 
   const handleCleanupChat = async (olderThanDays: number) => {
     if (!isOwner) return;
-    const confirmed = await modalConfirm({
-      title: "Очистка удалённых сообщений",
-      description:
-        olderThanDays > 0
-          ? `Очистить все удалённые сообщения чата старше ${olderThanDays} дней? Это действие необратимо.`
-          : "Очистить ВСЕ удалённые сообщения чата (включая свежие)? Это действие необратимо.",
-      confirmLabel: "Очистить",
-      cancelLabel: "Отмена",
-      variant: "destructive",
-    });
-    if (!confirmed) return;
 
     try {
       const res = await fetch(

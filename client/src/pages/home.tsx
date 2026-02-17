@@ -55,10 +55,9 @@ export default function Home() {
                 Найти клуб
               </Button>
             </Link>
-            {/* DEMO LINK */}
-            <Link href="/reader-studio">
-              <Button size="lg" variant="outline" className="rounded-full px-8 h-12 text-base font-medium bg-white/10 text-white border-white/20 hover:bg-white/20 backdrop-blur-sm hover:scale-105 transition-transform">
-                Начать читать (Демо)
+            <Link href="/library">
+              <Button size="lg" variant="outline" className="rounded-full px-8 h-12 text-base font-medium bg-white/5 hover:bg-white/10 backdrop-blur-sm hover:scale-105 transition-transform border-2">
+                В библиотеку
               </Button>
             </Link>
           </div>
@@ -148,11 +147,11 @@ export default function Home() {
               
               <div className="space-y-4 pt-4">
                 {[
-                  { title: "Вступите в клуб", desc: "Выберите жанр и найдите группу по душе." },
-                  { title: "Слушайте в эфире", desc: "Подключайтесь к живым чтениям от лучших чтецов." },
-                  { title: "Обсуждайте", desc: "Общайтесь в чате и делитесь мыслями по ходу сюжета." }
+                  { id: "join-club", title: "Вступите в клуб", desc: "Выберите жанр и найдите группу по душе." },
+                  { id: "listen-live", title: "Слушайте в эфире", desc: "Подключайтесь к живым чтениям от лучших чтецов." },
+                  { id: "discuss", title: "Обсуждайте", desc: "Общайтесь в чате и делитесь мыслями по ходу сюжета." }
                 ].map((item, i) => (
-                  <div key={i} className="flex gap-4">
+                  <div key={item.id} className="flex gap-4">
                     <div className="h-10 w-10 rounded-full bg-background border flex items-center justify-center shrink-0 font-serif font-bold text-accent shadow-sm">
                       {i + 1}
                     </div>
@@ -169,12 +168,14 @@ export default function Home() {
               <div className="aspect-square rounded-2xl bg-card border shadow-2xl p-8 rotate-3 hover:rotate-0 transition-transform duration-500">
                 <div className="h-full w-full rounded-xl bg-gradient-to-br from-primary/5 via-accent/5 to-secondary/10 flex items-center justify-center border border-dashed border-primary/20">
                    <div className="text-center space-y-6 p-6">
-                     <ReadingDreamIllustration className="w-32 h-32 mx-auto text-primary/60" />
-                     <p className="font-serif text-xl italic text-primary/80 leading-relaxed">
-                       "Чтение — это окно в тысячи миров, дверь к свободе и крылья для души."
-                       <span className="block text-sm mt-2 text-primary/50">— Максим Горький</span>
-                     </p>
-                   </div>
+                      <ReadingDreamIllustration className="w-32 h-32 mx-auto text-primary/60" />
+                      <blockquote className="font-serif text-xl italic text-primary/80 leading-relaxed">
+                        "Чтение — это окно в тысячи миров, дверь к свободе и крылья для души."
+                        <footer className="block text-sm mt-2 text-primary/50">
+                          — Максим Горький
+                        </footer>
+                      </blockquote>
+                    </div>
                 </div>
               </div>
             </div>

@@ -57,7 +57,6 @@ export function ClubDiscussionBoard({ clubId, isOwner }: Readonly<ClubDiscussion
   const [warningMessage, setWarningMessage] = useState("");
   const [showWarningDialog, setShowWarningDialog] = useState(false);
   const [messageToWarn, setMessageToWarn] = useState<ClubDiscussionMessage | null>(null);
-  const [messageToDelete, setMessageToDelete] = useState<ClubDiscussionMessage | null>(null);
   const newMessageEditorRef = useRef<RichTextEditorRef>(null);
   const replyEditorRef = useRef<RichTextEditorRef>(null);
   const { toast } = useToast();
@@ -149,7 +148,6 @@ export function ClubDiscussionBoard({ clubId, isOwner }: Readonly<ClubDiscussion
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["club-discussions", clubId] });
-      setMessageToDelete(null);
     },
     onError: (error: Error) => {
       toast({
@@ -198,12 +196,8 @@ export function ClubDiscussionBoard({ clubId, isOwner }: Readonly<ClubDiscussion
   };
 
   const handleDelete = (message: ClubDiscussionMessage) => {
-    setMessageToDelete(message);
-  };
-
-  const confirmDelete = () => {
-    if (!messageToDelete) return;
-    deleteMutation.mutate(messageToDelete.id);
+    // Удаляем без модалки - тихая очистка
+    deleteMutation.mutate(message.id);
   };
 
 
@@ -404,27 +398,6 @@ export function ClubDiscussionBoard({ clubId, isOwner }: Readonly<ClubDiscussion
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Диалог удаления */}
-      <AlertDialog open={!!messageToDelete} onOpenChange={(open) => !open && setMessageToDelete(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Удалить сообщение?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Это действие нельзя отменить. Сообщение будет удалено вместе со всеми ответами.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Отмена</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={confirmDelete}
-              disabled={deleteMutation.isPending}
-              className="bg-red-600 hover:bg-red-700"
-            >
-              {deleteMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Удалить"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 }
