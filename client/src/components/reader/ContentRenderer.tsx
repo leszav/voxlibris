@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import DOMPurify from "dompurify";
 
 interface ContentRendererProps {
-  content: string;
+  readonly content: string;
 }
 
 export function ContentRenderer({ content }: ContentRendererProps) {
@@ -31,7 +31,7 @@ export function ContentRenderer({ content }: ContentRendererProps) {
         fontSize: "var(--reader-font-size, 18px)",
         fontFamily: "var(--reader-font-family, Georgia)",
         lineHeight: "var(--reader-line-height, 1.8)",
-        textAlign: "justify",
+        textAlign: "justify" as const,
       }}
       dangerouslySetInnerHTML={{ __html: sanitizedContent }}
     />

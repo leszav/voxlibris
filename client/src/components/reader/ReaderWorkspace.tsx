@@ -115,7 +115,8 @@ function ReaderMainContent({
 }
 
 function useApplyReaderSettings() {
-  useEffect(() => {
+  // Функция для применения настроек из localStorage
+  const applyStoredSettings = () => {
     const saved = localStorage.getItem("readerSettings");
     if (!saved) return;
 
@@ -144,21 +145,27 @@ function useApplyReaderSettings() {
         console.error('Ошибка применения настроек:', e);
       }
     }
+  };
+
+  // Применяем настройки при монтировании
+  useEffect(() => {
+    applyStoredSettings();
   }, []);
 
-  // Cleanup при размонтировании - удаляем классы и переменные ридера
+  // Отслеживаем изменения в localStorage (например, при изменении настроек в панели)
   useEffect(() => {
-    return () => {
-      document.body.classList.remove("reader-light", "reader-dark", "reader-sepia");
-      const root = document.documentElement;
-      root.style.removeProperty("--reader-font-size");
-      root.style.removeProperty("--reader-font-family");
-      root.style.removeProperty("--reader-line-height");
-      root.style.removeProperty("--reader-text-align");
-      root.style.removeProperty("--reader-content-width");
-      delete root.dataset.readerTheme;
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === "readerSettings" && e.newValue) {
+        applyStoredSettings();
+      }
     };
+
+    globalThis.addEventListener("storage", handleStorageChange);
+    return () => globalThis.removeEventListener("storage", handleStorageChange);
   }, []);
+
+  // Cleanup при размонтировании - НЕ удаляем настройки, они должны сохраняться
+  // при закрытии панели настроек
 }
 
 function useTrackReaderAnalytics({
@@ -534,8 +541,8 @@ export function ReaderWorkspace({ bookId: propBookId, clubId, params }: Readonly
         onScroll={scheduleProgressSave}
         className="flex-1 overflow-y-auto bg-background text-foreground"
       >
-        <div 
-          className="mx-auto px-3 sm:px-4 md:px-8 py-8 sm:py-12"
+        <div
+          className="mx-auto px-3 sm:px-4 md:px-8 py-8 sm:py-12 reader-text-align"
           style={{
             width: "var(--reader-content-width, 90%)"
           }}

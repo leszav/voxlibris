@@ -30,7 +30,7 @@ const FONT_FAMILIES = [
 ];
 
 interface ReaderControlsProps {
-  bookId: string;
+  readonly bookId: string;
 }
 
 export function ReaderControls({ bookId: _bookId }: ReaderControlsProps) {
@@ -62,26 +62,16 @@ export function ReaderControls({ bookId: _bookId }: ReaderControlsProps) {
     root.style.setProperty("--reader-content-width", `${settings.contentWidth}%`);
 
     // Тема - применяем через data-атрибут для всей страницы
-    root.setAttribute('data-reader-theme', settings.theme);
+    (root.dataset as Record<string, string>).readerTheme = settings.theme;
     
     // Удаляем старые классы и добавляем новые
     document.body.classList.remove("reader-light", "reader-dark", "reader-sepia");
     document.body.classList.add(`reader-${settings.theme}`);
   };
 
-  // Cleanup при размонтировании - удаляем классы и переменные ридера
-  useEffect(() => {
-    return () => {
-      document.body.classList.remove("reader-light", "reader-dark", "reader-sepia");
-      const root = document.documentElement;
-      root.style.removeProperty("--reader-font-size");
-      root.style.removeProperty("--reader-font-family");
-      root.style.removeProperty("--reader-line-height");
-      root.style.removeProperty("--reader-text-align");
-      root.style.removeProperty("--reader-content-width");
-      root.removeAttribute('data-reader-theme');
-    };
-  }, []);
+  // Cleanup при размонтировании НЕ удаляем CSS переменные
+  // Они должны сохраняться между открытиями панели настроек
+  // и очищаются только при уходе со страницы ридера
 
   // Мемоизация для оптимизации
   const updateSetting = useMemo(
@@ -98,7 +88,7 @@ export function ReaderControls({ bookId: _bookId }: ReaderControlsProps) {
       {/* Размер шрифта */}
       <div className="space-y-2">
         <div className="flex items-center justify-between">
-          <label className="text-sm flex items-center">
+          <label htmlFor="font-size-slider" className="text-sm flex items-center">
             <Type className="w-4 h-4 mr-2" />
             Размер шрифта
           </label>
@@ -107,6 +97,7 @@ export function ReaderControls({ bookId: _bookId }: ReaderControlsProps) {
           </span>
         </div>
         <Slider
+          id="font-size-slider"
           value={[settings.fontSize]}
           onValueChange={(value) => updateSetting("fontSize", value[0])}
           min={12}
@@ -118,7 +109,7 @@ export function ReaderControls({ bookId: _bookId }: ReaderControlsProps) {
 
       {/* Шрифт */}
       <div className="space-y-2">
-        <label className="text-sm">Шрифт</label>
+        <span className="text-sm">Шрифт</span>
         <div className="grid grid-cols-2 gap-2">
           {FONT_FAMILIES.map((font) => (
             <Button
@@ -137,7 +128,7 @@ export function ReaderControls({ bookId: _bookId }: ReaderControlsProps) {
       {/* Межстрочный интервал */}
       <div className="space-y-2">
         <div className="flex items-center justify-between">
-          <label className="text-sm flex items-center">
+          <label htmlFor="line-height-slider" className="text-sm flex items-center">
             <AlignJustify className="w-4 h-4 mr-2" />
             Интервал
           </label>
@@ -146,6 +137,7 @@ export function ReaderControls({ bookId: _bookId }: ReaderControlsProps) {
           </span>
         </div>
         <Slider
+          id="line-height-slider"
           value={[settings.lineHeight]}
           onValueChange={(value) => updateSetting("lineHeight", value[0])}
           min={1.2}
@@ -158,12 +150,13 @@ export function ReaderControls({ bookId: _bookId }: ReaderControlsProps) {
       {/* Ширина текста */}
       <div className="space-y-2">
         <div className="flex items-center justify-between">
-          <label className="text-sm">Ширина текста</label>
+          <label htmlFor="content-width-slider" className="text-sm">Ширина текста</label>
           <span className="text-sm text-muted-foreground">
             {settings.contentWidth}%
           </span>
         </div>
         <Slider
+          id="content-width-slider"
           value={[settings.contentWidth]}
           onValueChange={(value) => updateSetting("contentWidth", value[0])}
           min={60}
@@ -175,7 +168,7 @@ export function ReaderControls({ bookId: _bookId }: ReaderControlsProps) {
 
       {/* Тема */}
       <div className="space-y-2">
-        <label className="text-sm">Тема</label>
+        <span className="text-sm">Тема</span>
         <div className="flex gap-2">
           <Button
             variant={settings.theme === "light" ? "secondary" : "outline"}
@@ -208,7 +201,7 @@ export function ReaderControls({ bookId: _bookId }: ReaderControlsProps) {
 
       {/* Выравнивание */}
       <div className="space-y-2">
-        <label className="text-sm">Выравнивание</label>
+        <span className="text-sm">Выравнивание</span>
         <div className="flex gap-2">
           <Button
             variant={settings.textAlign === "left" ? "secondary" : "outline"}

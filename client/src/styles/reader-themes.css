@@ -34,6 +34,11 @@ body.reader-sepia {
   scroll-behavior: smooth;
 }
 
+/* Reader container alignment */
+.reader-text-align {
+  text-align: var(--reader-text-align, justify);
+}
+
 .reader-content p {
   margin-bottom: 1em;
 }
