@@ -1,5 +1,5 @@
 import { Link, useLocation } from "wouter";
-import { Search, User, Menu, Settings, Construction } from "lucide-react";
+import { Search, User, Menu, Settings, Construction, LogOut } from "lucide-react";
 import { Logo } from "@/components/logo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,15 +17,20 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { FeedbackModal } from "@/components/ui/feedback-modal";
 import { useState, useEffect } from "react";
 import { useAuth } from "@/hooks/use-auth";
+import { isImpersonating, getImpersonatedUsername, exitImpersonation } from "@/lib/token-store";
 
 export function MainLayout({ children }: { readonly children: React.ReactNode }) {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [showComingSoon, setShowComingSoon] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [showFeedback, setShowFeedback] = useState(false);
   const [, setLocation] = useLocation();
-  const { user, isAuthenticated, logout } = useAuth();
+  const { user, isAuthenticated, logout, refetchUser } = useAuth();
+  const [impersonating, setImpersonating] = useState(isImpersonating());
+  const [impersonatedUser, setImpersonatedUser] = useState(getImpersonatedUsername());
 
   useEffect(() => {
     if (!isAuthenticated && isLoggingOut) {
@@ -55,6 +60,14 @@ export function MainLayout({ children }: { readonly children: React.ReactNode })
     setLocation("/");
   };
 
+  const handleExitImpersonation = async () => {
+    exitImpersonation();
+    setImpersonating(false);
+    setImpersonatedUser(null);
+    await refetchUser();
+    setLocation("/admin/users");
+  };
+
   return (
     <div className="min-h-screen bg-background font-sans text-foreground flex flex-col">
       <header className="sticky top-0 z-50 w-full border-b bg-background/80 backdrop-blur-md supports-[backdrop-filter]:bg-background/60">
@@ -79,16 +92,25 @@ export function MainLayout({ children }: { readonly children: React.ReactNode })
                       Клубы
                     </Link>
                     <Link href="/library" className="text-lg font-medium hover:text-primary transition-colors">
-                      Моя Библиотека
+                      {impersonating ? `Моя Библиотека (как ${impersonatedUser})` : "Моя Библиотека"}
                     </Link>
                     <Link href="/clubs" className="text-lg font-medium hover:text-primary transition-colors">
-                      Мои Клубы
+                      {impersonating ? `Мои Клубы (как ${impersonatedUser})` : "Мои Клубы"}
                     </Link>
                     <Link href="/profile" className="text-lg font-medium hover:text-primary transition-colors flex items-center gap-2">
                       <User className="h-4 w-4" />
-                      Профиль
+                      {impersonating ? `Профиль (как ${impersonatedUser})` : "Профиль"}
                     </Link>
-                    {user?.role === "admin" && (
+                    {impersonating && (
+                      <button
+                        onClick={handleExitImpersonation}
+                        className="text-lg font-medium hover:text-primary transition-colors flex items-center gap-2 text-orange-600"
+                      >
+                        <LogOut className="h-4 w-4" />
+                        Выйти из профиля {impersonatedUser}
+                      </button>
+                    )}
+                    {user?.role === "admin" && !impersonating && (
                       <Link href="/admin" className="text-lg font-medium hover:text-primary transition-colors flex items-center gap-2 text-accent">
                         <Settings className="h-4 w-4" />
                         Админка
@@ -152,17 +174,49 @@ export function MainLayout({ children }: { readonly children: React.ReactNode })
                   <DropdownMenuContent align="end">
                     <DropdownMenuItem className="font-medium">
                       {user?.username}
+                      {impersonating && (
+                        <span className="ml-2 text-orange-600 text-sm">
+                          (как {impersonatedUser})
+                        </span>
+                      )}
                     </DropdownMenuItem>
                     <DropdownMenuItem onClick={() => setLocation("/profile")}>
                       Профиль
+                      {impersonating && (
+                        <span className="ml-2 text-muted-foreground text-sm">
+                          (как {impersonatedUser})
+                        </span>
+                      )}
                     </DropdownMenuItem>
                     <DropdownMenuItem onClick={() => setLocation("/library")}>
                       Моя библиотека
+                      {impersonating && (
+                        <span className="ml-2 text-muted-foreground text-sm">
+                          (как {impersonatedUser})
+                        </span>
+                      )}
                     </DropdownMenuItem>
                     <DropdownMenuItem onClick={() => setLocation("/clubs")}>
                       Мои клубы
+                      {impersonating && (
+                        <span className="ml-2 text-muted-foreground text-sm">
+                          (как {impersonatedUser})
+                        </span>
+                      )}
                     </DropdownMenuItem>
-                    {(user?.role === 'admin' || user?.role === 'moderator') && (
+                    {impersonating && (
+                      <>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          onClick={handleExitImpersonation}
+                          className="text-orange-600 hover:text-orange-700"
+                        >
+                          <LogOut className="mr-2 h-4 w-4" />
+                          Выйти из профиля {impersonatedUser}
+                        </DropdownMenuItem>
+                      </>
+                    )}
+                    {(user?.role === 'admin' || user?.role === 'moderator') && !impersonating && (
                       <>
                         <DropdownMenuSeparator />
                         <DropdownMenuItem
@@ -233,7 +287,7 @@ export function MainLayout({ children }: { readonly children: React.ReactNode })
             <ul className="space-y-2 text-sm">
               <li><button type="button" onClick={handlePlaceholderLink} className="hover:text-primary cursor-pointer">Правила</button></li>
               <li><Link href="/become-reader" className="hover:text-primary">Стать чтецом</Link></li>
-              <li><button type="button" onClick={handlePlaceholderLink} className="hover:text-primary cursor-pointer">Помощь</button></li>
+              <li><button type="button" onClick={() => setShowFeedback(true)} className="hover:text-primary cursor-pointer">Обратная связь</button></li>
             </ul>
           </div>
           <div>
@@ -259,6 +313,11 @@ export function MainLayout({ children }: { readonly children: React.ReactNode })
           </p>
         </DialogContent>
       </Dialog>
+
+      <FeedbackModal 
+        isOpen={showFeedback} 
+        onClose={() => setShowFeedback(false)} 
+      />
     </div>
   );
 }

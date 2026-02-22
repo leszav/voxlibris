@@ -6,6 +6,7 @@ import {
   Clock,
   Download,
   KeyRound,
+  LogIn,
   MoreHorizontal,
   RotateCcw,
   Search,
@@ -16,6 +17,7 @@ import {
   UserPlus,
 } from "lucide-react";
 import { useState } from "react";
+import { useLocation } from "wouter";
 import { AdminLayout } from "@/components/layout/AdminLayout";
 import {
   AlertDialog,
@@ -47,7 +49,9 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { apiRequest } from "@/lib/queryClient";
+import { startImpersonation } from "@/lib/token-store";
 import { modalAlert } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/use-auth";
 
 interface User {
   id: string;
@@ -127,6 +131,24 @@ async function resetUserPassword(userId: string): Promise<void> {
   });
 }
 
+interface ImpersonateResponse {
+  accessToken: string;
+  refreshToken: string;
+  user: {
+    id: string;
+    username: string;
+    email: string;
+    role: string;
+    status: string;
+  };
+}
+
+async function impersonateUser(userId: string): Promise<ImpersonateResponse> {
+  return apiRequest<ImpersonateResponse>(`/api/v1/admin/users/${userId}/impersonate`, {
+    method: "POST",
+  });
+}
+
 async function fetchDeletedUsers(): Promise<UsersResponse> {
   const data = await apiRequest<{ users: User[] }>("/api/v1/admin/users/deleted");
   return {
@@ -202,6 +224,8 @@ function UserRoleBadge({ role }: Readonly<{ role: User["role"] }>) {
 
 function UserActionsMenu({ user }: Readonly<{ user: User }>) {
   const queryClient = useQueryClient();
+  const [, setLocation] = useLocation();
+  const { refetchUser } = useAuth();
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [showPermanentDeleteDialog, setShowPermanentDeleteDialog] = useState(false);
   const [showResetDialog, setShowResetDialog] = useState(false);
@@ -277,6 +301,29 @@ function UserActionsMenu({ user }: Readonly<{ user: User }>) {
       void modalAlert({
         title: "Не удалось отправить письмо",
         description: error instanceof Error ? error.message : "Ошибка сброса пароля",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const impersonateMutation = useMutation({
+    mutationFn: (userId: string) => impersonateUser(userId),
+    onSuccess: async (data) => {
+      // Запускаем режим имперсонации
+      startImpersonation(data.accessToken, data.user.username);
+      // Обновляем данные пользователя
+      await refetchUser();
+      // Перенаправляем на главную страницу
+      setLocation("/");
+      void modalAlert({
+        title: "Вход выполнен",
+        description: `Вы вошли как пользователь ${data.user.username}`,
+      });
+    },
+    onError: (error: unknown) => {
+      void modalAlert({
+        title: "Ошибка входа",
+        description: error instanceof Error ? error.message : "Не удалось войти под пользователем",
         variant: "destructive",
       });
     },
@@ -422,6 +469,14 @@ function UserActionsMenu({ user }: Readonly<{ user: User }>) {
           >
             <KeyRound className="h-4 w-4 mr-2" />
             Сбросить пароль
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onClick={() => impersonateMutation.mutate(user.id)}
+            disabled={impersonateMutation.isPending || user.role === 'admin'}
+            className="text-blue-600"
+          >
+            <LogIn className="h-4 w-4 mr-2" />
+            Зайти как...
           </DropdownMenuItem>
           <DropdownMenuItem
             onClick={() => setShowDeleteDialog(true)}

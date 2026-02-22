@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Обратная связь — VoxLibris</title>
+  <style>
+    /* Reset */
+    body, table, td, p, a, h1, h2, h3 { margin: 0; padding: 0; }
+    table { border-spacing: 0; border-collapse: collapse; }
+    img { display: block; border: 0; max-width: 100%; height: auto; }
+    body { font-family: "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; line-height: 1.6; color: #3D2B1F; background: #F5F2ED; }
+    a { color: #8B5A2B; text-decoration: underline; }
+    
+    /* Colors */
+    :root {
+      --primary: #5C4033;
+      --primary-dark: #4A3429;
+      --accent: #D4A574;
+      --accent-dark: #C49565;
+      --bg: #F7F3ED;
+      --card-bg: #FFFFFF;
+      --text: #3D2B1F;
+      --text-muted: #8B7355;
+      --border: #E8DFD5;
+    }
+
+    /* Container */
+    .wrapper { width: 100%; max-width: 600px; margin: 0 auto; padding: 40px 20px; }
+    
+    /* Card */
+    .card { background: var(--card-bg); border-radius: 12px; overflow: hidden; box-shadow: 0 2px 8px rgba(92, 64, 51, 0.08); }
+    
+    /* Header */
+    .header { background: var(--primary); padding: 32px 40px; text-align: center; }
+    .header-icon { width: 48px; height: 48px; margin: 0 auto 12px; background: rgba(255,255,255,0.15); border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 24px; }
+    .header-title { font-family: "Playfair Display", serif; font-size: 24px; font-weight: 600; color: #FFFFFF; margin: 0; }
+    
+    /* Body */
+    .body { padding: 40px; }
+    .body h2 { font-family: "Playfair Display", serif; font-size: 20px; font-weight: 600; color: var(--primary); margin: 0 0 16px; }
+    .body p { margin: 0 0 16px; color: var(--text); }
+    .body p:last-child { margin-bottom: 0; }
+    
+    /* Field */
+    .field { margin: 20px 0; }
+    .field-label { font-weight: 600; color: var(--primary); margin-bottom: 8px; font-size: 14px; }
+    .field-value { color: var(--text); padding: 12px 16px; background: var(--bg); border-radius: 6px; border: 1px solid var(--border); }
+    
+    /* Message */
+    .message { background: var(--bg); border-radius: 8px; padding: 20px; margin: 20px 0; white-space: pre-wrap; font-family: "SF Mono", Monaco, "Cascadia Code", "Roboto Mono", Consolas, "Courier New", monospace; font-size: 14px; line-height: 1.5; color: var(--text); border: 1px solid var(--border); }
+    
+    /* Footer */
+    .footer { background: var(--bg); padding: 24px 40px; text-align: center; border-top: 1px solid var(--border); }
+    .footer-logo { font-family: "Playfair Display", serif; font-size: 18px; font-weight: 600; color: var(--primary); margin-bottom: 8px; }
+    .footer-text { font-size: 14px; color: var(--text-muted); margin: 0; }
+    .footer-link { color: var(--accent); text-decoration: none; }
+    .footer-link:hover { text-decoration: underline; }
+    
+    /* Responsive */
+    @media (max-width: 600px) {
+      .wrapper { padding: 20px 10px; }
+      .header { padding: 24px 20px; }
+      .body { padding: 24px 20px; }
+      .footer { padding: 20px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrapper">
+    <div class="card">
+      <!-- Header -->
+      <div class="header">
+        <div class="header-icon">💬</div>
+        <h1 class="header-title">Новое сообщение обратной связи</h1>
+      </div>
+      
+      <!-- Body -->
+      <div class="body">
+        <p>Получено новое сообщение через форму обратной связи на сайте VoxLibris.</p>
+        
+        <div class="field">
+          <div class="field-label">Имя отправителя:</div>
+          <div class="field-value">{{senderName}}</div>
+        </div>
+        
+        <div class="field">
+          <div class="field-label">Email отправителя:</div>
+          <div class="field-value">{{senderEmail}}</div>
+        </div>
+        
+        <div class="field">
+          <div class="field-label">Тема:</div>
+          <div class="field-value">{{subject}}</div>
+        </div>
+        
+        <div class="field">
+          <div class="field-label">Сообщение:</div>
+          <div class="message">{{message}}</div>
+        </div>
+      </div>
+      
+      <!-- Footer -->
+      <div class="footer">
+        <div class="footer-logo">VoxLibris</div>
+        <p class="footer-text">
+          Это сообщение отправлено автоматически с сайта <a href="{{baseUrl}}" class="footer-link">{{baseUrl}}</a><br>
+          Для ответа используйте email отправителя: <a href="mailto:{{senderEmail}}" class="footer-link">{{senderEmail}}</a>
+        </p>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

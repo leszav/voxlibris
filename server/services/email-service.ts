@@ -617,6 +617,87 @@ class EmailService {
       };
     }
   }
+
+  /**
+   * Отправка обратной связи
+   */
+  async sendFeedback(params: {
+    name: string;
+    email: string;
+    subject: string;
+    message: string;
+    recipientEmails: string[];
+    baseUrl?: string;
+  }): Promise<boolean> {
+    try {
+      // Инициализируем транспорт если еще не инициализирован
+      if (!this.transporter) {
+        await this.initializeTransporter();
+      }
+
+      if (!this.transporter || !this.settings?.enabled) {
+        logger.warn('[EmailService] SMTP not configured or disabled, skipping feedback email');
+        return false;
+      }
+
+      if (!params.recipientEmails || params.recipientEmails.length === 0) {
+        logger.warn('[EmailService] No recipient emails provided for feedback');
+        return false;
+      }
+
+      const baseUrl = await resolveTrustedBaseUrl(params.baseUrl);
+      
+      // Загружаем шаблон для обратной связи
+      const template = await this.loadTemplate('feedback-notification');
+      
+      // Заменяем переменные в шаблоне
+      const html = this.replaceVariables(template, {
+        senderName: params.name,
+        senderEmail: params.email,
+        subject: params.subject,
+        message: params.message,
+        baseUrl
+      });
+
+      const emailSubject = `[VoxLibris] Обратная связь: ${params.subject}`;
+
+      // Отправляем фидбэк всем получателям
+      const results = await Promise.all(
+        params.recipientEmails.map(email =>
+          this.sendEmail({
+            to: email,
+            subject: emailSubject,
+            html,
+          })
+        )
+      );
+
+      const successCount = results.filter(Boolean).length;
+      if (successCount === params.recipientEmails.length) {
+        logger.info({
+          senderEmail: params.email,
+          subject: params.subject,
+          recipientCount: params.recipientEmails.length
+        }, 'Feedback email sent successfully');
+      } else {
+        logger.warn({
+          successCount,
+          totalCount: params.recipientEmails.length,
+          senderEmail: params.email
+        }, 'Some feedback emails failed to send');
+      }
+
+      return successCount > 0;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.error({ 
+        error: errorMessage,
+        senderEmail: params.email,
+        subject: params.subject
+      }, '[EmailService] Error sending feedback email');
+      return false;
+    }
+  }
 }
 
 // Экспортируем singleton

@@ -27,6 +27,7 @@ import { validateEnvironment } from "./config/validate.js";
 import { jwtAuth } from "./jwt-middleware.js";
 import { registerRoutes } from "./routes.js";
 import readerRoutes from "./routes/reader.js";
+import feedbackRoutes from "./routes/feedback.js";
 import { serveStatic } from "./static.js";
 import { setupWebSocketHandlers } from "./websocket.js";
 import { initializeReaderWebSocket } from "./websocket-reader.js";
@@ -674,6 +675,9 @@ try {
 
 	// Setup Schedule routes (JWT protected)
 	app.use("/api/schedule", jwtAuth, scheduleRoutes);
+
+	// Setup Feedback routes (no JWT required - public endpoint)
+	app.use("/api/v1/feedback", feedbackRoutes);
 
 	// Start scheduler for notifications (only in production or if enabled)
 	if (process.env.NODE_ENV === 'production' || process.env.ENABLE_SCHEDULER === 'true') {

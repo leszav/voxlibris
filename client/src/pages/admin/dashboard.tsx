@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Link } from "wouter";
 import { 
   Users, 
   BookOpen, 
@@ -317,22 +318,30 @@ export default function AdminDashboard() {
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <Button variant="outline" className="flex items-center gap-2">
-                <Users className="h-4 w-4" />
-                Управление пользователями
-              </Button>
-              <Button variant="outline" className="flex items-center gap-2">
-                <BookOpen className="h-4 w-4" />
-                Модерация книг
-              </Button>
-              <Button variant="outline" className="flex items-center gap-2">
-                <Users2 className="h-4 w-4" />
-                Управление клубами
-              </Button>
-              <Button variant="outline" className="flex items-center gap-2">
-                <CheckCircle className="h-4 w-4" />
-                Проверить отчеты
-              </Button>
+              <Link href="/admin/users">
+                <Button variant="outline" className="flex items-center gap-2 w-full">
+                  <Users className="h-4 w-4" />
+                  Управление пользователями
+                </Button>
+              </Link>
+              <Link href="/admin/books">
+                <Button variant="outline" className="flex items-center gap-2 w-full">
+                  <BookOpen className="h-4 w-4" />
+                  Модерация книг
+                </Button>
+              </Link>
+              <Link href="/admin/clubs">
+                <Button variant="outline" className="flex items-center gap-2 w-full">
+                  <Users2 className="h-4 w-4" />
+                  Управление клубами
+                </Button>
+              </Link>
+              <Link href="/admin/reports">
+                <Button variant="outline" className="flex items-center gap-2 w-full">
+                  <CheckCircle className="h-4 w-4" />
+                  Проверить отчеты
+                </Button>
+              </Link>
             </div>
           </CardContent>
         </Card>

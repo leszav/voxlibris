@@ -16,6 +16,10 @@
 let accessToken: string | null = null;
 let isSyncing = false;
 
+// Impersonation state
+let impersonatedUsername: string | null = null;
+let originalAdminToken: string | null = null;
+
 /**
  * Read a cookie value by name
  */
@@ -106,4 +110,55 @@ export function getUserFromToken(token: string): { userId: string; username: str
   } catch {
     return null;
   }
+}
+
+/**
+ * Start impersonation mode - save original admin token and set new user token.
+ */
+export function startImpersonation(
+  newUserToken: string,
+  username: string
+): void {
+  // Save current token as admin token
+  originalAdminToken = accessToken;
+  impersonatedUsername = username;
+  accessToken = newUserToken;
+}
+
+/**
+ * Check if currently in impersonation mode.
+ */
+export function isImpersonating(): boolean {
+  return originalAdminToken !== null;
+}
+
+/**
+ * Get the impersonated username.
+ */
+export function getImpersonatedUsername(): string | null {
+  return impersonatedUsername;
+}
+
+/**
+ * Exit impersonation mode - restore original admin token.
+ */
+export function exitImpersonation(): string | null {
+  if (!originalAdminToken) {
+    return null;
+  }
+  
+  const adminToken = originalAdminToken;
+  accessToken = adminToken;
+  originalAdminToken = null;
+  impersonatedUsername = null;
+  
+  return adminToken;
+}
+
+/**
+ * Clear impersonation state (on logout).
+ */
+export function clearImpersonation(): void {
+  originalAdminToken = null;
+  impersonatedUsername = null;
 }

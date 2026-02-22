@@ -482,6 +482,59 @@ router.post('/users/:id/reset-password', jwtAuth, requireFullAdmin, async (req, 
   }
 });
 
+// "Зайти как..." - получить токены для входа под другим пользователем
+router.post('/users/:id/impersonate', jwtAuth, requireFullAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Получаем целевого пользователя
+    const user = await storage.getUser(id);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    // Нельзя имперсонировать другого админа
+    if (user.role === 'admin') {
+      return res.status(403).json({ message: 'Cannot impersonate another admin' });
+    }
+
+    // Генерируем токены для целевого пользователя
+    const tokens = await authService.generateTokens(user, false);
+
+    // Логируем действие
+    await logAction(
+      req,
+      'impersonate',
+      'user',
+      user.id,
+      `Admin impersonated user ${user.username}`
+    );
+
+    logger.info({
+      adminId: req.user!.userId,
+      adminUsername: req.user!.username,
+      targetUserId: user.id,
+      targetUsername: user.username
+    }, '[Admin] Impersonation initiated');
+
+    res.json({
+      success: true,
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+      user: {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        role: user.role,
+        status: user.status
+      }
+    });
+  } catch (error) {
+    console.error('Error impersonating user:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
 // Получить ожидающих активации пользователей
 router.get('/users/pending', jwtAuth, requireAdmin, async (req, res) => {
   try {
@@ -2191,6 +2244,85 @@ router.put('/settings', jwtAuth, requireFullAdmin, async (req, res) => {
   } catch (error) {
     console.error('Error updating settings:', error);
     res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+// ==== FEEDBACK SETTINGS ====
+
+// Получить настройки обратной связи
+router.get('/settings/feedback', jwtAuth, requireFullAdmin, async (req, res) => {
+  try {
+    const feedbackSettings = await storage.getSettingsByCategory('feedback');
+
+    const settings: Record<string, string> = {};
+    feedbackSettings.forEach((s) => {
+      settings[s.key] = s.value || '';
+    });
+
+    res.json({
+      success: true,
+      settings: {
+        'feedback.emails': settings['feedback.emails'] || '',
+      },
+    });
+  } catch (error) {
+    console.error('Error fetching feedback settings:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+// Сохранить настройки обратной связи
+router.put('/settings/feedback', jwtAuth, requireFullAdmin, async (req, res) => {
+  try {
+    const { emails } = req.body;
+
+    if (!emails || typeof emails !== 'string') {
+      return res.status(400).json({
+        success: false,
+        message: 'Email addresses are required'
+      });
+    }
+
+    // Валидация email адресов
+    const emailList = emails.split(',').map(email => email.trim()).filter(Boolean);
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    
+    for (const email of emailList) {
+      if (!emailRegex.test(email)) {
+        return res.status(400).json({
+          success: false,
+          message: `Invalid email format: ${email}`
+        });
+      }
+    }
+
+    // Сохраняем настройку
+    await storage.setSetting({
+      key: 'feedback.emails',
+      value: emails,
+      category: 'feedback',
+      description: 'Email addresses for feedback notifications (comma-separated)',
+      updatedBy: req.user!.userId
+    });
+
+    // Логируем действие админа
+    await logAction(
+      req,
+      'update_settings',
+      'settings',
+      'feedback',
+      'Updated feedback email settings'
+    );
+
+    logger.info({ admin: req.user?.username }, 'Feedback settings updated');
+
+    res.json({
+      success: true,
+      message: 'Feedback settings saved successfully'
+    });
+  } catch (error) {
+    console.error('Error saving feedback settings:', error);
+    res.status(500).json({ message: 'Failed to save feedback settings' });
   }
 });
 
