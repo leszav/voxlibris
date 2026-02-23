@@ -1,12 +1,16 @@
 import { BaseRepository } from './BaseRepository.js';
-import { eq, asc } from 'drizzle-orm';
+import { eq, asc, desc, and, gte, lte, count, sql } from 'drizzle-orm';
 import { CryptoService } from '../crypto-service.js';
 import { 
   systemSettings,
   settings,
+  adminActions,
   type SystemSetting,
   type Setting,
-  type InsertSetting
+  type InsertSetting,
+  type AdminAction,
+  type AdminActionType,
+  type AdminActionTargetType
 } from '../../shared/schema.js';
 
 /**
@@ -88,6 +92,202 @@ export class SystemRepository extends BaseRepository {
     };
   }
   
+  // ============================================================
+  // Admin Action Logs - Логи действий администраторов
+  // ============================================================
+
+  /**
+   * Получение логов админских действий с фильтрацией и пагинацией
+   */
+  async getAdminActionLogs(filters: {
+    limit: number;
+    offset: number;
+    action?: string;
+    adminId?: string;
+    targetType?: string;
+    dateFrom?: string;
+    dateTo?: string;
+  }): Promise<(AdminAction & { adminUsername: string })[]> {
+    try {
+      const conditions = [];
+      
+      if (filters.action) {
+        conditions.push(eq(adminActions.actionType, filters.action as AdminActionType));
+      }
+      
+      if (filters.adminId) {
+        conditions.push(eq(adminActions.adminId, filters.adminId));
+      }
+      
+      if (filters.targetType) {
+        conditions.push(eq(adminActions.targetType, filters.targetType as AdminActionTargetType));
+      }
+      
+      if (filters.dateFrom) {
+        conditions.push(gte(adminActions.createdAt, new Date(filters.dateFrom)));
+      }
+      
+      if (filters.dateTo) {
+        conditions.push(lte(adminActions.createdAt, new Date(filters.dateTo)));
+      }
+      
+      const result = await this.db
+        .select({
+          id: adminActions.id,
+          adminId: adminActions.adminId,
+          actionType: adminActions.actionType,
+          targetType: adminActions.targetType,
+          targetId: adminActions.targetId,
+          reason: adminActions.reason,
+          previousValue: adminActions.previousValue,
+          newValue: adminActions.newValue,
+          metadata: adminActions.metadata,
+          ipAddress: adminActions.ipAddress,
+          userAgent: adminActions.userAgent,
+          createdAt: adminActions.createdAt,
+          adminUsername: sql`u.username`
+        })
+        .from(adminActions)
+        .leftJoin(sql`users u`, eq(adminActions.adminId, sql`u.id`))
+        .where(conditions.length > 0 ? and(...conditions) : undefined)
+        .orderBy(desc(adminActions.createdAt))
+        .limit(filters.limit)
+        .offset(filters.offset);
+      
+      return result as (AdminAction & { adminUsername: string })[];
+    } catch (error) {
+      this.logError('getAdminActionLogs', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Подсчет логов админских действий с фильтрацией
+   */
+  async getAdminActionLogsCount(filters: {
+    action?: string;
+    adminId?: string;
+    targetType?: string;
+    dateFrom?: string;
+    dateTo?: string;
+  }): Promise<number> {
+    try {
+      const conditions = [];
+      
+      if (filters.action) {
+        conditions.push(eq(adminActions.actionType, filters.action as AdminActionType));
+      }
+      
+      if (filters.adminId) {
+        conditions.push(eq(adminActions.adminId, filters.adminId));
+      }
+      
+      if (filters.targetType) {
+        conditions.push(eq(adminActions.targetType, filters.targetType as AdminActionTargetType));
+      }
+      
+      if (filters.dateFrom) {
+        conditions.push(gte(adminActions.createdAt, new Date(filters.dateFrom)));
+      }
+      
+      if (filters.dateTo) {
+        conditions.push(lte(adminActions.createdAt, new Date(filters.dateTo)));
+      }
+      
+      const result = await this.db
+        .select({ count: count() })
+        .from(adminActions)
+        .where(conditions.length > 0 ? and(...conditions) : undefined);
+      
+      return result[0]?.count || 0;
+    } catch (error) {
+      this.logError('getAdminActionLogsCount', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Получение статистики админских действий за период
+   */
+  async getAdminActionStats(days: number): Promise<{
+    totalActions: number;
+    actionsByType: Record<string, number>;
+    actionsByAdmin: Record<string, { count: number; username: string }>;
+    impersonationCount: number;
+    recentActions: (AdminAction & { adminUsername: string })[];
+  }> {
+    try {
+      const dateFrom = new Date();
+      dateFrom.setDate(dateFrom.getDate() - days);
+      
+      // Общее количество действий
+      const totalResult = await this.db
+        .select({ count: count() })
+        .from(adminActions)
+        .where(gte(adminActions.createdAt, dateFrom));
+      
+      // Статистика по типам действий
+      const actionTypeStats = await this.db
+        .select({
+          actionType: adminActions.actionType,
+          count: count()
+        })
+        .from(adminActions)
+        .where(gte(adminActions.createdAt, dateFrom))
+        .groupBy(adminActions.actionType)
+        .orderBy(desc(count()));
+      
+      // Статистика по админам
+      const adminStats = await this.db
+        .select({
+          adminId: adminActions.adminId,
+          adminUsername: sql`u.username`,
+          count: count()
+        })
+        .from(adminActions)
+        .leftJoin(sql`users u`, eq(adminActions.adminId, sql`u.id`))
+        .where(gte(adminActions.createdAt, dateFrom))
+        .groupBy(adminActions.adminId, sql`u.username`)
+        .orderBy(desc(count()));
+      
+      // Количество имперсонаций
+      const impersonationResult = await this.db
+        .select({ count: count() })
+        .from(adminActions)
+        .where(
+          and(
+            eq(adminActions.actionType, 'impersonate'),
+            gte(adminActions.createdAt, dateFrom)
+          )
+        );
+      
+      // Последние действия
+      const recentActions = await this.getAdminActionLogs({
+        limit: 10,
+        offset: 0,
+        dateFrom: dateFrom.toISOString()
+      });
+      
+      return {
+        totalActions: totalResult[0]?.count || 0,
+        actionsByType: Object.fromEntries(
+          actionTypeStats.map(s => [s.actionType, s.count])
+        ),
+        actionsByAdmin: Object.fromEntries(
+          adminStats.map(s => [
+            s.adminId, 
+            { count: s.count, username: s.adminUsername as string }
+          ])
+        ),
+        impersonationCount: impersonationResult[0]?.count || 0,
+        recentActions
+      };
+    } catch (error) {
+      this.logError('getAdminActionStats', error);
+      throw error;
+    }
+  }
+
   // ============================================================
   // System Settings - Системные настройки
   // ============================================================

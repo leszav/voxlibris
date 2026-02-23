@@ -296,7 +296,7 @@ router.get('/book/:bookId', jwtAuth, requireAdmin, async (req: Request, res: Res
 router.get('/kpi', jwtAuth, requireAdmin, async (req: Request, res: Response) => {
   try {
     const { period = '30' } = req.query;
-    const periodDays = parseInt(period as string, 10) || 30;
+    const periodDays = Number.parseInt(period as string, 10) || 30;
 
     logger.info({ periodDays }, '[Analytics] Calculating KPIs');
     

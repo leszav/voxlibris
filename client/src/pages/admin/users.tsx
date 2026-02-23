@@ -311,6 +311,8 @@ function UserActionsMenu({ user }: Readonly<{ user: User }>) {
     onSuccess: async (data) => {
       // Запускаем режим имперсонации
       startImpersonation(data.accessToken, data.user.username);
+      // Очищаем все кеши React Query, чтобы данные загрузились заново для нового пользователя
+      queryClient.clear();
       // Обновляем данные пользователя
       await refetchUser();
       // Перенаправляем на главную страницу

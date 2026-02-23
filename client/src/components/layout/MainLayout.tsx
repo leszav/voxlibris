@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/dialog";
 import { FeedbackModal } from "@/components/ui/feedback-modal";
 import { useState, useEffect } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { isImpersonating, getImpersonatedUsername, exitImpersonation } from "@/lib/token-store";
 
@@ -29,6 +30,7 @@ export function MainLayout({ children }: { readonly children: React.ReactNode })
   const [showFeedback, setShowFeedback] = useState(false);
   const [, setLocation] = useLocation();
   const { user, isAuthenticated, logout, refetchUser } = useAuth();
+  const queryClient = useQueryClient();
   const [impersonating, setImpersonating] = useState(isImpersonating());
   const [impersonatedUser, setImpersonatedUser] = useState(getImpersonatedUsername());
 
@@ -64,6 +66,8 @@ export function MainLayout({ children }: { readonly children: React.ReactNode })
     exitImpersonation();
     setImpersonating(false);
     setImpersonatedUser(null);
+    // Очищаем все кеши React Query, чтобы данные администратора загрузились заново
+    queryClient.clear();
     await refetchUser();
     setLocation("/admin/users");
   };

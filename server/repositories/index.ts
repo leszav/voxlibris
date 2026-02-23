@@ -946,6 +946,22 @@ class StorageAdapter implements Partial<IStorage> {
   async deleteSetting(key: string) {
     return this.repos.system.deleteSetting(key);
   }
+
+  // =================================================================
+  // Admin Action Logs Domain - логи административных действий
+  // =================================================================
+
+  async getAdminActionLogs(filters: Parameters<SystemRepository['getAdminActionLogs']>[0]) {
+    return this.repos.system.getAdminActionLogs(filters);
+  }
+
+  async getAdminActionLogsCount(filters: Parameters<SystemRepository['getAdminActionLogsCount']>[0]) {
+    return this.repos.system.getAdminActionLogsCount(filters);
+  }
+
+  async getAdminActionStats(days: number) {
+    return this.repos.system.getAdminActionStats(days);
+  }
 }
 
 // Создаем singleton instance для обратной совместимости

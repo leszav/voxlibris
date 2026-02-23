@@ -9,6 +9,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { EmailVerificationModal } from "@/components/ui/email-verification-modal";
 import { AuthProvider } from "@/hooks/use-auth";
 import AdminAnalytics from "@/pages/admin/analytics";
+import AdminAudit from "@/pages/admin/audit";
 import AdminBooks from "@/pages/admin/books";
 import AdminClubs from "@/pages/admin/clubs";
 import AdminDashboard from "@/pages/admin/dashboard";
@@ -74,6 +75,7 @@ function Router() {
       <Route path="/admin/reports" component={AdminReports} />
       <Route path="/admin/analytics" component={AdminAnalytics} />
       <Route path="/admin/kpi" component={AdminKPI} />
+      <Route path="/admin/audit" component={AdminAudit} />
       <Route path="/admin/settings" component={AdminSettings} />
 
       {/* Implemented Pages */}

@@ -11,7 +11,8 @@ import {
   FileText,
   TrendingUp,
   Home,
-  Target
+  Target,
+  Eye
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
@@ -33,6 +34,7 @@ const navigation = [
   { name: "Отчёты", href: "/admin/reports", icon: FileText },
   { name: "Аналитика", href: "/admin/analytics", icon: TrendingUp },
   { name: "KPI Метрики", href: "/admin/kpi", icon: Target },
+  { name: "Аудит", href: "/admin/audit", icon: Eye },
   { name: "Настройки", href: "/admin/settings", icon: Settings },
 ];
 

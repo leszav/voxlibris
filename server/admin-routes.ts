@@ -487,6 +487,15 @@ router.post('/users/:id/impersonate', jwtAuth, requireFullAdmin, async (req, res
   try {
     const { id } = req.params;
 
+    // Проверяем, включена ли функция имперсонации в настройках безопасности
+    const impersonationSetting = await storage.getSetting('security.impersonation.enabled');
+    if (impersonationSetting?.value !== 'true') {
+      return res.status(403).json({ 
+        message: 'Функция входа от имени другого пользователя отключена администратором',
+        code: 'IMPERSONATION_DISABLED'
+      });
+    }
+
     // Получаем целевого пользователя
     const user = await storage.getUser(id);
     if (!user) {
@@ -516,6 +525,27 @@ router.post('/users/:id/impersonate', jwtAuth, requireFullAdmin, async (req, res
       targetUserId: user.id,
       targetUsername: user.username
     }, '[Admin] Impersonation initiated');
+
+    // Устанавливаем cookies для токенов, как при обычном логине
+    const refreshMaxAge = 7 * 24 * 60 * 60 * 1000; // 7 дней
+    const accessMaxAge = 15 * 60 * 1000; // 15 минут
+    const isProduction = process.env.NODE_ENV === 'production';
+
+    res.cookie('accessToken', tokens.accessToken, {
+      httpOnly: false, // Доступен для JavaScript
+      secure: isProduction,
+      sameSite: 'strict',
+      maxAge: accessMaxAge,
+      path: '/',
+    });
+
+    res.cookie('refreshToken', tokens.refreshToken, {
+      httpOnly: true, // Защищен от XSS
+      secure: isProduction,
+      sameSite: 'strict',
+      maxAge: refreshMaxAge,
+      path: '/',
+    });
 
     res.json({
       success: true,
@@ -2145,6 +2175,157 @@ router.get('/stats/overview', jwtAuth, requireAdmin, async (_req, res) => {
     });
   } catch (error) {
     console.error('Error fetching stats:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+// ==== ADMIN AUDIT LOGS ====
+
+// Получить логи админских действий
+router.get('/audit-logs', jwtAuth, requireFullAdmin, async (req, res) => {
+  try {
+    const { 
+      page = '1', 
+      limit = '50', 
+      action, 
+      adminId, 
+      targetType, 
+      dateFrom, 
+      dateTo 
+    } = req.query;
+
+    const pageNum = Math.max(1, Number.parseInt(page as string) || 1);
+    const limitNum = Math.min(100, Math.max(1, Number.parseInt(limit as string) || 50));
+    const offset = (pageNum - 1) * limitNum;
+
+    // Получаем логи с фильтрами
+    const logs = await storage.getAdminActionLogs({
+      limit: limitNum,
+      offset,
+      action: action as string,
+      adminId: adminId as string, 
+      targetType: targetType as string,
+      dateFrom: dateFrom as string,
+      dateTo: dateTo as string
+    });
+
+    const totalCount = await storage.getAdminActionLogsCount({
+      action: action as string,
+      adminId: adminId as string,
+      targetType: targetType as string, 
+      dateFrom: dateFrom as string,
+      dateTo: dateTo as string
+    });
+
+    res.json({
+      success: true,
+      data: {
+        logs,
+        pagination: {
+          page: pageNum,
+          limit: limitNum,
+          total: totalCount,
+          pages: Math.ceil(totalCount / limitNum)
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching audit logs:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+// Получить статистику админских действий
+router.get('/audit-stats', jwtAuth, requireFullAdmin, async (req, res) => {
+  try {
+    const { days = '30' } = req.query;
+    const daysNum = Math.min(365, Math.max(1, Number.parseInt(days as string) || 30));
+    
+    const stats = await storage.getAdminActionStats(daysNum);
+    
+    res.json({
+      success: true,
+      data: stats
+    });
+  } catch (error) {
+    console.error('Error fetching audit stats:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+// ==== SECURITY SETTINGS ====
+
+// Получить настройки безопасности
+router.get('/security-settings', jwtAuth, requireFullAdmin, async (req, res) => {
+  try {
+    const settings = await storage.getSettingsByCategory('security');
+    const securitySettings: Record<string, string> = {};
+    
+    settings.forEach(s => {
+      securitySettings[s.key] = s.value || '';
+    });
+    
+    res.json({
+      success: true,
+      settings: {
+        'security.impersonation.enabled': securitySettings['security.impersonation.enabled'] || 'true',
+        'security.impersonation.log_retention_days': securitySettings['security.impersonation.log_retention_days'] || '90',
+        'security.admin_session_timeout': securitySettings['security.admin_session_timeout'] || '60'
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching security settings:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+// Обновить настройки безопасности
+router.put('/security-settings', jwtAuth, requireFullAdmin, async (req, res) => {
+  try {
+    const { impersonationEnabled, logRetentionDays, adminSessionTimeout } = req.body;
+    
+    const settingsToSave = [
+      {
+        key: 'security.impersonation.enabled',
+        value: impersonationEnabled ? 'true' : 'false',
+        category: 'security',
+        description: 'Enable/disable admin impersonation feature',
+        updatedBy: req.user!.userId
+      },
+      {
+        key: 'security.impersonation.log_retention_days', 
+        value: String(Math.max(1, Number.parseInt(logRetentionDays) || 90)),
+        category: 'security',
+        description: 'Days to retain impersonation logs',
+        updatedBy: req.user!.userId
+      },
+      {
+        key: 'security.admin_session_timeout',
+        value: String(Math.max(15, Number.parseInt(adminSessionTimeout) || 60)),
+        category: 'security', 
+        description: 'Admin session timeout in minutes',
+        updatedBy: req.user!.userId
+      }
+    ];
+    
+    for (const setting of settingsToSave) {
+      await storage.setSetting(setting);
+    }
+    
+    await logAction(
+      req,
+      'update_settings',
+      'settings',
+      'security',
+      'Updated security settings'
+    );
+    
+    res.json({
+      success: true,
+      message: 'Security settings updated successfully'
+    });
+  } catch (error) {
+    console.error('Error updating security settings:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 });
