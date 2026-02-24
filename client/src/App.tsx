@@ -1,51 +1,42 @@
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Route, Switch } from "wouter";
-import { Suspense, lazy, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { ClubReader } from "@/components/reader/ClubReader";
+import { ReaderWorkspace } from "@/components/reader/ReaderWorkspace";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { EmailVerificationModal } from "@/components/ui/email-verification-modal";
 import { AuthProvider } from "@/hooks/use-auth";
+import AdminAnalytics from "@/pages/admin/analytics";
+import AdminAudit from "@/pages/admin/audit";
+import AdminBooks from "@/pages/admin/books";
+import AdminClubs from "@/pages/admin/clubs";
+import AdminDashboard from "@/pages/admin/dashboard";
+import AdminKPI from "@/pages/admin/kpi";
+import AdminReports from "@/pages/admin/reports";
+import AdminSettings from "@/pages/admin/settings";
+import AdminUsers from "@/pages/admin/users";
+import ConfirmEmail from "@/pages/auth/confirm-email";
+import ForgotPassword from "@/pages/auth/forgot-password";
+import Login from "@/pages/auth/login";
+import Register from "@/pages/auth/register";
+import ResetPassword from "@/pages/auth/reset-password";
+import BecomeReader from "@/pages/become-reader";
+import Catalog from "@/pages/catalog";
+import ClubDetails from "@/pages/club-details";
+import CreateClub from "@/pages/clubs/create-club";
+import MyClubs from "@/pages/clubs/my-clubs";
+import Home from "@/pages/home";
+import InviteAccept from "@/pages/invite-accept";
+import Library from "@/pages/library";
+import NotFound from "@/pages/not-found";
+import ProfilePage from "@/pages/ProfilePage";
+import Pricing from "@/pages/pricing";
+import ReaderStudio from "@/pages/reader-studio";
+import Readers from "@/pages/readers";
 import { queryClient } from "./lib/queryClient";
 import { YandexMetrikaTracker } from "./lib/yandexMetrika";
-
-const Home = lazy(() => import("@/pages/home"));
-const Catalog = lazy(() => import("@/pages/catalog"));
-const ReaderStudio = lazy(() => import("@/pages/reader-studio"));
-const MyClubs = lazy(() => import("@/pages/clubs/my-clubs"));
-const CreateClub = lazy(() => import("@/pages/clubs/create-club"));
-const ClubDetails = lazy(() => import("@/pages/club-details"));
-const Login = lazy(() => import("@/pages/auth/login"));
-const Register = lazy(() => import("@/pages/auth/register"));
-const ForgotPassword = lazy(() => import("@/pages/auth/forgot-password"));
-const ResetPassword = lazy(() => import("@/pages/auth/reset-password"));
-const ConfirmEmail = lazy(() => import("@/pages/auth/confirm-email"));
-const InviteAccept = lazy(() => import("@/pages/invite-accept"));
-const AdminDashboard = lazy(() => import("@/pages/admin/dashboard"));
-const AdminUsers = lazy(() => import("@/pages/admin/users"));
-const AdminBooks = lazy(() => import("@/pages/admin/books"));
-const AdminClubs = lazy(() => import("@/pages/admin/clubs"));
-const AdminReports = lazy(() => import("@/pages/admin/reports"));
-const AdminAnalytics = lazy(() => import("@/pages/admin/analytics"));
-const AdminKPI = lazy(() => import("@/pages/admin/kpi"));
-const AdminAudit = lazy(() => import("@/pages/admin/audit"));
-const AdminSettings = lazy(() => import("@/pages/admin/settings"));
-const Readers = lazy(() => import("@/pages/readers"));
-const Library = lazy(() => import("@/pages/library"));
-const Pricing = lazy(() => import("@/pages/pricing"));
-const BecomeReader = lazy(() => import("@/pages/become-reader"));
-const ProfilePage = lazy(() => import("@/pages/ProfilePage"));
-const NotFound = lazy(() => import("@/pages/not-found"));
-const ReaderWorkspace = lazy(() =>
-  import("@/components/reader/ReaderWorkspace").then((module) => ({
-    default: module.ReaderWorkspace,
-  })),
-);
-const ClubReader = lazy(() =>
-  import("@/components/reader/ClubReader").then((module) => ({
-    default: module.ClubReader,
-  })),
-);
 
 function Router() {
   return (
@@ -102,14 +93,6 @@ function Router() {
   );
 }
 
-function RouteLoadingFallback() {
-  return (
-    <div className="flex min-h-[40vh] items-center justify-center text-sm text-muted-foreground">
-      Загрузка страницы...
-    </div>
-  );
-}
-
 function App() {
   const [showEmailVerificationModal, setShowEmailVerificationModal] = useState(false);
 
@@ -133,9 +116,7 @@ function App() {
             <Toaster />
             {/* Отслеживание просмотров страниц в Яндекс.Метрике для SPA */}
             <YandexMetrikaTracker />
-            <Suspense fallback={<RouteLoadingFallback />}>
-              <Router />
-            </Suspense>
+            <Router />
             <EmailVerificationModal 
               isOpen={showEmailVerificationModal}
               onClose={() => setShowEmailVerificationModal(false)}
