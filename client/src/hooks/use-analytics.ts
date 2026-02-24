@@ -28,6 +28,7 @@ interface AnalyticsEventData {
 interface ReadingSessionTracker {
   bookId: string;
   chapterNumber: number;
+  clubId?: string;
   startTime: number;
 }
 
@@ -82,54 +83,65 @@ export function useAnalytics() {
 
   // Открытие книги
   const trackBookOpen = useCallback((bookId: string, metadata?: Record<string, unknown>) => {
+    const clubIdFromMetadata =
+      typeof metadata?.clubId === 'string' && metadata.clubId.length > 0
+        ? metadata.clubId
+        : undefined;
+
     trackEvent({
       eventType: 'book_open',
       bookId,
+      clubId: clubIdFromMetadata,
       metadata,
     });
   }, [trackEvent]);
 
   // Начало чтения главы
-  const trackChapterStart = useCallback((bookId: string, chapterNumber: number) => {
+  const trackChapterStart = useCallback((bookId: string, chapterNumber: number, clubId?: string) => {
     trackEvent({
       eventType: 'chapter_start',
       bookId,
+      clubId,
       chapterNumber,
     });
   }, [trackEvent]);
 
   // Завершение главы
-  const trackChapterComplete = useCallback((bookId: string, chapterNumber: number, duration?: number) => {
+  const trackChapterComplete = useCallback((bookId: string, chapterNumber: number, duration?: number, clubId?: string) => {
     trackEvent({
       eventType: 'chapter_complete',
       bookId,
+      clubId,
       chapterNumber,
       duration,
     });
   }, [trackEvent]);
 
   // Завершение книги
-  const trackBookComplete = useCallback((bookId: string) => {
+  const trackBookComplete = useCallback((bookId: string, clubId?: string) => {
     trackEvent({
       eventType: 'book_complete',
       bookId,
+      clubId,
     });
   }, [trackEvent]);
 
   // Создание закладки
-  const trackBookmarkCreate = useCallback((bookId: string, chapterNumber: number) => {
+  const trackBookmarkCreate = useCallback((bookId: string, chapterNumber: number, clubId?: string) => {
     trackEvent({
       eventType: 'bookmark_create',
       bookId,
+      clubId,
       chapterNumber,
     });
   }, [trackEvent]);
 
   // Создание заметки
-  const trackNoteCreate = useCallback((bookId: string, chapterNumber: number) => {
+  const trackNoteCreate = useCallback((bookId: string, chapterNumber: number, clubId?: string) => {
     trackEvent({
       eventType: 'note_create',
       bookId,
+      clubId,
       chapterNumber,
     });
   }, [trackEvent]);
@@ -160,7 +172,7 @@ export function useAnalytics() {
   }, [trackEvent]);
 
   // Начало отслеживания сессии чтения
-  const startReadingSession = useCallback((bookId: string, chapterNumber: number) => {
+  const startReadingSession = useCallback((bookId: string, chapterNumber: number, clubId?: string) => {
     // Остановить предыдущую сессию если есть
     if (sessionInterval.current) {
       clearInterval(sessionInterval.current);
@@ -169,6 +181,7 @@ export function useAnalytics() {
     sessionTracker.current = {
       bookId,
       chapterNumber,
+      clubId,
       startTime: Date.now(),
     };
 
@@ -179,6 +192,7 @@ export function useAnalytics() {
         trackEvent({
           eventType: 'reading_session',
           bookId: sessionTracker.current.bookId,
+          clubId: sessionTracker.current.clubId,
           chapterNumber: sessionTracker.current.chapterNumber,
           duration,
         });
@@ -199,6 +213,7 @@ export function useAnalytics() {
       trackEvent({
         eventType: 'reading_session',
         bookId: sessionTracker.current.bookId,
+        clubId: sessionTracker.current.clubId,
         chapterNumber: sessionTracker.current.chapterNumber,
         duration,
       });

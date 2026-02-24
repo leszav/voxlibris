@@ -16,9 +16,12 @@ import readerQualityRouter from "./routes/reader-quality.js";
 import { jwtAuth, requireActiveUser } from "./jwt-middleware.js";
 import { logger } from "./lib/logger.js";
 import { getPublicBaseUrl } from "./lib/public-base-url.js";
+import { db } from "./db.js";
 import {
+  analyticsEvents,
   insertClubSchema,
   insertBookSchema,
+  type InsertAnalyticsEvent,
   type InsertBook
 } from "../shared/schema.js";
 
@@ -134,6 +137,26 @@ function validateStoragePath(path: string): { valid: boolean; normalizedPath?: s
   });
   logger.debug(`[validateStoragePath] Final result: ${isAllowed}`);
   return { valid: isAllowed, normalizedPath: isAllowed ? normalizedPath : undefined };
+}
+
+async function recordAnalyticsEvent(req: Request, payload: Omit<InsertAnalyticsEvent, "userId" | "ipAddress" | "userAgent" | "metadata"> & { metadata?: Record<string, unknown> }) {
+  try {
+    const userId = req.user?.id ?? null;
+    const ipAddress = (req.headers['x-forwarded-for'] as string)?.split(',')[0] || req.socket.remoteAddress || null;
+    const userAgent = req.headers['user-agent'] || null;
+
+    const eventData: InsertAnalyticsEvent = {
+      ...payload,
+      userId,
+      metadata: payload.metadata ? JSON.stringify(payload.metadata) : null,
+      ipAddress,
+      userAgent,
+    };
+
+    await db.insert(analyticsEvents).values(eventData);
+  } catch (error) {
+    logger.warn({ error, payload }, "[Analytics] Failed to record event in routes.ts");
+  }
 }
 
 export async function registerRoutes(
@@ -488,6 +511,15 @@ export async function registerRoutes(
 
       const membership = await storage.joinClub(clubId, userId);
 
+      await recordAnalyticsEvent(req, {
+        eventType: "club_join",
+        clubId,
+        bookId: null,
+        chapterNumber: null,
+        duration: null,
+        progress: null,
+      });
+
       res.status(201).json({
         message: "Вы успешно присоединились к клубу",
         membership
@@ -513,6 +545,15 @@ export async function registerRoutes(
       if (!success) {
         return res.status(404).json({ message: "Вы не являетесь участником этого клуба" });
       }
+
+      await recordAnalyticsEvent(req, {
+        eventType: "club_leave",
+        clubId,
+        bookId: null,
+        chapterNumber: null,
+        duration: null,
+        progress: null,
+      });
 
       res.json({ message: "Вы покинули клуб" });
     } catch (error) {

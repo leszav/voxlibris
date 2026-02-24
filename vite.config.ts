@@ -41,6 +41,72 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes("node_modules")) {
+            return undefined;
+          }
+
+          if (
+            id.includes("/react/") ||
+            id.includes("/react-dom/") ||
+            id.includes("/scheduler/")
+          ) {
+            return "vendor-react";
+          }
+
+          if (id.includes("/@tanstack/react-query/") || id.includes("/wouter/")) {
+            return "vendor-routing-data";
+          }
+
+          if (id.includes("/@radix-ui/") || id.includes("/lucide-react/")) {
+            return "vendor-ui";
+          }
+
+          if (id.includes("/recharts/")) {
+            return "vendor-charts";
+          }
+
+          if (id.includes("/socket.io-client/")) {
+            return "vendor-socket";
+          }
+
+          if (id.includes("/framer-motion/")) {
+            return "vendor-motion";
+          }
+
+          if (
+            id.includes("/dompurify/") ||
+            id.includes("/react-easy-crop/") ||
+            id.includes("/emoji-picker-react/")
+          ) {
+            return "vendor-media";
+          }
+
+          if (
+            id.includes("/@tiptap/") ||
+            id.includes("/prosemirror-")
+          ) {
+            return "vendor-editor";
+          }
+
+          if (id.includes("/date-fns/")) {
+            return "vendor-date";
+          }
+
+          if (
+            id.includes("/react-hook-form/") ||
+            id.includes("/@hookform/resolvers/") ||
+            id.includes("/zod/")
+          ) {
+            return "vendor-forms";
+          }
+
+          return undefined;
+        },
+      },
+    },
   },
   server: {
     host: "0.0.0.0",

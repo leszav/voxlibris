@@ -149,23 +149,23 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
   const lastTrackedChapter = useRef<number | null>(null);
   useEffect(() => {
     if (currentChapter != null && bookId && currentChapter !== lastTrackedChapter.current) {
-      analytics.trackChapterStart(bookId, currentChapter);
-      analytics.startReadingSession(bookId, currentChapter);
+      analytics.trackChapterStart(bookId, currentChapter, clubId);
+      analytics.startReadingSession(bookId, currentChapter, clubId);
       lastTrackedChapter.current = currentChapter;
     }
     return () => {
       analytics.stopReadingSession();
     };
-  }, [currentChapter, bookId]);
+  }, [currentChapter, bookId, clubId, analytics]);
 
   // Analytics: Track book completion when progress reaches 100% (only once)
   const hasTrackedCompletion = useRef(false);
   useEffect(() => {
     if (userProgress?.progress === 100 && bookId && !hasTrackedCompletion.current) {
-      analytics.trackBookComplete(bookId);
+      analytics.trackBookComplete(bookId, clubId);
       hasTrackedCompletion.current = true;
     }
-  }, [userProgress?.progress, bookId, analytics]);
+  }, [userProgress?.progress, bookId, clubId, analytics]);
 
   const normalizedBookmarks = useMemo<BookmarkType[]>(() => {
     return bookmarks.map((bookmark) => {
