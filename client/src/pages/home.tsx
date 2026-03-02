@@ -18,8 +18,6 @@ export default function Home() {
   // Берем только первые 6 клубов для главной страницы (TOP-6)
   const featuredClubs = clubs?.slice(0, 6) || [];
 
-
-
   return (
     <MainLayout>
       {/* Hero Section */}
@@ -39,7 +37,7 @@ export default function Home() {
             <Sparkles className="w-3.5 h-3.5 mr-2 text-accent" />
             Социальное чтение по-новому
           </Badge>
-          
+
           <h1 className="font-serif text-5xl md:text-7xl font-bold text-white leading-tight tracking-tight drop-shadow-lg">
             Читаем Вместе,<br />
             <span className="text-accent italic">Вслух и Живьем.</span>

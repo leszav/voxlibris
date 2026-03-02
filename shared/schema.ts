@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, boolean, timestamp, foreignKey } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, boolean, timestamp, foreignKey, jsonb } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -1688,6 +1688,148 @@ export const insertClubReadingStatusSchema = createInsertSchema(clubReadingStatu
   sessionType: true,
 });
 
+// ============================================
+// GUEST SYSTEM (v2.1 - KISS)
+// ============================================
+
+// Guest Account Status
+export const guestAccountStatuses = ["active", "expired", "deleted"] as const;
+export type GuestAccountStatus = typeof guestAccountStatuses[number];
+
+// Guest Book Format
+export const guestBookFormats = ["epub", "fb2"] as const;
+export type GuestBookFormat = typeof guestBookFormats[number];
+
+// Guest Book Moderation Status
+export const guestBookModerationStatuses = ["pending", "approved", "rejected"] as const;
+export type GuestBookModerationStatus = typeof guestBookModerationStatuses[number];
+
+// Guest Analytics Event Types
+export const guestAnalyticsEventTypes = ["book_upload", "session_start", "session_end", "book_open"] as const;
+export type GuestAnalyticsEventType = typeof guestAnalyticsEventTypes[number];
+
+// Guest Accounts
+export const guestAccounts = pgTable("guest_accounts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  accessCode: varchar("access_code", { length: 8 }).notNull(),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+  lastSeenAt: timestamp("last_seen_at").notNull().default(sql`now()`),
+  expiresAt: timestamp("expires_at").notNull(),
+  status: text("status").notNull().default("active").$type<GuestAccountStatus>(),
+  createdFromIp: varchar("created_from_ip", { length: 45 }), // IPv6 compatible
+  createdUserAgent: text("created_user_agent"),
+  browserFingerprint: varchar("browser_fingerprint", { length: 64 }),
+  recoveryAttempts: integer("recovery_attempts").default(0),
+  lastRecoveryAt: timestamp("last_recovery_at"),
+});
+
+// Guest Books
+export const guestBooks = pgTable("guest_books", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  guestAccountId: varchar("guest_account_id").notNull().references(() => guestAccounts.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  author: text("author").notNull(),
+  description: text("description"),
+  format: text("format").notNull().$type<GuestBookFormat>(),
+  fileSizeBytes: integer("file_size_bytes").notNull(),
+  originalFilename: text("original_filename"),
+  originalFileStorageKey: text("original_file_storage_key"),
+  originalFileContentType: text("original_file_content_type"),
+  flatContent: text("flat_content").notNull(),
+  contentHash: varchar("content_hash", { length: 64 }),
+  wordCount: integer("word_count").default(0),
+  uploadedAt: timestamp("uploaded_at").notNull().default(sql`now()`),
+  expiresAt: timestamp("expires_at").notNull(),
+  isDeleted: boolean("is_deleted").notNull().default(false),
+  deletedAt: timestamp("deleted_at"),
+  // Moderation
+  moderationStatus: text("moderation_status").default("pending").$type<GuestBookModerationStatus>(),
+  moderatedBy: varchar("moderated_by").references(() => users.id),
+  moderatedAt: timestamp("moderated_at"),
+  moderationNotes: text("moderation_notes"),
+});
+
+// Guest Reading Positions
+export const guestReadingPositions = pgTable("guest_reading_positions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  guestAccountId: varchar("guest_account_id").notNull().references(() => guestAccounts.id, { onDelete: "cascade" }),
+  guestBookId: varchar("guest_book_id").notNull().references(() => guestBooks.id, { onDelete: "cascade" }),
+  progressPercent: integer("progress_percent").notNull().default(0),
+  currentPosition: jsonb("current_position").default({}),
+  readingTimeMinutes: integer("reading_time_minutes").default(0),
+  lastReadAt: timestamp("last_read_at").notNull().default(sql`now()`),
+  updatedAt: timestamp("updated_at").notNull().default(sql`now()`),
+});
+
+// Guest Analytics (simplified)
+export const guestAnalytics = pgTable("guest_analytics", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  guestAccountId: varchar("guest_account_id").notNull().references(() => guestAccounts.id, { onDelete: "cascade" }),
+  guestBookId: varchar("guest_book_id").references(() => guestBooks.id, { onDelete: "set null" }),
+  eventType: text("event_type").notNull().$type<GuestAnalyticsEventType>(),
+  eventData: jsonb("event_data").default({}),
+  sessionId: varchar("session_id", { length: 64 }),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+});
+
+// Guest Insert Schemas
+export const insertGuestAccountSchema = createInsertSchema(guestAccounts).pick({
+  accessCode: true,
+  expiresAt: true,
+  status: true,
+  createdFromIp: true,
+  createdUserAgent: true,
+  browserFingerprint: true,
+});
+
+export const insertGuestBookSchema = createInsertSchema(guestBooks).pick({
+  guestAccountId: true,
+  title: true,
+  author: true,
+  description: true,
+  format: true,
+  fileSizeBytes: true,
+  originalFilename: true,
+  originalFileStorageKey: true,
+  originalFileContentType: true,
+  flatContent: true,
+  contentHash: true,
+  wordCount: true,
+  expiresAt: true,
+});
+
+export const updateGuestBookSchema = createInsertSchema(guestBooks).pick({
+  moderationStatus: true,
+  moderatedBy: true,
+  moderatedAt: true,
+  moderationNotes: true,
+  isDeleted: true,
+  deletedAt: true,
+});
+
+export const insertGuestReadingPositionSchema = createInsertSchema(guestReadingPositions).pick({
+  guestAccountId: true,
+  guestBookId: true,
+  progressPercent: true,
+  currentPosition: true,
+  readingTimeMinutes: true,
+});
+
+export const updateGuestReadingPositionSchema = createInsertSchema(guestReadingPositions).pick({
+  progressPercent: true,
+  currentPosition: true,
+  readingTimeMinutes: true,
+  lastReadAt: true,
+});
+
+export const insertGuestAnalyticsSchema = createInsertSchema(guestAnalytics).pick({
+  guestAccountId: true,
+  guestBookId: true,
+  eventType: true,
+  eventData: true,
+  sessionId: true,
+});
+
 // Session Reactions
 export const insertSessionReactionSchema = createInsertSchema(sessionReactions).pick({
   sessionId: true,
@@ -1917,4 +2059,60 @@ export interface ReaderQualityRatingWithDetails extends ReaderQualityRating {
   ratedUser: User;
   raterUser: User;
   club?: Club;
+}
+
+// ============================================
+// GUEST SYSTEM TYPES
+// ============================================
+
+// Guest Account Types
+export type GuestAccount = typeof guestAccounts.$inferSelect;
+export type InsertGuestAccount = z.infer<typeof insertGuestAccountSchema>;
+
+// Guest Book Types
+export type GuestBook = typeof guestBooks.$inferSelect;
+export type InsertGuestBook = z.infer<typeof insertGuestBookSchema>;
+export type UpdateGuestBook = z.infer<typeof updateGuestBookSchema>;
+
+// Guest Reading Position Types
+export type GuestReadingPosition = typeof guestReadingPositions.$inferSelect;
+export type InsertGuestReadingPosition = z.infer<typeof insertGuestReadingPositionSchema>;
+export type UpdateGuestReadingPosition = z.infer<typeof updateGuestReadingPositionSchema>;
+
+// Guest Analytics Types
+export type GuestAnalytics = typeof guestAnalytics.$inferSelect;
+export type InsertGuestAnalytics = z.infer<typeof insertGuestAnalyticsSchema>;
+
+// Guest API Response DTOs
+export interface GuestAccountResponse {
+  guestId: string;
+  accessCode: string;
+  expiresAt: string;
+  hasBook: boolean;
+  canRecover: boolean;
+}
+
+export interface GuestBookResponse {
+  bookId: string;
+  title: string;
+  author: string;
+  format: GuestBookFormat;
+  wordCount: number;
+  uploadedAt: string;
+  expiresAt: string;
+  moderationStatus: GuestBookModerationStatus;
+}
+
+export interface GuestReadingProgressResponse {
+  progressPercent: number;
+  currentPosition: Record<string, unknown>;
+  readingTimeMinutes: number;
+  lastReadAt: string;
+}
+
+export interface GuestAnalyticsSummaryResponse {
+  totalReadingTime: number;
+  sessionsCount: number;
+  averageSessionTime: number;
+  lastActivity: string;
 }

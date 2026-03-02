@@ -35,6 +35,8 @@ import ProfilePage from "@/pages/ProfilePage";
 import Pricing from "@/pages/pricing";
 import ReaderStudio from "@/pages/reader-studio";
 import Readers from "@/pages/readers";
+import GuestLibrary from "@/pages/guest-library";
+import GuestReader from "@/pages/guest-reader";
 import { queryClient } from "./lib/queryClient";
 import { YandexMetrikaTracker } from "./lib/yandexMetrika";
 
@@ -44,6 +46,10 @@ function Router() {
       <Route path="/" component={Home} />
       <Route path="/catalog" component={Catalog} />
       <Route path="/reader-studio" component={ReaderStudio} />
+
+      {/* Guest Routes */}
+      <Route path="/guest/library" component={GuestLibrary} />
+      <Route path="/guest/reader/:bookId" component={GuestReader} />
 
       {/* Club Routes */}
       <Route path="/clubs" component={MyClubs} />

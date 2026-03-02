@@ -1,5 +1,6 @@
 import cron from 'node-cron';
 import { repositories } from '../repositories/index.js';
+import * as GuestRepo from '../repositories/GuestRepository.js';
 import { notificationService } from './notification-service.js';
 import { clubPopularityService } from './club-popularity-service.js';
 import { logger } from '../lib/logger.js';
@@ -163,13 +164,25 @@ class Scheduler {
   }
 
   /**
-   * Очистка старых данных
+   * Очистка старых данных (включая guest систему)
    */
   private async cleanupOldData(): Promise<void> {
     try {
       logger.info('Running cleanup of old data...');
-      // Пока нет массовых операций очистки; оставляем как no-op.
-      logger.debug('Cleanup completed');
+
+      // Очистка просроченных гостевых книг
+      const expiredBooks = await GuestRepo.cleanupExpiredGuestBooks();
+      logger.info({ expiredBooks }, 'Cleaned up expired guest books');
+
+      // Очистка просроченных гостевых аккаунтов
+      const expiredAccounts = await GuestRepo.cleanupExpiredGuestAccounts();
+      logger.info({ expiredAccounts }, 'Cleaned up expired guest accounts');
+
+      // Очистка старой аналитики (>90 дней)
+      const oldAnalytics = await GuestRepo.cleanupOldAnalytics(90);
+      logger.info({ oldAnalytics }, 'Cleaned up old guest analytics');
+
+      logger.info('Guest cleanup completed');
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       logger.error({ error: errorMessage }, 'Error cleaning up old data');

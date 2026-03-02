@@ -22,6 +22,7 @@ import { useState, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { isImpersonating, getImpersonatedUsername, exitImpersonation } from "@/lib/token-store";
+import { GuestStatusBanner } from "@/components/guest/GuestStatusBanner";
 
 export function MainLayout({ children }: { readonly children: React.ReactNode }) {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -266,7 +267,10 @@ export function MainLayout({ children }: { readonly children: React.ReactNode })
           </div>
         </div>
       </header>
-      <main className="flex-1">{children}</main>
+      <main className="flex-1">
+        <GuestStatusBanner />
+        {children}
+      </main>
       <footer className="border-t bg-card py-12 text-muted-foreground">
         <div className="container px-6 md:px-12 grid grid-cols-1 md:grid-cols-4 gap-8">
           <div className="space-y-4">

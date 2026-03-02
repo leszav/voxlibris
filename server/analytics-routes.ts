@@ -335,7 +335,14 @@ router.get('/stats', jwtAuth, requireAdmin, async (req: Request, res: Response) 
     ];
     const funnel = funnelStages.map((item, idx) => {
       const prev = idx === 0 ? item.count : funnelStages[idx - 1]?.count || 0;
-      const percentage = idx === 0 ? 100 : prev > 0 ? Math.round((item.count / prev) * 100) : 0;
+      let percentage: number;
+      if (idx === 0) {
+        percentage = 100;
+      } else if (prev > 0) {
+        percentage = Math.round((item.count / prev) * 100);
+      } else {
+        percentage = 0;
+      }
       return { ...item, percentage };
     });
 

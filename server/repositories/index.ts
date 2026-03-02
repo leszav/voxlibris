@@ -996,3 +996,6 @@ export { ClubSubscriptionsRepository } from './ClubSubscriptionsRepository.js';
 export { ReadingScheduleRepository } from './ReadingScheduleRepository.js';
 export { SessionRecordingsRepository } from './SessionRecordingsRepository.js';
 export { ReaderQualityRatingsRepository } from './ReaderQualityRatingsRepository.js';
+
+// Guest System
+export * from './GuestRepository.js';

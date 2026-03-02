@@ -162,6 +162,13 @@
       "when": 1768829147260,
       "tag": "0031_add_reading_schedule",
       "breakpoints": false
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1770331560000,
+      "tag": "0033_add_guest_system_and_add_guest_books_original_file_storage",
+      "breakpoints": true
     }
   ]
 }

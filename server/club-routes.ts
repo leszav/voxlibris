@@ -1,5 +1,5 @@
 import express from 'express';
-import { jwtAuth, requireActiveUser } from './jwt-middleware.js';
+import { jwtAuth, optionalJwtAuth, requireActiveUser } from './jwt-middleware.js';
 import { storage } from './repositories/index.js';
 import { db } from './db.js';
 import { clubs } from '../shared/schema.js';
@@ -200,15 +200,23 @@ router.get('/', jwtAuth, async (req, res) => {
  * GET /api/clubs/:id
  * Получить детали клуба
  */
-router.get('/:id', jwtAuth, async (req, res) => {
+router.get('/:id', optionalJwtAuth, async (req, res) => {
   try {
-    if (!req.user) {
-      return res.status(401).json({ message: 'Authentication required' });
-    }
-
     const club = await storage.getClub(req.params.id);
     if (!club) {
       return res.status(404).json({ message: 'Club not found' });
+    }
+
+    if (!req.user) {
+      if (club.isPrivate) {
+        return res.status(403).json({
+          message: 'Это закрытый клуб. Для доступа необходимо получить приглашение от участника клуба.',
+          code: 'PRIVATE_CLUB_ACCESS_DENIED',
+          isPrivate: true,
+        });
+      }
+
+      return res.json(club);
     }
 
     // Проверяем доступ к приватному клубу

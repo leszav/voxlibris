@@ -16,7 +16,8 @@ import {
   AlertTriangle,
   Save,
   RefreshCw,
-  MessageCircle
+  MessageCircle,
+  Users
 } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -1016,6 +1017,122 @@ function SMTPSettings() {
   );
 }
 
+// Feature Flags Settings Component
+function FeatureFlagsSettings() {
+  const queryClient = useQueryClient();
+
+  const { data, isLoading, error } = useQuery<{ features: Record<string, boolean> }>({
+    queryKey: ['admin-features'],
+    queryFn: async () => {
+      return apiRequest<{ features: Record<string, boolean> }>('/api/v1/admin/features');
+    },
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: async (enabled: boolean) => {
+      return apiRequest('/api/v1/admin/features/guest-access', {
+        method: 'PUT',
+        body: JSON.stringify({ enabled }),
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin-features'] });
+      void modalAlert({
+        title: "Настройки сохранены",
+        description: "Изменения применены.",
+      });
+    },
+    onError: (error: Error) => {
+      void modalAlert({
+        title: "Ошибка сохранения",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const guestEnabled = data?.features?.['guest.access.enabled'] ?? false;
+
+  if (isLoading) {
+    return (
+      <Card>
+        <CardContent className="p-6">
+          <div className="text-center">
+            <RefreshCw className="h-8 w-8 animate-spin mx-auto mb-4" />
+            <p className="text-gray-600">Загрузка настроек функций...</p>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (error) {
+    return (
+      <Card>
+        <CardContent className="p-6">
+          <div className="text-center">
+            <AlertTriangle className="h-8 w-8 text-red-500 mx-auto mb-4" />
+            <p className="text-red-600">Ошибка загрузки настроек</p>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Users className="h-5 w-5" />
+            Гостевой доступ
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+            <div className="space-y-1">
+              <Label htmlFor="guest_access_enabled">Включить гостевой режим</Label>
+              <p className="text-sm text-gray-500">
+                Разрешить чтение книг без регистрации (гостевой аккаунт)
+              </p>
+            </div>
+            <Switch
+              id="guest_access_enabled"
+              checked={guestEnabled}
+              onCheckedChange={(checked) => updateMutation.mutate(checked)}
+              disabled={updateMutation.isPending}
+            />
+          </div>
+
+          {guestEnabled && (
+            <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
+              <div className="flex items-center gap-2 text-green-800">
+                <Settings className="h-4 w-4" />
+                <span className="text-sm font-medium">Гостевой доступ включён</span>
+              </div>
+              <p className="text-sm text-green-700 mt-2">
+                Пользователи могут читать книги без регистрации через /guest/library
+              </p>
+            </div>
+          )}
+
+          {!guestEnabled && (
+            <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg">
+              <div className="flex items-center gap-2 text-gray-600">
+                <AlertTriangle className="h-4 w-4" />
+                <span className="text-sm font-medium">Гостевой доступ выключен</span>
+              </div>
+              <p className="text-sm text-gray-500 mt-2">
+                Для включения переключите тоггл выше. Изменение применяется мгновенно.
+              </p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 export default function AdminSettings() {
   const queryClient = useQueryClient();
 
@@ -1077,11 +1194,12 @@ export default function AdminSettings() {
         </div>
 
         <Tabs defaultValue="general" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-5">
+          <TabsList className="grid w-full grid-cols-6">
             <TabsTrigger value="general">Общие</TabsTrigger>
             <TabsTrigger value="security">Безопасность</TabsTrigger>
             <TabsTrigger value="smtp">SMTP</TabsTrigger>
             <TabsTrigger value="feedback">Обратная связь</TabsTrigger>
+            <TabsTrigger value="features">Функции</TabsTrigger>
             <TabsTrigger value="monitoring">Мониторинг</TabsTrigger>
           </TabsList>
 
@@ -1106,6 +1224,10 @@ export default function AdminSettings() {
 
           <TabsContent value="feedback" className="space-y-6">
             <FeedbackSettings />
+          </TabsContent>
+
+          <TabsContent value="features" className="space-y-6">
+            <FeatureFlagsSettings />
           </TabsContent>
 
           <TabsContent value="monitoring" className="space-y-6">

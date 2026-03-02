@@ -899,9 +899,10 @@ export default function ClubDetails() {
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const canLoadClubData = !!clubId && isAuthenticated && !authLoading;
+  const canLoadClubData = !!clubId && !authLoading;
+  const canLoadMembersData = !!clubId && isAuthenticated && !authLoading;
   const { data: clubData, isLoading, error } = useClub(clubId, canLoadClubData);
-  const { data: membersData, isLoading: membersLoading } = useClubMembers(clubId, canLoadClubData);
+  const { data: membersData, isLoading: membersLoading } = useClubMembers(clubId, canLoadMembersData);
   const removeMemberMutation = useRemoveMember();
   const deleteBookMutation = useDeleteClubBook(clubId);
 
@@ -926,7 +927,6 @@ export default function ClubDetails() {
   // Теперь обрабатываем условия после всех хуков
   if (!clubId) return <ClubNotFound />;
   if (authLoading) return <ClubLoading />;
-  if (!isAuthenticated) return <ClubAuthRequired />;
   if (isLoading) return <ClubLoading />;
   if (errorComponent) return errorComponent;
 
@@ -1015,11 +1015,13 @@ export default function ClubDetails() {
         </div>
       </div>
 
-      <ChatWidget 
-        clubId={club.id} 
-        onCleanupDeleted={() => handleCleanupChat(0)}
-        canCleanup={isOwner}
-      />
+      {isAuthenticated && isMember && (
+        <ChatWidget 
+          clubId={club.id} 
+          onCleanupDeleted={() => handleCleanupChat(0)}
+          canCleanup={isOwner}
+        />
+      )}
     </MainLayout>
   );
 }

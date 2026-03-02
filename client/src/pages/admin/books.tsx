@@ -82,6 +82,30 @@ interface BooksFilters {
   limit: number;
 }
 
+interface GuestBook {
+  id: string;
+  guestAccountId: string;
+  guestAccessCode: string;
+  title: string;
+  author: string;
+  format: "epub" | "fb2";
+  wordCount: number | null;
+  uploadedAt: string;
+  moderationStatus: "pending" | "approved" | "rejected";
+  moderationNotes: string | null;
+}
+
+interface GuestBooksResponse {
+  books: GuestBook[];
+  pagination: {
+    page: number;
+    limit: number;
+    offset: number;
+    total: number;
+    pages: number;
+  };
+}
+
 async function fetchBooks(filters: BooksFilters): Promise<BooksResponse> {
   const params = new URLSearchParams();
   if (filters.search) params.append('search', filters.search);
@@ -91,6 +115,35 @@ async function fetchBooks(filters: BooksFilters): Promise<BooksResponse> {
   params.append('limit', filters.limit.toString());
 
   return apiRequest<BooksResponse>(`/api/v1/admin/books?${params.toString()}`);
+}
+
+async function fetchGuestBooks(params: { search: string; status: string; page: number; limit: number }): Promise<GuestBooksResponse> {
+  const query = new URLSearchParams();
+  query.append("limit", params.limit.toString());
+  query.append("page", params.page.toString());
+
+  if (params.search) {
+    query.append("search", params.search);
+  }
+
+  if (params.status && params.status !== "all") {
+    query.append("status", params.status);
+  }
+
+  return apiRequest<GuestBooksResponse>(`/api/v1/admin/guest-books?${query.toString()}`);
+}
+
+async function updateGuestBookStatus(bookId: string, status: "approved" | "rejected", notes?: string): Promise<void> {
+  await apiRequest(`/api/v1/admin/guest-books/${bookId}/status`, {
+    method: "PUT",
+    body: JSON.stringify({ status, notes }),
+  });
+}
+
+async function deleteGuestBookAdmin(bookId: string): Promise<void> {
+  await apiRequest(`/api/v1/admin/guest-books/${bookId}`, {
+    method: "DELETE",
+  });
 }
 
 async function deleteBook(bookId: string, source: string): Promise<void> {
@@ -137,6 +190,33 @@ function BookStatusBadge({ status }: Readonly<{ status: Book['status'] }>) {
     default:
       return <Badge variant="secondary">{status}</Badge>;
   }
+}
+
+function GuestBookStatusBadge({ status }: Readonly<{ status: GuestBook["moderationStatus"] }>) {
+  if (status === "approved") {
+    return (
+      <Badge variant="secondary" className="bg-green-50 text-green-700 border-green-200">
+        <CheckCircle className="w-3 h-3 mr-1" />
+        Разрешена
+      </Badge>
+    );
+  }
+
+  if (status === "rejected") {
+    return (
+      <Badge variant="secondary" className="bg-red-50 text-red-700 border-red-200">
+        <Ban className="w-3 h-3 mr-1" />
+        Заблокирована
+      </Badge>
+    );
+  }
+
+  return (
+    <Badge variant="secondary" className="bg-yellow-50 text-yellow-700 border-yellow-200">
+      <Clock className="w-3 h-3 mr-1" />
+      Ожидает проверки
+    </Badge>
+  );
 }
 
 function BookActionsMenu({ book }: Readonly<{ book: Book }>) {
@@ -301,7 +381,7 @@ function BookActionsMenu({ book }: Readonly<{ book: Book }>) {
             <DialogTitle>Заблокировать книгу?</DialogTitle>
             <DialogDescription>
               Укажите причину блокировки книги "{book.title}".
-              {book.source !== 'books' ? " Пользователю будет отправлено email-уведомление." : ""}
+              {book.source === 'books' ? "" : " Пользователю будет отправлено email-уведомление."}
             </DialogDescription>
           </DialogHeader>
 
@@ -509,6 +589,7 @@ function BooksTableSkeleton() {
 }
 
 export default function AdminBooks() {
+  const queryClient = useQueryClient();
   const [filters, setFilters] = useState<BooksFilters>({
     search: '',
     status: 'all',
@@ -516,10 +597,67 @@ export default function AdminBooks() {
     page: 1,
     limit: 20,
   });
+  const [guestStatusFilter, setGuestStatusFilter] = useState<string>("all");
+  const [guestSearchInput, setGuestSearchInput] = useState("");
+  const [guestSearchQuery, setGuestSearchQuery] = useState("");
+  const [guestPage, setGuestPage] = useState(1);
+  const [guestLimit] = useState(20);
 
   const { data, isLoading, error } = useQuery<BooksResponse>({
     queryKey: ['admin-books', filters],
     queryFn: () => fetchBooks(filters),
+  });
+
+  const {
+    data: guestBooksData,
+    isLoading: isGuestBooksLoading,
+  } = useQuery<GuestBooksResponse>({
+    queryKey: ["admin-guest-books", guestSearchQuery, guestStatusFilter, guestPage, guestLimit],
+    queryFn: () => fetchGuestBooks({
+      search: guestSearchQuery,
+      status: guestStatusFilter,
+      page: guestPage,
+      limit: guestLimit,
+    }),
+  });
+
+  const guestStatusMutation = useMutation({
+    mutationFn: ({ bookId, status, notes }: { bookId: string; status: "approved" | "rejected"; notes?: string }) =>
+      updateGuestBookStatus(bookId, status, notes),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["admin-guest-books"] });
+      void modalAlert({
+        title: variables.status === "rejected" ? "Книга заблокирована" : "Книга разрешена",
+        description: variables.status === "rejected"
+          ? "Гостевая книга заблокирована для чтения"
+          : "Гостевая книга разрешена",
+      });
+    },
+    onError: (mutationError: Error) => {
+      void modalAlert({
+        title: "Ошибка",
+        description: mutationError.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const guestDeleteMutation = useMutation({
+    mutationFn: (bookId: string) => deleteGuestBookAdmin(bookId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin-guest-books"] });
+      void modalAlert({
+        title: "Гостевая книга удалена",
+        description: "Книга удалена из гостевой библиотеки",
+      });
+    },
+    onError: (mutationError: Error) => {
+      void modalAlert({
+        title: "Ошибка удаления",
+        description: mutationError.message,
+        variant: "destructive",
+      });
+    },
   });
 
   const handleSearchChange = (search: string) => {
@@ -698,6 +836,213 @@ export default function AdminBooks() {
                 </div>
               );
             })()}
+          </CardContent>
+        </Card>
+
+        {/* Guest Books Moderation */}
+        <Card>
+          <CardContent className="p-0">
+            <div className="p-4 border-b bg-gray-50 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">Гостевые книги</h3>
+                <p className="text-sm text-gray-600">Отдельная модерация и удаление гостевого контента</p>
+              </div>
+              <div className="flex flex-col gap-2 md:flex-row md:items-center">
+                <div className="relative md:w-72">
+                  <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+                  <Input
+                    placeholder="Поиск по названию, автору или коду..."
+                    value={guestSearchInput}
+                    onChange={(event) => setGuestSearchInput(event.target.value)}
+                    className="pl-9"
+                  />
+                </div>
+                <Select
+                  value={guestStatusFilter}
+                  onValueChange={(value) => {
+                    setGuestStatusFilter(value);
+                    setGuestPage(1);
+                  }}
+                >
+                  <SelectTrigger className="w-56">
+                    <SelectValue placeholder="Статус гостевых книг" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Все статусы</SelectItem>
+                    <SelectItem value="pending">Ожидают проверки</SelectItem>
+                    <SelectItem value="approved">Разрешенные</SelectItem>
+                    <SelectItem value="rejected">Заблокированные</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setGuestSearchQuery(guestSearchInput.trim());
+                    setGuestPage(1);
+                  }}
+                >
+                  Найти
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setGuestSearchInput("");
+                    setGuestSearchQuery("");
+                    setGuestStatusFilter("all");
+                    setGuestPage(1);
+                  }}
+                >
+                  Сбросить
+                </Button>
+              </div>
+            </div>
+
+            {isGuestBooksLoading ? (
+              <div className="p-6 text-sm text-gray-500">Загрузка гостевых книг...</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b bg-gray-50">
+                      <th className="text-left p-4 font-medium text-gray-600">Книга</th>
+                      <th className="text-left p-4 font-medium text-gray-600">Гость</th>
+                      <th className="text-left p-4 font-medium text-gray-600">Статус</th>
+                      <th className="text-left p-4 font-medium text-gray-600">Загрузка</th>
+                      <th className="text-right p-4 font-medium text-gray-600">Действия</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(guestBooksData?.books || []).map((book) => (
+                      <tr key={book.id} className="border-b hover:bg-gray-50">
+                        <td className="p-4">
+                          <div className="font-medium text-gray-900">{book.title}</div>
+                          <div className="text-sm text-gray-500">{book.author}</div>
+                        </td>
+                        <td className="p-4">
+                          <code className="text-xs bg-gray-100 rounded px-2 py-1">{book.guestAccessCode}</code>
+                        </td>
+                        <td className="p-4">
+                          <GuestBookStatusBadge status={book.moderationStatus} />
+                        </td>
+                        <td className="p-4 text-sm text-gray-500">
+                          {new Date(book.uploadedAt).toLocaleString("ru")}
+                        </td>
+                        <td className="p-4 text-right">
+                          <div className="flex justify-end gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                globalThis.open(`/api/v1/admin/guest-books/${book.id}/download`, "_blank", "noopener,noreferrer");
+                              }}
+                            >
+                              Скачать
+                            </Button>
+
+                            {book.moderationStatus !== "approved" && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="text-green-600"
+                                onClick={() => {
+                                  guestStatusMutation.mutate({ bookId: book.id, status: "approved" });
+                                }}
+                                disabled={guestStatusMutation.isPending}
+                              >
+                                Разрешить
+                              </Button>
+                            )}
+
+                            {book.moderationStatus !== "rejected" && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="text-red-600"
+                                onClick={() => {
+                                  const reason = globalThis.prompt("Укажите причину блокировки:", "Нарушение правил платформы");
+                                  if (!reason?.trim()) {
+                                    return;
+                                  }
+                                  guestStatusMutation.mutate({
+                                    bookId: book.id,
+                                    status: "rejected",
+                                    notes: reason.trim(),
+                                  });
+                                }}
+                                disabled={guestStatusMutation.isPending}
+                              >
+                                Заблокировать
+                              </Button>
+                            )}
+
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="text-red-700"
+                              onClick={() => {
+                                const confirmed = globalThis.confirm("Удалить гостевую книгу безвозвратно?");
+                                if (!confirmed) {
+                                  return;
+                                }
+                                guestDeleteMutation.mutate(book.id);
+                              }}
+                              disabled={guestDeleteMutation.isPending}
+                            >
+                              Удалить
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+
+                    {(!guestBooksData?.books || guestBooksData.books.length === 0) && (
+                      <tr>
+                        <td colSpan={5} className="p-8 text-center text-sm text-gray-500">
+                          Гостевые книги не найдены
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {!!guestBooksData?.pagination && guestBooksData.pagination.total > 0 && (
+              <div className="p-4 border-t flex items-center justify-between">
+                <p className="text-sm text-gray-600">
+                  Показано {(guestBooksData.pagination.page - 1) * guestBooksData.pagination.limit + 1}
+                  –
+                  {Math.min(
+                    guestBooksData.pagination.page * guestBooksData.pagination.limit,
+                    guestBooksData.pagination.total,
+                  )}
+                  {' '}из {guestBooksData.pagination.total} гостевых книг
+                </p>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={guestBooksData.pagination.page <= 1}
+                    onClick={() => setGuestPage((prev) => Math.max(prev - 1, 1))}
+                  >
+                    Предыдущая
+                  </Button>
+                  <span className="text-sm text-gray-600">
+                    Страница {guestBooksData.pagination.page} из {Math.max(guestBooksData.pagination.pages, 1)}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={guestBooksData.pagination.page >= Math.max(guestBooksData.pagination.pages, 1)}
+                    onClick={() =>
+                      setGuestPage((prev) => Math.min(prev + 1, Math.max(guestBooksData.pagination.pages, 1)))
+                    }
+                  >
+                    Следующая
+                  </Button>
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
 
