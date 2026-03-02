@@ -248,12 +248,12 @@ if (redisEnabled && redisUrl) {
 	redisClient.on("error", (error) => {
 		logger.warn({ error }, "[rate-limit] Redis client error");
 	});
-	// NOSONAR typescript:S7785 - Non-blocking Redis connection
-	redisClient.connect().then(() => {
+	try {
+		await redisClient.connect();
 		logger.info({ redisTarget: redisLogTarget }, "[rate-limit] Redis store connected");
-	}).catch((error) => {
+	} catch (error) {
 		logger.warn({ error, redisTarget: redisLogTarget }, "[rate-limit] Redis connect failed, using memory fallback");
-	});
+	}
 
 	createRedisStore = (namespace: string) =>
 		new RedisStore({
@@ -493,11 +493,11 @@ const speedLimiter = slowDown({
 });
 
 const anonBurstWindowMs = parsePositiveIntEnv("RL_ANON_BURST_WINDOW_MS", 5 * 1000);
-const anonBurstMax = parsePositiveIntEnv("RL_ANON_BURST_MAX", 5);
+const anonBurstMax = parsePositiveIntEnv("RL_ANON_BURST_MAX", 10);
 const anonReadWindowMs = parsePositiveIntEnv("RL_ANON_READ_WINDOW_MS", 60 * 1000);
 const anonReadMax = parsePositiveIntEnv("RL_ANON_READ_MAX", 120);
 const anonWriteWindowMs = parsePositiveIntEnv("RL_ANON_WRITE_WINDOW_MS", 15 * 60 * 1000);
-const anonWriteMax = parsePositiveIntEnv("RL_ANON_WRITE_MAX", 30);
+const anonWriteMax = parsePositiveIntEnv("RL_ANON_WRITE_MAX", 120);
 
 const authReadWindowMs = parsePositiveIntEnv("RL_AUTH_READ_WINDOW_MS", 15 * 60 * 1000);
 const authReadMax = parsePositiveIntEnv("RL_AUTH_READ_MAX", 1200);

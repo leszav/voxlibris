@@ -44,6 +44,7 @@ export interface GuestAnalyticsSummaryResponse {
 
 interface UseGuestState {
   isLoading: boolean;
+  isGuestAccessEnabled: boolean | null;
   error: string | null;
   guest: GuestAccountResponse | null;
   book: GuestBookResponse | null;
@@ -108,11 +109,19 @@ export async function getCurrentGuest(): Promise<GuestAccountResponse | null> {
     return await apiCall<GuestAccountResponse>(`${API_BASE}/me`);
   } catch (e) {
     const apiError = e as ApiError;
+    if (apiError?.code === "GUEST_DISABLED") {
+      throw e;
+    }
     if (apiError?.status === 404 || apiError?.status === 401) {
       return null;
     }
     throw e;
   }
+}
+
+function isGuestDisabledError(error: unknown): boolean {
+  const apiError = error as ApiError;
+  return apiError?.code === "GUEST_DISABLED";
 }
 
 export async function getGuestBook(): Promise<GuestBookResponse | null> {
@@ -242,6 +251,7 @@ export function useGuest(options?: { autoInit?: boolean }) {
   const autoInit = options?.autoInit ?? true;
   const [state, setState] = useState<UseGuestState>({
     isLoading: true,
+    isGuestAccessEnabled: null,
     error: null,
     guest: null,
     book: null,
@@ -265,6 +275,7 @@ export function useGuest(options?: { autoInit?: boolean }) {
       
       setState({
         isLoading: false,
+        isGuestAccessEnabled: true,
         error: null,
         guest,
         book,
@@ -278,6 +289,7 @@ export function useGuest(options?: { autoInit?: boolean }) {
       setState(s => ({
         ...s,
         isLoading: false,
+        isGuestAccessEnabled: isGuestDisabledError(e) ? false : (s.isGuestAccessEnabled ?? true),
         error: normalizedError.message,
       }));
       throw normalizedError;
@@ -289,6 +301,7 @@ export function useGuest(options?: { autoInit?: boolean }) {
     try {
       const guest = await getCurrentGuest();
       let book: GuestBookResponse | null = null;
+      let position: GuestReadingPositionResponse | null = null;
 
       if (guest?.hasBook) {
         try {
@@ -296,19 +309,29 @@ export function useGuest(options?: { autoInit?: boolean }) {
         } catch (bookError) {
           console.warn("Failed to load current guest book:", bookError);
         }
+        if (book) {
+          try {
+            position = await getGuestPosition();
+          } catch (posError) {
+            console.warn("Failed to load reading position:", posError);
+          }
+        }
       }
 
       setState(s => ({
         ...s,
         isLoading: false,
+        isGuestAccessEnabled: true,
         error: null,
         guest,
         book,
+        position,
       }));
     } catch (e) {
       setState(s => ({
         ...s,
         isLoading: false,
+        isGuestAccessEnabled: isGuestDisabledError(e) ? false : (s.isGuestAccessEnabled ?? true),
         error: e instanceof Error ? e.message : "Failed to load guest",
       }));
     }
@@ -319,7 +342,7 @@ export function useGuest(options?: { autoInit?: boolean }) {
     getOrCreateFingerprint();
 
     if (!autoInit) {
-      setState(s => ({ ...s, isLoading: false }));
+      setState(s => ({ ...s, isLoading: false, isGuestAccessEnabled: true }));
       return;
     }
 
@@ -331,21 +354,30 @@ export function useGuest(options?: { autoInit?: boolean }) {
     try {
       const guest = await restoreGuest(code);
       let book: GuestBookResponse | null = null;
-      
+      let position: GuestReadingPositionResponse | null = null;
+
       if (guest.hasBook) {
         try {
           book = await getGuestBook();
         } catch (bookError) {
           console.warn("Failed to load guest book after restore:", bookError);
         }
+        if (book) {
+          try {
+            position = await getGuestPosition();
+          } catch (posError) {
+            console.warn("Failed to load reading position after restore:", posError);
+          }
+        }
       }
-      
+
       setState({
         isLoading: false,
+        isGuestAccessEnabled: true,
         error: null,
         guest,
         book,
-        position: null,
+        position,
         analytics: null,
       });
 
@@ -355,6 +387,7 @@ export function useGuest(options?: { autoInit?: boolean }) {
       setState(s => ({
         ...s,
         isLoading: false,
+        isGuestAccessEnabled: isGuestDisabledError(e) ? false : (s.isGuestAccessEnabled ?? true),
         error: normalizedError.message,
       }));
       throw normalizedError;
@@ -366,6 +399,7 @@ export function useGuest(options?: { autoInit?: boolean }) {
       await logoutGuest();
       setState({
         isLoading: false,
+        isGuestAccessEnabled: true,
         error: null,
         guest: null,
         book: null,
@@ -412,14 +446,13 @@ export function useGuest(options?: { autoInit?: boolean }) {
   }, []);
 
   const refreshPosition = useCallback(async () => {
-    if (!state.book) return;
     try {
       const position = await getGuestPosition();
       setState(s => ({ ...s, position }));
     } catch (e) {
       console.error("Failed to refresh position:", e);
     }
-  }, [state.book]);
+  }, []);
 
   const savePosition = useCallback(async (
     progress: number,
@@ -471,6 +504,7 @@ export function useGuest(options?: { autoInit?: boolean }) {
   return {
     // State
     isLoading: state.isLoading,
+    isGuestAccessEnabled: state.isGuestAccessEnabled,
     error: state.error,
     guest: state.guest,
     book: state.book,

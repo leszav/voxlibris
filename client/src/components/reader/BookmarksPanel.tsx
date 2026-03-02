@@ -14,7 +14,7 @@ interface BookmarksPanelProps {
   onNavigateToBookmark?: (bookmark: Bookmark) => void;
 }
 
-export function BookmarksPanel({ bookId, bookmarks, onNavigateToBookmark }: BookmarksPanelProps) {
+export function BookmarksPanel({ bookId, bookmarks, onNavigateToBookmark }: Readonly<BookmarksPanelProps>) {
   const [isAdding, setIsAdding] = useState(false);
   const [newTitle, setNewTitle] = useState("");
 
@@ -34,7 +34,7 @@ export function BookmarksPanel({ bookId, bookmarks, onNavigateToBookmark }: Book
       {
         position: currentPosition,
         title: newTitle,
-        chapterNumber: 1, // TODO: получать из контекста
+        chapterNumber: 1,
       },
       {
         onSuccess: () => {
@@ -116,10 +116,13 @@ export function BookmarksPanel({ bookId, bookmarks, onNavigateToBookmark }: Book
             >
               <div className="flex items-start justify-between">
                 <div className="flex-1">
-                  <h4 className="font-medium text-sm mb-1 cursor-pointer hover:text-primary transition-colors" 
-                      onClick={() => handleNavigate(bookmark)}>
+                  <Button
+                    variant="ghost"
+                    className="h-auto p-0 font-medium text-sm mb-1 hover:text-primary transition-colors"
+                    onClick={() => handleNavigate(bookmark)}
+                  >
                     {bookmark.title || "Без названия"}
-                  </h4>
+                  </Button>
                   {bookmark.chapterNumber && (
                     <p className="text-xs text-muted-foreground">
                       Глава {bookmark.chapterNumber}

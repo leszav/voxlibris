@@ -83,7 +83,7 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
     root.style.setProperty("--club-reader-line-height", newSettings.lineHeight.toString());
     root.style.setProperty("--club-reader-text-align", newSettings.textAlign);
     root.style.setProperty("--club-reader-content-width", `${newSettings.contentWidth}%`);
-    root.setAttribute('data-club-reader-theme', newSettings.theme);
+    root.dataset.clubReaderTheme = newSettings.theme;
     document.body.classList.remove("club-reader-light", "club-reader-dark", "club-reader-sepia");
     document.body.classList.add(`club-reader-${newSettings.theme}`);
   };
@@ -107,7 +107,7 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
       root.style.removeProperty("--club-reader-line-height");
       root.style.removeProperty("--club-reader-text-align");
       root.style.removeProperty("--club-reader-content-width");
-      root.removeAttribute('data-club-reader-theme');
+      delete root.dataset.clubReaderTheme;
     };
   }, []);
 
@@ -441,7 +441,7 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
               <Settings className="w-4 h-4" />
             </Button>
             
-            {/* TODO: раскомментировать когда функционал закладок будет готов
+            {/* Закладки временно скрыты до включения функционала в UI
             <Button
               variant="outline"
               size="sm"
