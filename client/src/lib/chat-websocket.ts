@@ -146,7 +146,7 @@ export class ChatWebSocketClient {
     this.socket.emit("leave_room", { clubId, channel });
   }
 
-  sendMessage(payload: { clubId: string; channel?: string; text: string; mentions?: string[]; attachments?: Record<string, unknown>[] }) {
+  sendMessage(payload: { clubId: string; channel?: string; text: string; mentions?: string[] }) {
     if (!this.socket?.connected) return;
     this.socket.emit("chat_message", payload);
   }

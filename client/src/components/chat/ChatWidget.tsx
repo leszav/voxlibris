@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { MessageCircle, X, Minimize2, Trash2, Eraser, Smile } from "lucide-react";
+import { MessageCircle, X, Maximize2, Trash2, Eraser, Smile, ChevronDown, Send } from "lucide-react";
 import { useChat } from "@/hooks/use-chat";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import type { ChatMessageWithUser } from "@shared/schema";
 
 interface ChatWidgetProps {
@@ -14,34 +14,115 @@ interface ChatWidgetProps {
   readonly canCleanup?: boolean;
 }
 
+const blockedEmojiPattern = /(?:🏳️‍🌈|🏳️‍⚧️|🌈|👬|👭|👨‍❤️‍👨|👩‍❤️‍👩|👨‍👨‍👧‍👦|👩‍👩‍👧‍👦|👨‍👨‍👧|👨‍👨‍👦|👩‍👩‍👧|👩‍👩‍👦)/u;
+
+function isSameDay(a: Date, b: Date): boolean {
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  );
+}
+
+function formatDayLabel(date: Date): string {
+  const now = new Date();
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+
+  if (isSameDay(date, now)) return "Сегодня";
+  if (isSameDay(date, yesterday)) return "Вчера";
+
+  return date.toLocaleDateString("ru-RU", {
+    day: "2-digit",
+    month: "long",
+    year: "numeric",
+  });
+}
+
+type ChatRenderRow = {
+  message: ChatMessageWithUser;
+  showDateDivider: boolean;
+  dayLabel: string | null;
+  isOwnMessage: boolean;
+  messageTime: string;
+  username: string;
+  userInitial: string;
+  isGroupedWithPrev: boolean;
+  showAvatar: boolean;
+  showUsername: boolean;
+};
+
 export function ChatWidget({ clubId, channel = "general", onCleanupDeleted, canCleanup = false }: Readonly<ChatWidgetProps>) {
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState("");
   const [hasUnread, setHasUnread] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
-  const [chatSize, setChatSize] = useState({ width: 335, height: 409 });
+  const [chatSize, setChatSize] = useState({ width: 436, height: 532 });
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [isIdle, setIsIdle] = useState(false);
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const lastMessageCountRef = useRef(0);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const scrollAreaRef = useRef<HTMLDivElement | null>(null);
+  const scrollViewportRef = useRef<HTMLDivElement | null>(null);
   const chatRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const idleTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const { user } = useAuth();
-  const { messages, participants, sendMessage, deleteMessage, connected, client } = useChat({
+  const { messages, participants, sendMessage, deleteMessage, connected, client, loadingHistory, error } = useChat({
     clubId,
     channel,
   });
 
-  // Автоскролл вниз при новых сообщениях, если окно раскрыто
+  const scrollToBottom = (behavior: ScrollBehavior = "smooth") => {
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior, block: "end" });
+    }
+  };
+
+  const getDistanceToBottom = (): number => {
+    const viewport = scrollViewportRef.current;
+    if (!viewport) return 0;
+    return viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
+  };
+
+  // Умный автоскролл: скроллим вниз только если пользователь и так рядом с концом
   useEffect(() => {
     if (!open) return;
-    if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: "smooth", block: "end" });
+
+    const nearBottom = getDistanceToBottom() < 120;
+    const lastMessage = messages.at(-1);
+    const isOwnLastMessage = Boolean(lastMessage?.user?.id && lastMessage.user.id === user?.id);
+
+    if (nearBottom || isOwnLastMessage) {
+      scrollToBottom("smooth");
     }
-  }, [messages.length, open]);
+  }, [messages.length, open, messages, user?.id]);
+
+  // Подключаемся к viewport ScrollArea чтобы управлять кнопкой "вниз"
+  useEffect(() => {
+    if (!open || !scrollAreaRef.current) return;
+
+    const viewport = scrollAreaRef.current.querySelector<HTMLDivElement>("[data-radix-scroll-area-viewport]");
+    if (!viewport) return;
+
+    scrollViewportRef.current = viewport;
+    const onScroll = () => {
+      const distance = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
+      setShowScrollToBottom(distance > 140);
+    };
+
+    onScroll();
+    viewport.addEventListener("scroll", onScroll, { passive: true });
+
+    return () => {
+      viewport.removeEventListener("scroll", onScroll);
+      scrollViewportRef.current = null;
+    };
+  }, [open]);
 
   // Подсветка пузыря при новых сообщениях, если окно свернуто
   useEffect(() => {
@@ -88,13 +169,30 @@ export function ChatWidget({ clubId, channel = "general", onCleanupDeleted, canC
     }
   };
 
-  const handleSend = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSend = () => {
     const text = input.trim();
     if (!text) return;
     sendMessage(text);
     setInput("");
+    setShowEmojiPicker(false);
   };
+
+  useEffect(() => {
+    if (!inputRef.current) return;
+    inputRef.current.style.height = "auto";
+    inputRef.current.style.height = `${Math.min(inputRef.current.scrollHeight, 132)}px`;
+  }, [input]);
+
+  const handleInputKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key !== "Enter" || e.shiftKey || e.nativeEvent.isComposing) {
+      return;
+    }
+    e.preventDefault();
+    if (!connected) return;
+    handleSend();
+  };
+
+  const canSend = connected && input.trim().length > 0;
 
   const handleCleanupDeleted = async () => {
     if (!onCleanupDeleted) return;
@@ -201,17 +299,22 @@ export function ChatWidget({ clubId, channel = "general", onCleanupDeleted, canC
     {"id": "paper", "char": "📄", "keywords": ["лист", "документ", "письмо"]}
   ];
 
+  const allowedEmojis = useMemo(
+    () => safeEmojis.filter((emoji) => !blockedEmojiPattern.test(emoji.char)),
+    [safeEmojis],
+  );
+
   // Фильтрация эмоджи по поисковому запросу
   const filteredEmojis = useMemo(() => {
-    if (!searchTerm.trim()) return safeEmojis;
+    if (!searchTerm.trim()) return allowedEmojis;
     
     const lowerSearchTerm = searchTerm.toLowerCase();
-    return safeEmojis.filter(emoji => 
+    return allowedEmojis.filter(emoji => 
       emoji.keywords.some(keyword => 
         keyword.toLowerCase().includes(lowerSearchTerm)
       )
     );
-  }, [searchTerm]);
+  }, [searchTerm, allowedEmojis]);
 
   const handleMouseDown = (e: React.MouseEvent) => {
     if (e.target !== e.currentTarget) return;
@@ -223,9 +326,9 @@ export function ChatWidget({ clubId, channel = "general", onCleanupDeleted, canC
     if (!isDragging) return;
     const deltaX = dragStart.x - e.clientX;
     const deltaY = dragStart.y - e.clientY;
-    setChatSize(prev => ({
+    setChatSize((prev) => ({
       width: Math.max(280, prev.width + deltaX),
-      height: Math.max(300, prev.height + deltaY)
+      height: Math.max(300, prev.height + deltaY),
     }));
     setDragStart({ x: e.clientX, y: e.clientY });
   };
@@ -272,6 +375,52 @@ export function ChatWidget({ clubId, channel = "general", onCleanupDeleted, canC
     [messages],
   );
 
+  const renderRows: ChatRenderRow[] = useMemo(() => {
+    return sortedMessages.map((message, index) => {
+      const isOwnMessage = user?.id === message.user?.id;
+      const messageTime = message.createdAt
+        ? new Date(message.createdAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })
+        : "";
+      const username = message.user?.username || "Участник";
+      const userInitial = username.charAt(0).toUpperCase();
+
+      const prev = sortedMessages[index - 1];
+      const currentDate = message.createdAt ? new Date(message.createdAt) : null;
+      const prevDate = prev?.createdAt ? new Date(prev.createdAt) : null;
+      const showDateDivider = Boolean(currentDate && (!prevDate || !isSameDay(currentDate, prevDate)));
+      const isGroupedWithPrev = Boolean(
+        prev &&
+          prev.user?.id === message.user?.id &&
+          currentDate &&
+          prevDate &&
+          isSameDay(currentDate, prevDate),
+      );
+
+      return {
+        message,
+        showDateDivider,
+        dayLabel: showDateDivider && currentDate ? formatDayLabel(currentDate) : null,
+        isOwnMessage,
+        messageTime,
+        username,
+        userInitial,
+        isGroupedWithPrev,
+        showAvatar: !isGroupedWithPrev,
+        showUsername: !isOwnMessage && !isGroupedWithPrev,
+      };
+    });
+  }, [sortedMessages, user?.id]);
+
+  const connectionMeta = useMemo(() => {
+    if (connected) {
+      return { label: "online", dotClass: "bg-emerald-500" };
+    }
+    if (error) {
+      return { label: "ошибка соединения", dotClass: "bg-red-500" };
+    }
+    return { label: "подключение...", dotClass: "bg-amber-500 animate-pulse" };
+  }, [connected, error]);
+
   return (
     <div className="fixed bottom-4 right-4 z-40 flex flex-col items-end gap-2">
       {/* Окно чата */}
@@ -283,18 +432,23 @@ export function ChatWidget({ clubId, channel = "general", onCleanupDeleted, canC
         >
           {/* Resize handle */}
           <div 
-            className="absolute top-0 left-0 w-4 h-4 cursor-nw-resize bg-muted/20 hover:bg-muted/40 transition-colors"
+            className="absolute top-0 left-0 z-10 flex h-8 w-8 items-start justify-start p-[2px] cursor-nw-resize"
             onMouseDown={handleMouseDown}
             aria-hidden="true"
             title="Потяните для изменения размера"
-          />
+          >
+            <div className="pointer-events-none flex h-6 w-6 items-center justify-center rounded-br-sm border-2 border-transparent bg-muted/85 shadow-sm transition-colors">
+              <Maximize2 className="h-3 w-3 rotate-90 text-foreground/90" />
+            </div>
+          </div>
           <div className="flex items-center justify-between px-3 py-2 border-b bg-muted/60">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 pl-7">
               <MessageCircle className="w-4 h-4" />
               <div className="flex flex-col">
                 <span className="text-sm font-medium">Чат клуба</span>
-                <span className="text-xs text-muted-foreground">
-                  {connected ? "online" : "подключение..."} · участников: {participants.length}
+                <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                  <span className={`inline-block h-1.5 w-1.5 rounded-full ${connectionMeta.dotClass}`} />
+                  {connectionMeta.label} · участников: {participants.length}
                 </span>
               </div>
             </div>
@@ -310,9 +464,6 @@ export function ChatWidget({ clubId, channel = "general", onCleanupDeleted, canC
                   <Eraser className="w-3 h-3" />
                 </Button>
               )}
-              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setOpen(false)}>
-                <Minimize2 className="w-3 h-3" />
-              </Button>
               <Button
                 variant="ghost"
                 size="icon"
@@ -326,25 +477,52 @@ export function ChatWidget({ clubId, channel = "general", onCleanupDeleted, canC
             </div>
           </div>
 
-          <ScrollArea className="flex-1 px-3 py-2">
+          <ScrollArea ref={scrollAreaRef} className="flex-1 px-3 py-2">
             <div className="space-y-3 text-sm px-1">
-              {sortedMessages.map((m) => {
-                const isOwnMessage = user?.id === m.user?.id;
-                const messageTime = m.createdAt
-                  ? new Date(m.createdAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
-                  : '';
-                const username = m.user?.username || "Участник";
-                const userInitial = username.charAt(0).toUpperCase();
+              {loadingHistory && (
+                <div className="space-y-2 py-2">
+                  <div className="h-10 w-2/3 animate-pulse rounded-lg bg-muted" />
+                  <div className="h-10 w-1/2 animate-pulse rounded-lg bg-muted" />
+                  <div className="h-10 w-3/4 animate-pulse rounded-lg bg-muted" />
+                </div>
+              )}
+
+              {renderRows.map((row) => {
+                const {
+                  message: m,
+                  showDateDivider,
+                  dayLabel,
+                  isOwnMessage,
+                  messageTime,
+                  username,
+                  userInitial,
+                  isGroupedWithPrev,
+                  showAvatar,
+                  showUsername,
+                } = row;
                 
                 return (
-                  <div key={m.id} className={`group flex ${isOwnMessage ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`flex items-start gap-2 max-w-[75%] ${isOwnMessage ? 'flex-row-reverse' : 'flex-row'}`}>
-                      {/* Avatar */}
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white shrink-0 ${
-                        isOwnMessage ? 'bg-blue-500' : 'bg-gray-500'
-                      }`}>
-                        {userInitial}
+                  <div key={m.id}>
+                    {showDateDivider && dayLabel && (
+                      <div className="my-3 flex items-center gap-2 text-[11px] text-muted-foreground">
+                        <div className="h-px flex-1 bg-border" />
+                        <span>{dayLabel}</span>
+                        <div className="h-px flex-1 bg-border" />
                       </div>
+                    )}
+
+                    <div className={`group flex ${isOwnMessage ? 'justify-end' : 'justify-start'}`}>
+                    <div className={`flex items-start gap-2 max-w-[75%] ${isOwnMessage ? 'flex-row-reverse' : 'flex-row'} ${isGroupedWithPrev ? 'mt-1' : ''}`}>
+                      {/* Avatar */}
+                      {showAvatar ? (
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white shrink-0 ${
+                          isOwnMessage ? 'bg-blue-500' : 'bg-gray-500'
+                        }`}>
+                          {userInitial}
+                        </div>
+                      ) : (
+                        <div className="w-8 shrink-0" aria-hidden="true" />
+                      )}
                       
                       {/* Message bubble */}
                       <div className={`relative px-3 py-2 rounded-2xl shadow-sm ${
@@ -353,7 +531,7 @@ export function ChatWidget({ clubId, channel = "general", onCleanupDeleted, canC
                           : 'bg-gray-100 text-gray-900 rounded-bl-md'
                       } ${m.deletedAt ? 'opacity-60' : ''}`}>
                         {/* Username for other users */}
-                        {!isOwnMessage && (
+                        {showUsername && (
                           <div className="text-xs font-medium text-gray-600 mb-1">
                             {username}
                           </div>
@@ -362,7 +540,7 @@ export function ChatWidget({ clubId, channel = "general", onCleanupDeleted, canC
                         {/* Message text */}
                         <div className={`text-sm leading-relaxed ${
                           m.deletedAt ? 'italic' : ''
-                        } ${isOwnMessage ? 'text-white' : 'text-gray-900'}`}>
+                        } ${isOwnMessage ? 'text-white' : 'text-gray-900'} whitespace-pre-wrap break-words`}>
                           {m.text}
                         </div>
                         
@@ -375,7 +553,6 @@ export function ChatWidget({ clubId, channel = "general", onCleanupDeleted, canC
                           }`}>
                             {messageTime}
                           </span>
-                          
                           {!m.deletedAt && (
                             <button
                               type="button"
@@ -402,13 +579,34 @@ export function ChatWidget({ clubId, channel = "general", onCleanupDeleted, canC
                       </div>
                     </div>
                   </div>
+                  </div>
                 );
               })}
               <div ref={messagesEndRef} />
             </div>
           </ScrollArea>
 
-          <form onSubmit={handleSend} className="border-t px-2 py-2 flex items-center gap-2">
+          {showScrollToBottom && (
+            <div className="pointer-events-none absolute bottom-16 right-3 z-10">
+              <Button
+                type="button"
+                size="icon"
+                className="pointer-events-auto h-8 w-8 rounded-full shadow-md"
+                onClick={() => scrollToBottom("smooth")}
+                title="К последним сообщениям"
+              >
+                <ChevronDown className="h-4 w-4" />
+              </Button>
+            </div>
+          )}
+
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleSend();
+            }}
+            className="relative border-t px-2 py-2 flex items-end gap-2"
+          >
             <div className="relative">
               <Button
                 type="button"
@@ -458,15 +656,29 @@ export function ChatWidget({ clubId, channel = "general", onCleanupDeleted, canC
               )}
             </div>
             
-            <Input
+            <Textarea
+              ref={inputRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleInputKeyDown}
               placeholder={connected ? "Напишите сообщение..." : "Подключаем чат..."}
               disabled={!connected}
-              className="h-8 text-sm"
+              rows={1}
+              className="min-h-[32px] max-h-[132px] resize-none py-1.5 text-sm"
             />
-            <Button type="submit" size="sm" disabled={!connected || !input.trim()}>
-              Отпр.
+            <Button
+              type="submit"
+              size="icon"
+              disabled={!canSend}
+              aria-label="Отправить сообщение"
+              title="Отправить сообщение"
+              className={`h-9 w-9 min-w-[2.25rem] shrink-0 rounded-md p-0 transition-colors ${
+                canSend
+                  ? "bg-cyan-500 text-white hover:bg-cyan-400"
+                  : "bg-muted text-muted-foreground hover:bg-muted"
+              }`}
+            >
+              <Send className="h-4 w-4" />
             </Button>
           </form>
         </div>
