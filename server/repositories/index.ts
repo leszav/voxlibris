@@ -380,6 +380,10 @@ class StorageAdapter implements Partial<IStorage> {
     return this.repos.users.updateUserPassword(userId, passwordHash);
   }
 
+  async updateUserEmail(userId: string, email: string, confirmationToken: string) {
+    return this.repos.users.updateUserEmail(userId, email, confirmationToken);
+  }
+
   async updateUserLastActivity(userId: string) {
     return this.repos.users.updateUserLastActivity(userId);
   }
@@ -392,7 +396,7 @@ class StorageAdapter implements Partial<IStorage> {
     return this.repos.users.updateUserEmailConfirmation(userId, confirmed);
   }
 
-  async updateUserConfirmationToken(userId: string, token: string) {
+  async updateUserConfirmationToken(userId: string, token: string | null) {
     return this.repos.users.updateUserConfirmationToken(userId, token);
   }
 

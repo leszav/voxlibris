@@ -3,7 +3,8 @@ import { z } from "zod";
 import cookieParser from "cookie-parser";
 import { authService } from "./auth-service.js";
 import { storage } from "./repositories/index.js";
-import { jwtAuth } from "./jwt-middleware.js";
+import { jwtAuth, requireActiveUser } from "./jwt-middleware.js";
+import { serializeAuthUser } from "./lib/client-serializers.js";
 import { getPublicBaseUrl } from "./lib/public-base-url.js";
 import { insertUserSchema } from "../shared/schema.js";
 
@@ -44,10 +45,48 @@ const forgotPasswordSchema = z.object({
   message: "Either username or email must be provided"
 });
 
+function respondToLoginError(error: unknown, res: Response): Response {
+  console.error("Login error:", error);
+
+  if (error instanceof Error && error.message === 'EMAIL_NOT_CONFIRMED') {
+    return res.status(403).json({
+      message: "Подтвердите email для входа",
+      code: "EMAIL_NOT_CONFIRMED",
+      userStatus: "pending"
+    });
+  }
+
+  if (error instanceof Error && (error.message === 'ACCOUNT_SUSPENDED' || error.message === 'ACCOUNT_DELETED')) {
+    const isSuspended = error.message === 'ACCOUNT_SUSPENDED';
+    return res.status(403).json({
+      message: isSuspended ? "Аккаунт заблокирован администратором" : "Аккаунт удален",
+      code: error.message
+    });
+  }
+
+  return res.status(500).json({
+    message: error instanceof Error ? error.message : "Ошибка сервера"
+  });
+}
+
 // Reset password schema
 const resetPasswordSchema = z.object({
   token: z.string().min(1),
   password: passwordSchema,
+});
+
+const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1, "Текущий пароль обязателен"),
+  newPassword: passwordSchema,
+});
+
+const changeEmailSchema = z.object({
+  currentPassword: z.string().min(1, "Текущий пароль обязателен"),
+  newEmail: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .regex(EMAIL_REGEX, "Укажите корректный email"),
 });
 
 // Валидация и обработка приглашения при регистрации
@@ -171,7 +210,7 @@ export function setupAuthRoutes(app: Express): void {
 
       res.status(201).json({
         message: "Пользователь успешно зарегистрирован",
-        user: authResult.user,
+        user: serializeAuthUser(authResult.user),
         sessionType: authResult.sessionType
       });
     } catch (error) {
@@ -236,24 +275,11 @@ export function setupAuthRoutes(app: Express): void {
 
       res.json({
         message: "Успешный вход в систему",
-        user: authResult.user,
+        user: serializeAuthUser(authResult.user),
         sessionType: authResult.sessionType
       });
     } catch (error) {
-      console.error("Login error:", error);
-      
-      // Обработка специфичных ошибок
-      if (error instanceof Error && (error.message === 'ACCOUNT_SUSPENDED' || error.message === 'ACCOUNT_DELETED')) {
-        const isSuspended = error.message === 'ACCOUNT_SUSPENDED';
-        return res.status(403).json({ 
-          message: isSuspended ? "Аккаунт заблокирован администратором" : "Аккаунт удален",
-          code: error.message
-        });
-      }
-      
-      res.status(500).json({ 
-        message: error instanceof Error ? error.message : "Ошибка сервера" 
-      });
+      return respondToLoginError(error, res);
     }
   });
 
@@ -436,15 +462,109 @@ export function setupAuthRoutes(app: Express): void {
         }
       }
 
-      // Возвращаем пользователя без пароля
-      const { password: _, ...userWithoutPassword } = user;
-      
       res.json({
-        user: userWithoutPassword
+        user: serializeAuthUser(user)
       });
     } catch (error) {
       console.error("Get current user error:", error);
       res.status(500).json({ message: "Ошибка получения данных пользователя" });
+    }
+  });
+
+  // Change password endpoint (authenticated)
+  app.post("/api/auth/change-password", jwtAuth, requireActiveUser, async (req: Request, res: Response) => {
+    try {
+      if (!req.user) {
+        return res.status(401).json({
+          message: "Требуется аутентификация",
+          code: "NO_AUTH"
+        });
+      }
+
+      const validation = changePasswordSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({
+          message: "Ошибка валидации данных",
+          errors: validation.error.issues,
+        });
+      }
+
+      const { currentPassword, newPassword } = validation.data;
+      if (currentPassword === newPassword) {
+        return res.status(400).json({
+          message: "Новый пароль должен отличаться от текущего",
+          code: "PASSWORD_NOT_CHANGED"
+        });
+      }
+
+      const result = await authService.changePassword(req.user.userId, currentPassword, newPassword);
+      if (!result.success) {
+        return res.status(result.status ?? 400).json({
+          message: result.message,
+          ...(result.code && { code: result.code }),
+        });
+      }
+
+      res.clearCookie('refreshToken', { path: '/' });
+      res.clearCookie('accessToken', { path: '/' });
+
+      return res.json({
+        success: true,
+        message: result.message,
+        ...(result.code && { code: result.code }),
+      });
+    } catch (error) {
+      console.error('Change password endpoint error:', error);
+      return res.status(500).json({
+        message: "Ошибка при смене пароля",
+        code: "CHANGE_PASSWORD_FAILED"
+      });
+    }
+  });
+
+  // Change email endpoint (authenticated)
+  app.post("/api/auth/change-email", jwtAuth, requireActiveUser, async (req: Request, res: Response) => {
+    try {
+      if (!req.user) {
+        return res.status(401).json({
+          message: "Требуется аутентификация",
+          code: "NO_AUTH"
+        });
+      }
+
+      const validation = changeEmailSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({
+          message: "Ошибка валидации данных",
+          errors: validation.error.issues,
+        });
+      }
+
+      const { currentPassword, newEmail } = validation.data;
+      const baseUrl = await getPublicBaseUrl();
+      const result = await authService.requestEmailChange(req.user.userId, currentPassword, newEmail, baseUrl);
+
+      if (!result.success) {
+        return res.status(result.status ?? 400).json({
+          message: result.message,
+          ...(result.code && { code: result.code }),
+        });
+      }
+
+      res.clearCookie('refreshToken', { path: '/' });
+      res.clearCookie('accessToken', { path: '/' });
+
+      return res.json({
+        success: true,
+        message: result.message,
+        ...(result.code && { code: result.code }),
+      });
+    } catch (error) {
+      console.error('Change email endpoint error:', error);
+      return res.status(500).json({
+        message: "Ошибка при смене email",
+        code: "CHANGE_EMAIL_FAILED"
+      });
     }
   });
 
@@ -494,24 +614,17 @@ export function setupAuthRoutes(app: Express): void {
         });
       }
 
-      const result = await authService.resendConfirmationEmail(userId);
-      
-      if (result.success) {
-        res.json({
-          success: true,
-          message: result.message
-        });
-      } else {
-        res.status(400).json({
-          success: false,
-          message: result.message,
-          code: "RESEND_FAILED"
-        });
-      }
+      await authService.resendConfirmationEmail(userId);
+
+      res.json({
+        success: true,
+        message: "Если аккаунт существует, письмо отправлено"
+      });
     } catch (error) {
       console.error('Resend confirmation email error:', error);
-      res.status(500).json({
-        message: "Ошибка при повторной отправке письма"
+      res.json({
+        success: true,
+        message: "Если аккаунт существует, письмо отправлено"
       });
     }
   });

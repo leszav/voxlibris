@@ -8,6 +8,7 @@ import type { InsertClub, ClubMemberRole, InsertClubInvitation, Club, UserRole }
 import { emailService } from './services/email-service.js';
 import crypto from 'node:crypto';
 import { logger } from './lib/logger.js';
+import { serializeClub, serializeClubList, serializeClubMembers } from './lib/client-serializers.js';
 import { getPublicBaseUrl } from './lib/public-base-url.js';
 import { sanitizeClubSettingsInput } from './lib/club-settings-sanitizer.js';
 
@@ -171,7 +172,7 @@ router.post('/', jwtAuth, requireActiveUser, async (req, res) => {
 router.get('/catalog', async (req, res) => {
   try {
     const clubs = await storage.getAllClubs();
-    res.json(clubs);
+    res.json(serializeClubList(clubs));
   } catch (error) {
     console.error('Error getting catalog clubs:', error);
     res.status(500).json({ message: 'Failed to get clubs' });
@@ -189,7 +190,7 @@ router.get('/', jwtAuth, async (req, res) => {
     }
 
     const clubs = await storage.getClubsByUser(req.user.userId);
-    res.json(clubs);
+    res.json(serializeClubList(clubs));
   } catch (error) {
     console.error('Error getting clubs:', error);
     res.status(500).json({ message: 'Failed to get clubs' });
@@ -216,7 +217,7 @@ router.get('/:id', optionalJwtAuth, async (req, res) => {
         });
       }
 
-      return res.json(club);
+      return res.json(serializeClub(club, null));
     }
 
     // Проверяем доступ к приватному клубу
@@ -229,7 +230,8 @@ router.get('/:id', optionalJwtAuth, async (req, res) => {
       });
     }
 
-    res.json(club);
+    const membership = await storage.getUserClubMembership(club.id, req.user.userId);
+    res.json(serializeClub(club, membership?.role ?? null));
   } catch (error) {
     console.error('Error getting club:', error);
     res.status(500).json({ message: 'Failed to get club' });
@@ -339,18 +341,19 @@ router.get('/:id/members', jwtAuth, async (req, res) => {
       return res.status(404).json({ message: 'Club not found' });
     }
 
-    // Проверяем доступ к приватному клубу
-    const access = await canAccessPrivateClub(club, req.user.userId, req.user.role as UserRole);
-    if (!access.allowed) {
-      return res.status(403).json({ 
-        message: access.reason,
-        code: 'PRIVATE_CLUB_ACCESS_DENIED',
-        isPrivate: true
+    const userRole = req.user.role as UserRole;
+    const isSystemAdmin = userRole === 'admin' || userRole === 'moderator';
+    const membership = await storage.getUserClubMembership(club.id, req.user.userId);
+
+    if (!isSystemAdmin && !membership) {
+      return res.status(403).json({
+        message: 'Список участников доступен только участникам клуба',
+        code: 'CLUB_MEMBERSHIP_REQUIRED'
       });
     }
 
     const members = await storage.getClubMembersWithRoles(req.params.id);
-    res.json(members);
+    res.json(serializeClubMembers(members));
   } catch (error) {
     console.error('Error getting club members:', error);
     res.status(500).json({ message: 'Failed to get club members' });
@@ -684,6 +687,18 @@ router.post('/invitations/:token/accept', jwtAuth, async (req, res) => {
     const club = await storage.getClub(invitation.clubId);
     if (!club) {
       return res.status(404).json({ message: 'Club not found' });
+    }
+
+    const currentUser = await storage.getUser(req.user.userId);
+    if (!currentUser) {
+      return res.status(401).json({ message: 'Пользователь не найден' });
+    }
+
+    if (invitation.email && currentUser.email && invitation.email.toLowerCase() !== currentUser.email.toLowerCase()) {
+      return res.status(403).json({
+        message: 'Этот инвайт предназначен для другого email. Пожалуйста, войдите под приглашённым аккаунтом или зарегистрируйтесь.',
+        code: 'INVITE_EMAIL_MISMATCH'
+      });
     }
 
     // Проверяем, не заполнен ли клуб

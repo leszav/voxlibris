@@ -490,40 +490,16 @@ export async function registerRoutes(
       if (!user) {
         return res.status(401).json({ message: "Пользователь не аутентифицирован" });
       }
-      const userId = user.id;
-
       // Check if club exists
       const club = await storage.getClub(clubId);
       if (!club) {
         return res.status(404).json({ message: "Клуб не найден" });
       }
 
-      // Check if already a member
-      const existingMembership = await storage.getUserClubMembership(clubId, userId);
-      if (existingMembership) {
-        return res.status(409).json({ message: "Вы уже являетесь участником этого клуба" });
-      }
-
-      // Check if club is full
-      if (club.memberCount >= club.maxMembers) {
-        return res.status(409).json({ message: "Клуб заполнен" });
-      }
-
-      const membership = await storage.joinClub(clubId, userId);
-
-      await recordAnalyticsEvent(req, {
-        eventType: "club_join",
-        clubId,
-        bookId: null,
-        chapterNumber: null,
-        duration: null,
-        progress: null,
-      });
-
-      res.status(201).json({
-        message: "Вы успешно присоединились к клубу",
-        membership
-      });
+	  return res.status(403).json({
+	    message: "Присоединение к клубу возможно только по приглашению.",
+	    code: "INVITATION_REQUIRED"
+	  });
     } catch (error) {
       console.error("Join club error:", error);
       res.status(500).json({ message: "Внутренняя ошибка сервера" });

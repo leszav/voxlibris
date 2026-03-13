@@ -561,6 +561,7 @@ async confirmEmail(token: string): Promise<{ success: boolean; message: string }
 
     // Обновляем статус пользователя
     await storage.updateUserEmailConfirmation(user.id, true);
+    await storage.updateUserConfirmationToken(user.id, null);
     await storage.updateUserStatus(user.username, 'active');
       
     // Создаем профиль пользователя, если его нет
@@ -678,6 +679,176 @@ async resendConfirmationEmail(userId: string): Promise<{ success: boolean; messa
   } catch (error) {
     console.error('[AuthService] Password reset request error:', error);
     return { emailSent: false };
+  }
+}
+
+/**
+ * Смена пароля авторизованным пользователем
+ * После смены инвалидируются все refresh-сессии пользователя
+ */
+async changePassword(
+  userId: string,
+  currentPassword: string,
+  newPassword: string
+): Promise<{ success: boolean; message: string; code?: string; status?: number }> {
+  try {
+    const user = await storage.getUser(userId);
+    if (!user || user.status === 'deleted') {
+      return {
+        success: false,
+        message: 'Пользователь не найден',
+        code: 'USER_NOT_FOUND',
+        status: 404,
+      };
+    }
+
+    const isCurrentPasswordValid = await bcrypt.compare(currentPassword, user.password);
+    if (!isCurrentPasswordValid) {
+      return {
+        success: false,
+        message: 'Неверный текущий пароль',
+        code: 'INVALID_CURRENT_PASSWORD',
+        status: 400,
+      };
+    }
+
+    const isSamePassword = await bcrypt.compare(newPassword, user.password);
+    if (isSamePassword) {
+      return {
+        success: false,
+        message: 'Новый пароль должен отличаться от текущего',
+        code: 'PASSWORD_NOT_CHANGED',
+        status: 400,
+      };
+    }
+
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    const updatedUser = await storage.updateUserPassword(user.id, hashedPassword);
+
+    if (!updatedUser) {
+      return {
+        success: false,
+        message: 'Не удалось обновить пароль',
+        code: 'PASSWORD_UPDATE_FAILED',
+        status: 500,
+      };
+    }
+
+    await storage.revokeAllUserRefreshTokens(user.id);
+    await storage.invalidatePasswordResetTokensForUser(user.id);
+
+    return {
+      success: true,
+      message: 'Пароль успешно изменен. Выполните вход заново.',
+      code: 'PASSWORD_CHANGED_REAUTH_REQUIRED',
+      status: 200,
+    };
+  } catch (error) {
+    console.error('Change password error:', error);
+    return {
+      success: false,
+      message: 'Ошибка при смене пароля',
+      code: 'CHANGE_PASSWORD_FAILED',
+      status: 500,
+    };
+  }
+}
+
+/**
+ * Смена email авторизованным пользователем
+ * Новый email требует подтверждения, все refresh-сессии инвалидируются
+ */
+async requestEmailChange(
+  userId: string,
+  currentPassword: string,
+  newEmail: string,
+  baseUrl?: string
+): Promise<{ success: boolean; message: string; code?: string; status?: number }> {
+  try {
+    const normalizedEmail = newEmail.trim().toLowerCase();
+
+    const user = await storage.getUser(userId);
+    if (!user || user.status === 'deleted') {
+      return {
+        success: false,
+        message: 'Пользователь не найден',
+        code: 'USER_NOT_FOUND',
+        status: 404,
+      };
+    }
+
+    const isCurrentPasswordValid = await bcrypt.compare(currentPassword, user.password);
+    if (!isCurrentPasswordValid) {
+      return {
+        success: false,
+        message: 'Неверный текущий пароль',
+        code: 'INVALID_CURRENT_PASSWORD',
+        status: 400,
+      };
+    }
+
+    if (user.email.toLowerCase() === normalizedEmail) {
+      return {
+        success: false,
+        message: 'Указан текущий email. Введите новый адрес.',
+        code: 'EMAIL_NOT_CHANGED',
+        status: 400,
+      };
+    }
+
+    const existingUserByEmail = await storage.getUserByEmail(normalizedEmail);
+    if (existingUserByEmail && existingUserByEmail.id !== user.id) {
+      return {
+        success: false,
+        message: 'Пользователь с таким email уже существует',
+        code: 'EMAIL_ALREADY_IN_USE',
+        status: 409,
+      };
+    }
+
+    const confirmationToken = randomBytes(32).toString('hex');
+    const emailSent = await emailService.sendRegistrationConfirmation({
+      email: normalizedEmail,
+      username: user.username,
+      confirmationToken,
+      baseUrl,
+    });
+
+    if (!emailSent) {
+      return {
+        success: false,
+        message: 'Не удалось отправить письмо подтверждения на новый email',
+        code: 'EMAIL_CONFIRMATION_SEND_FAILED',
+        status: 503,
+      };
+    }
+
+    const updatedUser = await storage.updateUserEmail(user.id, normalizedEmail, confirmationToken);
+    if (!updatedUser) {
+      return {
+        success: false,
+        message: 'Не удалось обновить email',
+        code: 'EMAIL_UPDATE_FAILED',
+        status: 500,
+      };
+    }
+
+    await storage.revokeAllUserRefreshTokens(user.id);
+
+    return {
+      success: true,
+      message: 'Email изменен. Подтвердите новый адрес через письмо и войдите заново.',
+      code: 'EMAIL_CHANGED_CONFIRMATION_REQUIRED',
+      status: 200,
+    };
+  } catch (error) {
+    console.error('Request email change error:', error);
+    return {
+      success: false,
+      message: 'Ошибка при смене email',
+      code: 'CHANGE_EMAIL_FAILED',
+      status: 500,
+    };
   }
 }
 

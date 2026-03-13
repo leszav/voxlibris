@@ -69,6 +69,10 @@ export interface ClubProgress {
   };
 }
 
+export interface ClubDetailsResponse extends ClubWithDetails {
+  viewerMembershipRole?: ClubMemberRole | null;
+}
+
 // Получить все клубы для каталога (не требует аутентификации)
 export function useCatalogClubs() {
   return useQuery({
@@ -106,8 +110,8 @@ export function useUserClubs() {
 export function useClub(clubId: string, enabled: boolean = true) {
   return useQuery({
     queryKey: ["club", clubId],
-    queryFn: async (): Promise<ClubWithDetails> => {
-      return apiRequest<ClubWithDetails>(`/api/clubs/${clubId}`);
+    queryFn: async (): Promise<ClubDetailsResponse> => {
+      return apiRequest<ClubDetailsResponse>(`/api/clubs/${clubId}`);
     },
     enabled: !!clubId && enabled,
   });

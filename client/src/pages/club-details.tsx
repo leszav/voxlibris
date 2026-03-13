@@ -42,7 +42,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { VoxLibrisUpload } from "@/components/ui/voxlibris-upload";
 import { useAuth } from "@/hooks/use-auth";
 import { useDeleteClubBook } from "@/hooks/use-books-v2";
-import { useClub, useClubMembers, useRemoveMember, type ClubMemberWithUser } from "@/hooks/use-clubs";
+import { useClub, useClubMembers, useRemoveMember, type ClubDetailsResponse, type ClubMemberWithUser } from "@/hooks/use-clubs";
 import { modalConfirm, useToast } from "@/hooks/use-toast";
 import { getAccessToken } from "@/lib/token-store";
 import DOMPurify from "dompurify";
@@ -62,7 +62,7 @@ interface ClubSettings {
   shortDescription?: string;
 }
 
-type ClubWithOptionalBook = ClubWithDetails & { book?: ClubWithDetails["book"] | null };
+type ClubWithOptionalBook = ClubDetailsResponse & { book?: ClubDetailsResponse["book"] | null };
 
 // Вспомогательная функция для получения варианта badge по роли
 const getMemberRoleBadgeVariant = (role: ClubMemberRole): "default" | "secondary" | "outline" => {
@@ -219,11 +219,10 @@ function useClubErrorHandling(error: unknown, setLocation: (path: string) => voi
   );
 }
 
-function useClubPermissions(members: ClubMemberWithUser[], user: User | null) {
-  const currentUserMember = members.find((m) => m.id === user?.id);
-  const isOwner = currentUserMember?.role === "owner";
-  const isModerator = currentUserMember?.role === "moderator";
-  const isMember = !!currentUserMember;
+function useClubPermissions(currentUserRole: ClubMemberRole | null | undefined, user: User | null) {
+  const isOwner = currentUserRole === "owner";
+  const isModerator = currentUserRole === "moderator";
+  const isMember = Boolean(currentUserRole);
   
   const canRemove = (memberRole: string, memberId: string) => {
     if (!user?.id || memberId === user.id) return false;
@@ -232,7 +231,7 @@ function useClubPermissions(members: ClubMemberWithUser[], user: User | null) {
     return false;
   };
   
-  return { isOwner, isModerator, isMember, canRemove, currentUserMember };
+  return { isOwner, isModerator, isMember, canRemove };
 }
 
 function useClubActions({
@@ -647,81 +646,89 @@ interface MembersListCardProps {
   readonly clubId: string;
   readonly clubTitle: string;
   readonly members: ClubMemberWithUser[];
+  readonly memberCount: number;
   readonly membersLoading: boolean;
+  readonly canViewMembers: boolean;
   readonly isOwner: boolean;
   readonly isModerator: boolean;
   readonly canRemove: (role: string, memberId: string) => boolean;
   readonly handleRemoveMember: (memberId: string, username: string) => void;
 }
 
-function MembersListCard({ clubId, clubTitle, members, membersLoading, isOwner, isModerator, canRemove, handleRemoveMember }: MembersListCardProps) {
+function MembersListCard({ clubId, clubTitle, members, memberCount, membersLoading, canViewMembers, isOwner, isModerator, canRemove, handleRemoveMember }: MembersListCardProps) {
   return (
     <div className="bg-card rounded-xl border p-6 shadow-sm">
       <h3 className="font-serif font-bold text-xl mb-4 flex items-center justify-between">
         <span>Участники</span>
         <div className="flex items-center gap-2">
           <Badge variant="outline" className="font-sans font-normal text-xs">
-            {membersLoading ? "Загрузка..." : `${members.length} участников`}
+            {membersLoading ? "Загрузка..." : `${memberCount} участников`}
           </Badge>
-          {(isOwner || isModerator) && (
+          {canViewMembers && (isOwner || isModerator) && (
             <InviteMemberModal clubId={clubId} clubTitle={clubTitle} />
           )}
         </div>
       </h3>
-      <div className="space-y-4">
-        {membersLoading ? (
-          <div className="flex items-center justify-center py-4">
-            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-            <span className="ml-2 text-sm text-muted-foreground">
-              Загружаем участников...
-            </span>
-          </div>
-        ) : (
-          members.map((member) => (
-            <div key={member.id} className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <Avatar>
-                  <AvatarFallback className="bg-primary/10 text-primary font-bold">
-                    {member.username.substring(0, 2).toUpperCase()}
-                  </AvatarFallback>
-                </Avatar>
-                <div>
-                  <p className="text-sm font-medium">{member.username}</p>
-                  <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                    <span>
-                      Присоединился {new Date(member.joinedAt).toLocaleDateString()}
-                    </span>
+      {canViewMembers ? (
+        <div className="space-y-4">
+          {membersLoading ? (
+            <div className="flex items-center justify-center py-4">
+              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+              <span className="ml-2 text-sm text-muted-foreground">
+                Загружаем участников...
+              </span>
+            </div>
+          ) : (
+            members.map((member) => (
+              <div key={member.id} className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <Avatar>
+                    <AvatarFallback className="bg-primary/10 text-primary font-bold">
+                      {member.username.substring(0, 2).toUpperCase()}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div>
+                    <p className="text-sm font-medium">{member.username}</p>
+                    <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                      <span>
+                        Присоединился {new Date(member.joinedAt).toLocaleDateString()}
+                      </span>
+                    </div>
                   </div>
                 </div>
+                <div className="flex items-center gap-2">
+                  <Badge variant={getMemberRoleBadgeVariant(member.role)}>
+                    {member.role === "owner" && "Владелец"}
+                    {member.role === "moderator" && "Модератор"}
+                    {member.role === "member" && "Участник"}
+                  </Badge>
+                  {(isOwner || isModerator) && canRemove(member.role, member.id) && (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button size="icon" variant="ghost" className="h-8 w-8">
+                          <MoreHorizontal className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem
+                          className="text-destructive"
+                          onClick={() => handleRemoveMember(member.id, member.username)}
+                        >
+                          <Trash2 className="h-4 w-4 mr-2" /> Удалить из клуба
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  )}
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                <Badge variant={getMemberRoleBadgeVariant(member.role)}>
-                  {member.role === "owner" && "Владелец"}
-                  {member.role === "moderator" && "Модератор"}
-                  {member.role === "member" && "Участник"}
-                </Badge>
-                {(isOwner || isModerator) && canRemove(member.role, member.id) && (
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button size="icon" variant="ghost" className="h-8 w-8">
-                        <MoreHorizontal className="h-4 w-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem
-                        className="text-destructive"
-                        onClick={() => handleRemoveMember(member.id, member.username)}
-                      >
-                        <Trash2 className="h-4 w-4 mr-2" /> Удалить из клуба
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                )}
-              </div>
-            </div>
-          ))
-        )}
-      </div>
+            ))
+          )}
+        </div>
+      ) : (
+        <div className="rounded-xl border border-dashed bg-muted/30 px-4 py-5 text-sm text-muted-foreground">
+          Список участников доступен только участникам клуба и модераторам.
+        </div>
+      )}
     </div>
   );
 }
@@ -900,8 +907,10 @@ export default function ClubDetails() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const canLoadClubData = !!clubId && !authLoading;
-  const canLoadMembersData = !!clubId && isAuthenticated && !authLoading;
   const { data: clubData, isLoading, error } = useClub(clubId, canLoadClubData);
+  const viewerMembershipRole = clubData?.viewerMembershipRole ?? null;
+  const canViewMembers = Boolean(viewerMembershipRole) || ['admin', 'moderator'].includes(user?.role ?? '');
+  const canLoadMembersData = !!clubId && isAuthenticated && !authLoading && canViewMembers;
   const { data: membersData, isLoading: membersLoading } = useClubMembers(clubId, canLoadMembersData);
   const removeMemberMutation = useRemoveMember();
   const deleteBookMutation = useDeleteClubBook(clubId);
@@ -910,7 +919,7 @@ export default function ClubDetails() {
   const errorComponent = useClubErrorHandling(error, setLocation);
   
   const members = Array.isArray(membersData) ? membersData : [];
-  const permissions = useClubPermissions(members, user);
+  const permissions = useClubPermissions(viewerMembershipRole, user);
   const { isOwner, isModerator, isMember, canRemove } = permissions;
 
   const { handleRemoveMember, handleDeleteBook, handleLeaveClub, handleCleanupChat } = useClubActions({
@@ -989,7 +998,9 @@ export default function ClubDetails() {
             clubId={clubId}
             clubTitle={club.title}
             members={members}
+            memberCount={club.memberCount || members.length}
             membersLoading={membersLoading}
+            canViewMembers={canViewMembers}
             isOwner={isOwner}
             isModerator={isModerator}
             canRemove={canRemove}

@@ -369,10 +369,30 @@ function getAuthIdentifier(req: Request): string | null {
 	return null;
 }
 
+function getResendConfirmationIdentifier(req: Request): string | null {
+	if (!req.body || typeof req.body !== "object") {
+		return null;
+	}
+
+	const userId = (req.body as Record<string, unknown>).userId;
+	if (typeof userId !== "string") {
+		return null;
+	}
+
+	const normalized = userId.trim().toLowerCase();
+	return normalized.length > 0 ? normalized.slice(0, 128) : null;
+}
+
 function getAuthRateLimitKey(req: Request): string {
 	const ipKey = getClientIpKey(req);
 	const identifier = getAuthIdentifier(req);
 	return identifier ? `auth:${identifier}:${ipKey}` : `auth:${ipKey}`;
+}
+
+function getResendConfirmationRateLimitKey(req: Request): string {
+	const ipKey = getClientIpKey(req);
+	const identifier = getResendConfirmationIdentifier(req);
+	return identifier ? `resend:${identifier}:${ipKey}` : `resend:${ipKey}`;
 }
 
 function getGeneralRateLimitKey(req: Request): string {
@@ -397,6 +417,23 @@ const authLimiter = rateLimit({
 		retryAfter: "15 minutes",
 	},
 	skipSuccessfulRequests: true,
+});
+
+const resendConfirmationWindowMs = parsePositiveIntEnv("RL_RESEND_CONFIRMATION_WINDOW_MS", 60 * 60 * 1000);
+const resendConfirmationMax = parsePositiveIntEnv("RL_RESEND_CONFIRMATION_MAX", 3);
+
+const resendConfirmationLimiter = rateLimit({
+	...rateLimitCommonOptions,
+	...rateLimitHeadersOptions,
+	...withRateLimitStore("auth-resend-confirmation"),
+	windowMs: resendConfirmationWindowMs,
+	max: resendConfirmationMax,
+	keyGenerator: getResendConfirmationRateLimitKey,
+	message: {
+		error: "Too many confirmation email requests. Please try again later.",
+		code: "RESEND_CONFIRMATION_LIMIT",
+		retryAfter: `${Math.ceil(resendConfirmationWindowMs / 1000)} seconds`,
+	},
 });
 
 // ============================================
@@ -640,6 +677,7 @@ app.use("/api/auth/login", authLimiter);
 app.use("/api/auth/register", authLimiter);
 app.use("/api/auth/forgot-password", authLimiter);
 app.use("/api/auth/reset-password", authLimiter);
+app.use("/api/auth/resend-confirmation", resendConfirmationLimiter);
 app.use("/api/auth", speedLimiter);
 app.use("/api", anonymousBurstLimiter);
 app.use("/api", anonymousReadLimiter);

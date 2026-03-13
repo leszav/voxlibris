@@ -20,7 +20,7 @@ function parsePositiveInt(value: string | undefined, fallback: number): number {
 }
 
 function sanitizeUploadFileName(fileName: string): string {
-    return fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+    return fileName.replaceAll(/[^a-zA-Z0-9._-]/g, '_');
 }
 
 const MAX_BOOK_UPLOAD_BYTES = parsePositiveInt(process.env.MAX_BOOK_UPLOAD_MB, 50) * 1024 * 1024;
@@ -56,6 +56,9 @@ interface UploadSession {
 type UploadMetadata = Omit<Partial<BookMetadata>, 'coverImageData' | 'coverImageType'> & {
     coverImageData?: Buffer | string | null;
     coverImageType?: string | null;
+    publicationYear?: string | number;
+    genre?: string;
+    recommendedReadingOrder?: string | number;
 };
 
 function normalizeUploadMetadata(metadata: UploadMetadata): UploadMetadata {
@@ -78,6 +81,76 @@ function normalizeUploadMetadata(metadata: UploadMetadata): UploadMetadata {
 
 const uploadSessions = new Map<string, UploadSession>();
 
+// Helper function to extract cover buffer from various sources
+function extractCoverBuffer(metadata: UploadMetadata, session: UploadSession): Buffer | undefined {
+    // Try new metadata first
+    if (metadata.coverImageData && typeof metadata.coverImageData === 'string') {
+        try {
+            const matches = metadata.coverImageData.match(/^data:([A-Za-z-+/]+);base64,(.+)$/);
+            if (matches?.length === 3) {
+                return Buffer.from(matches[2], 'base64');
+            }
+            return Buffer.from(metadata.coverImageData, 'base64');
+        } catch (e) {
+            console.warn('Failed to parse new cover image', e);
+        }
+    }
+    
+    if (metadata.coverImageData === null) {
+        return undefined;
+    }
+    
+    // Fallback to session metadata
+    if (typeof session.parsedMetadata.coverImageData === 'string') {
+        try {
+            const matches = session.parsedMetadata.coverImageData.match(/^data:([A-Za-z-+/]+);base64,(.+)$/);
+            if (matches?.length === 3) {
+                return Buffer.from(matches[2], 'base64');
+            }
+            return Buffer.from(session.parsedMetadata.coverImageData, 'base64');
+        } catch (e) {
+            console.warn('Failed to parse cached cover image', e);
+        }
+    }
+    
+    if (Buffer.isBuffer(session.parsedMetadata.coverImageData)) {
+        return session.parsedMetadata.coverImageData;
+    }
+    
+    return undefined;
+}
+
+// Helper function to upload optimized cover
+async function uploadOptimizedCover(
+    coverBuffer: Buffer,
+    clubId: string,
+    sessionId: string
+): Promise<string | undefined> {
+    try {
+        const optimized = await optimizeImage(coverBuffer, 'cover');
+        const coverPath = `covers/club/${clubId}/${sessionId}-cover.webp`;
+        
+        logger.info({ 
+            coverPath, 
+            originalSize: optimized.originalSize,
+            optimizedSize: optimized.optimizedSize,
+            compressionRatio: optimized.compressionRatio 
+        }, '[ClubBooks] Uploading optimized cover');
+        
+        const coverResult = await fileStorage.uploadFile(
+            optimized.buffer, 
+            coverPath, 
+            optimized.mimeType
+        );
+        const coverUrl = `/api/storage/${coverResult.key}`;
+        logger.info({ key: coverResult.key, url: coverUrl }, '[ClubBooks] Cover uploaded');
+        return coverUrl;
+    } catch (e) {
+        logger.error({ error: e }, '[ClubBooks] Failed to upload cover');
+    }
+    return undefined;
+}
+
 // Helper function to process cover image data
 async function processCoverImage(
     metadata: UploadMetadata,
@@ -85,61 +158,12 @@ async function processCoverImage(
     clubId: string,
     sessionId: string
 ): Promise<string | undefined> {
-    let coverBuffer: Buffer | undefined;
-
-    if (metadata.coverImageData && typeof metadata.coverImageData === 'string') {
-        try {
-            const matches = metadata.coverImageData.match(/^data:([A-Za-z-+/]+);base64,(.+)$/);
-            if (matches?.length === 3) {
-                coverBuffer = Buffer.from(matches[2], 'base64');
-            } else {
-                coverBuffer = Buffer.from(metadata.coverImageData, 'base64');
-            }
-        } catch (e) {
-            console.warn('Failed to parse new cover image', e);
-        }
-    } else if (metadata.coverImageData === null) {
-        coverBuffer = undefined;
-    } else if (typeof session.parsedMetadata.coverImageData === 'string') {
-        try {
-            const matches = session.parsedMetadata.coverImageData.match(/^data:([A-Za-z-+/]+);base64,(.+)$/);
-            if (matches?.length === 3) {
-                coverBuffer = Buffer.from(matches[2], 'base64');
-            } else {
-                coverBuffer = Buffer.from(session.parsedMetadata.coverImageData, 'base64');
-            }
-        } catch (e) {
-            console.warn('Failed to parse cached cover image', e);
-        }
-    } else if (Buffer.isBuffer(session.parsedMetadata.coverImageData)) {
-        coverBuffer = session.parsedMetadata.coverImageData;
-    }
-
+    const coverBuffer = extractCoverBuffer(metadata, session);
+    
     if (coverBuffer) {
-        try {
-            // Оптимизируем обложку перед загрузкой
-            const optimized = await optimizeImage(coverBuffer, 'cover');
-            const coverPath = `covers/club/${clubId}/${sessionId}-cover.webp`;
-            
-            logger.info({ 
-                coverPath, 
-                originalSize: optimized.originalSize,
-                optimizedSize: optimized.optimizedSize,
-                compressionRatio: optimized.compressionRatio 
-            }, '[ClubBooks] Uploading optimized cover');
-            
-            const coverResult = await fileStorage.uploadFile(
-                optimized.buffer, 
-                coverPath, 
-                optimized.mimeType
-            );
-            const coverUrl = `/api/storage/${coverResult.key}`;
-            logger.info({ key: coverResult.key, url: coverUrl }, '[ClubBooks] Cover uploaded');
-            return coverUrl;
-        } catch (e) {
-            logger.error({ error: e }, '[ClubBooks] Failed to upload cover');
-        }
+        return uploadOptimizedCover(coverBuffer, clubId, sessionId);
     }
+    
     return undefined;
 }
 
@@ -282,6 +306,59 @@ router.post('/clubs/:clubId/books/upload', jwtAuth, requireActiveUser, upload.si
     }
 });
 
+// Helper function to validate upload session
+function validateUploadSession(
+    session: UploadSession | undefined,
+    userId: string,
+    clubId: string
+): { valid: boolean; error?: string; status?: number } {
+    if (!session) {
+        return { valid: false, error: 'Session not found or expired', status: 404 };
+    }
+    if (session.userId !== userId) {
+        return { valid: false, error: 'Forbidden', status: 403 };
+    }
+    if (session.clubId !== clubId) {
+        return { valid: false, error: 'Session mismatch', status: 400 };
+    }
+    return { valid: true };
+}
+
+interface ClubBookDataParams {
+    clubId: string;
+    userId: string;
+    fileHash: string;
+    format: BookFormat;
+    session: UploadSession;
+    metadata: UploadMetadata;
+    storagePath: string;
+    encryptedKey: string;
+    coverUrl: string | undefined;
+}
+
+// Helper function to build club book creation data
+function buildClubBookData(params: ClubBookDataParams) {
+    const { clubId, userId, fileHash, format, session, metadata, storagePath, encryptedKey, coverUrl } = params;
+    
+    return {
+        clubId,
+        uploadedByUserId: userId,
+        title: metadata.title || session.parsedMetadata.title || session.originalName,
+        author: metadata.author || session.parsedMetadata.author || 'Unknown',
+        description: metadata.description,
+        format,
+        fileHash,
+        fileSizeBytes: session.fileSize,
+        language: metadata.language,
+        publicationYear: metadata.publicationYear ? Number.parseInt(String(metadata.publicationYear)) : undefined,
+        genre: metadata.genre,
+        recommendedReadingOrder: metadata.recommendedReadingOrder ? Number.parseInt(String(metadata.recommendedReadingOrder)) : undefined,
+        encryptedContentKey: encryptedKey,
+        storagePath,
+        coverUrl,
+    };
+}
+
 // 2. Confirm Club Upload
 router.post('/clubs/:clubId/books/upload/:sessionId/confirm', jwtAuth, requireActiveUser, async (req, res) => {
     try {
@@ -289,52 +366,43 @@ router.post('/clubs/:clubId/books/upload/:sessionId/confirm', jwtAuth, requireAc
         const { metadata } = req.body;
         const session = uploadSessions.get(sessionId);
 
-        if (!session) return res.status(404).json({ error: 'Session not found or expired' });
-        if (session.userId !== req.user?.id) return res.status(403).json({ error: 'Forbidden' });
-        if (session.clubId !== clubId) return res.status(400).json({ error: 'Session mismatch' });
+        const validation = validateUploadSession(session, req.user!.id, clubId);
+        if (!validation.valid) {
+            return res.status(validation.status!).json({ error: validation.error });
+        }
 
-        const fileBuffer = await fileStorage.getFile(session.tempStorageKey);
+        const fileBuffer = await fileStorage.getFile(session!.tempStorageKey);
         const fileHash = crypto.createHash('sha256').update(fileBuffer).digest('hex');
-        const fileType = await BookParserFactory.detectFileTypeFromBuffer(fileBuffer, session.originalName);
+        const fileType = await BookParserFactory.detectFileTypeFromBuffer(fileBuffer, session!.originalName);
         if (!fileType) {
             return res.status(400).json({ error: 'Invalid or unsupported file type' });
         }
         const format = fileType.toUpperCase() as BookFormat;
 
-        // Encrypt and upload book file
-        const { storagePath, encryptedKey } = await encryptAndUploadBookFile(
-            fileBuffer,
-            clubId,
-            sessionId
-        );
+        const { storagePath, encryptedKey } = await encryptAndUploadBookFile(fileBuffer, clubId, sessionId);
+        const coverUrl = await processCoverImage(metadata, session!, clubId, sessionId);
 
-        // Process cover image
-        const coverUrl = await processCoverImage(metadata, session, clubId, sessionId);
-
-        const book = await storage.createClubBook({
+        const bookData = buildClubBookData({
             clubId,
-            uploadedByUserId: req.user.id,
-            title: metadata.title || session.parsedMetadata.title || session.originalName,
-            author: metadata.author || session.parsedMetadata.author || 'Unknown',
-            description: metadata.description,
-            format: format,
+            userId: req.user!.id,
             fileHash,
-            fileSizeBytes: session.fileSize,
-            language: metadata.language,
-            publicationYear: metadata.publicationYear ? Number.parseInt(metadata.publicationYear) : undefined,
-            genre: metadata.genre,
-            recommendedReadingOrder: metadata.recommendedReadingOrder ? Number.parseInt(metadata.recommendedReadingOrder) : undefined,
-            encryptedContentKey: encryptedKey,
-            storagePath: storagePath,
-            coverUrl: coverUrl,
+            format,
+            session: session!,
+            metadata,
+            storagePath,
+            encryptedKey,
+            coverUrl,
         });
 
+        const book = await storage.createClubBook(bookData);
         await storage.updateClub(clubId, { bookId: book.id });
+
         try {
-            await fileStorage.deleteFile(session.tempStorageKey);
+            await fileStorage.deleteFile(session!.tempStorageKey);
         } catch (error) {
-            logger.warn({ error, key: session.tempStorageKey }, '[ClubBooks] Failed to delete temp upload file after confirm');
+            logger.warn({ error, key: session!.tempStorageKey }, '[ClubBooks] Failed to delete temp upload file after confirm');
         }
+
         uploadSessions.delete(sessionId);
         res.json(book);
     } catch (error) {

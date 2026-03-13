@@ -1,6 +1,6 @@
 import type { ClubWithDetails } from "@shared/schema";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, BookOpen, Edit, Loader2, TrendingUp, Users, Target } from "lucide-react";
+import { ArrowLeft, BookOpen, Edit, Loader2, TrendingUp, Users, Target, Shield, KeyRound, Mail } from "lucide-react";
 import * as React from "react";
 import { useLocation, useParams } from "wouter";
 import { MainLayout } from "@/components/layout/MainLayout";
@@ -151,7 +151,7 @@ export default function ProfilePage() {
   const { id } = useParams();
   const { toast } = useToast();
   const [, setLocation] = useLocation();
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
 
   // Если ID не указан, используем ID текущего пользователя
   const profileId = id || user?.id || "current";
@@ -229,6 +229,11 @@ export default function ProfilePage() {
   const currentYear = new Date().getFullYear();
   const [goalDialogOpen, setGoalDialogOpen] = React.useState(false);
   const [newGoal, setNewGoal] = React.useState(12);
+  const [currentPassword, setCurrentPassword] = React.useState("");
+  const [newPassword, setNewPassword] = React.useState("");
+  const [confirmPassword, setConfirmPassword] = React.useState("");
+  const [newEmail, setNewEmail] = React.useState(user?.email ?? "");
+  const [emailPassword, setEmailPassword] = React.useState("");
 
   // Определяем isOwnProfile здесь, перед использованием
   const currentUserId = user?.id || null;
@@ -288,6 +293,125 @@ export default function ProfilePage() {
       });
     },
   });
+
+  const changePasswordMutation = useMutation({
+    mutationFn: async (data: { currentPassword: string; newPassword: string }) => {
+      const response = await authFetch('/api/auth/change-password', {
+        method: 'POST',
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(data),
+      });
+
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload.message || 'Не удалось сменить пароль');
+      }
+      return payload as { message?: string };
+    },
+    onSuccess: async (data) => {
+      toast({
+        title: "Пароль обновлен",
+        description: data.message || "Войдите снова для продолжения работы",
+      });
+
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+
+      await logout();
+      setLocation('/auth/login');
+    },
+    onError: (error) => {
+      toast({
+        title: "Ошибка смены пароля",
+        description: error instanceof Error ? error.message : "Попробуйте позже",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const changeEmailMutation = useMutation({
+    mutationFn: async (data: { currentPassword: string; newEmail: string }) => {
+      const response = await authFetch('/api/auth/change-email', {
+        method: 'POST',
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(data),
+      });
+
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload.message || 'Не удалось сменить email');
+      }
+      return payload as { message?: string };
+    },
+    onSuccess: async (data) => {
+      toast({
+        title: "Email обновлен",
+        description: data.message || "Подтвердите новый email и войдите заново",
+      });
+
+      setEmailPassword("");
+
+      await logout();
+      setLocation('/auth/login');
+    },
+    onError: (error) => {
+      toast({
+        title: "Ошибка смены email",
+        description: error instanceof Error ? error.message : "Попробуйте позже",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handlePasswordSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      toast({
+        title: "Заполните все поля",
+        description: "Для смены пароля требуется заполнить все поля формы",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      toast({
+        title: "Пароли не совпадают",
+        description: "Проверьте подтверждение нового пароля",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    changePasswordMutation.mutate({
+      currentPassword,
+      newPassword,
+    });
+  };
+
+  const handleEmailSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (!newEmail || !emailPassword) {
+      toast({
+        title: "Заполните все поля",
+        description: "Для смены email введите новый адрес и текущий пароль",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    changeEmailMutation.mutate({
+      currentPassword: emailPassword,
+      newEmail,
+    });
+  };
 
   if (profileLoading) {
     return (
@@ -433,7 +557,7 @@ export default function ProfilePage() {
 
         {/* Табы с контентом */}
         <Tabs defaultValue="reading" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-3 h-12">
+          <TabsList className={`grid w-full h-12 ${isOwnProfile ? 'grid-cols-4' : 'grid-cols-3'}`}>
             <TabsTrigger value="reading" className="flex items-center gap-2">
               <BookOpen className="h-4 w-4" />
               <span className="hidden sm:inline">Чтение</span>
@@ -446,6 +570,12 @@ export default function ProfilePage() {
               <TrendingUp className="h-4 w-4" />
               <span className="hidden sm:inline">Статистика</span>
             </TabsTrigger>
+            {isOwnProfile && (
+              <TabsTrigger value="security" className="flex items-center gap-2">
+                <Shield className="h-4 w-4" />
+                <span className="hidden sm:inline">Безопасность</span>
+              </TabsTrigger>
+            )}
           </TabsList>
 
           {/* Читательская полка и статус */}
@@ -641,6 +771,102 @@ export default function ProfilePage() {
               </CardContent>
             </Card>
           </TabsContent>
+
+          {isOwnProfile && (
+            <TabsContent value="security">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Shield className="h-5 w-5" />
+                    Настройки безопасности
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-8">
+                  <form onSubmit={handlePasswordSubmit} className="space-y-4">
+                    <div className="flex items-center gap-2 pb-2 border-b">
+                      <KeyRound className="h-4 w-4 text-muted-foreground" />
+                      <h3 className="font-semibold">Смена пароля</h3>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="current-password">Текущий пароль</Label>
+                      <Input
+                        id="current-password"
+                        type="password"
+                        value={currentPassword}
+                        onChange={(event) => setCurrentPassword(event.target.value)}
+                        autoComplete="current-password"
+                        disabled={changePasswordMutation.isPending}
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="new-password">Новый пароль</Label>
+                      <Input
+                        id="new-password"
+                        type="password"
+                        value={newPassword}
+                        onChange={(event) => setNewPassword(event.target.value)}
+                        autoComplete="new-password"
+                        disabled={changePasswordMutation.isPending}
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="confirm-password">Подтвердите новый пароль</Label>
+                      <Input
+                        id="confirm-password"
+                        type="password"
+                        value={confirmPassword}
+                        onChange={(event) => setConfirmPassword(event.target.value)}
+                        autoComplete="new-password"
+                        disabled={changePasswordMutation.isPending}
+                      />
+                    </div>
+
+                    <Button type="submit" disabled={changePasswordMutation.isPending}>
+                      {changePasswordMutation.isPending ? 'Сохранение...' : 'Сменить пароль'}
+                    </Button>
+                  </form>
+
+                  <form onSubmit={handleEmailSubmit} className="space-y-4">
+                    <div className="flex items-center gap-2 pb-2 border-b">
+                      <Mail className="h-4 w-4 text-muted-foreground" />
+                      <h3 className="font-semibold">Смена email</h3>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="new-email">Новый email</Label>
+                      <Input
+                        id="new-email"
+                        type="email"
+                        value={newEmail}
+                        onChange={(event) => setNewEmail(event.target.value)}
+                        autoComplete="email"
+                        disabled={changeEmailMutation.isPending}
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="email-password">Текущий пароль</Label>
+                      <Input
+                        id="email-password"
+                        type="password"
+                        value={emailPassword}
+                        onChange={(event) => setEmailPassword(event.target.value)}
+                        autoComplete="current-password"
+                        disabled={changeEmailMutation.isPending}
+                      />
+                    </div>
+
+                    <Button type="submit" disabled={changeEmailMutation.isPending}>
+                      {changeEmailMutation.isPending ? 'Сохранение...' : 'Сменить email'}
+                    </Button>
+                  </form>
+                </CardContent>
+              </Card>
+            </TabsContent>
+          )}
         </Tabs>
       </div>
     </MainLayout>
