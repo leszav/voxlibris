@@ -80,15 +80,6 @@ const changePasswordSchema = z.object({
   newPassword: passwordSchema,
 });
 
-const changeEmailSchema = z.object({
-  currentPassword: z.string().min(1, "Текущий пароль обязателен"),
-  newEmail: z
-    .string()
-    .trim()
-    .toLowerCase()
-    .regex(EMAIL_REGEX, "Укажите корректный email"),
-});
-
 // Валидация и обработка приглашения при регистрации
 async function validateAndProcessInvite(
   inviteToken: string | undefined,
@@ -518,52 +509,6 @@ export function setupAuthRoutes(app: Express): void {
       return res.status(500).json({
         message: "Ошибка при смене пароля",
         code: "CHANGE_PASSWORD_FAILED"
-      });
-    }
-  });
-
-  // Change email endpoint (authenticated)
-  app.post("/api/auth/change-email", jwtAuth, requireActiveUser, async (req: Request, res: Response) => {
-    try {
-      if (!req.user) {
-        return res.status(401).json({
-          message: "Требуется аутентификация",
-          code: "NO_AUTH"
-        });
-      }
-
-      const validation = changeEmailSchema.safeParse(req.body);
-      if (!validation.success) {
-        return res.status(400).json({
-          message: "Ошибка валидации данных",
-          errors: validation.error.issues,
-        });
-      }
-
-      const { currentPassword, newEmail } = validation.data;
-      const baseUrl = await getPublicBaseUrl();
-      const result = await authService.requestEmailChange(req.user.userId, currentPassword, newEmail, baseUrl);
-
-      if (!result.success) {
-        return res.status(result.status ?? 400).json({
-          message: result.message,
-          ...(result.code && { code: result.code }),
-        });
-      }
-
-      res.clearCookie('refreshToken', { path: '/' });
-      res.clearCookie('accessToken', { path: '/' });
-
-      return res.json({
-        success: true,
-        message: result.message,
-        ...(result.code && { code: result.code }),
-      });
-    } catch (error) {
-      console.error('Change email endpoint error:', error);
-      return res.status(500).json({
-        message: "Ошибка при смене email",
-        code: "CHANGE_EMAIL_FAILED"
       });
     }
   });

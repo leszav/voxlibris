@@ -480,16 +480,18 @@ class EmailService {
 
       const escapeHtml = (value: string): string =>
         value
-          .replace(/&/g, '&amp;')
-          .replace(/</g, '&lt;')
-          .replace(/>/g, '&gt;')
-          .replace(/"/g, '&quot;')
-          .replace(/'/g, '&#39;');
+          .replaceAll('&', '&amp;')
+          .replaceAll('<', '&lt;')
+          .replaceAll('>', '&gt;')
+          .replaceAll('"', '&quot;')
+          .replaceAll("'", '&#39;');
 
-      const escapedReason = escapeHtml(params.reason).replace(/\n/g, '<br>');
-      const sourceLabel = params.source === 'club_books'
-        ? `клубной библиотеки${params.clubTitle ? ` клуба "${escapeHtml(params.clubTitle)}"` : ''}`
-        : 'личной библиотеки';
+      const escapedReason = escapeHtml(params.reason).replaceAll('\n', '<br>');
+      let sourceLabel = 'личной библиотеки';
+      if (params.source === 'club_books') {
+        const clubSuffix = params.clubTitle ? ` клуба "${escapeHtml(params.clubTitle)}"` : '';
+        sourceLabel = `клубной библиотеки${clubSuffix}`;
+      }
 
       const html = this.replaceVariables(template, {
         username: escapeHtml(params.username),

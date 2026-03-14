@@ -1,6 +1,6 @@
 import type { ClubWithDetails } from "@shared/schema";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, BookOpen, Edit, Loader2, TrendingUp, Users, Target, Shield, KeyRound, Mail } from "lucide-react";
+import { ArrowLeft, BookOpen, Edit, Loader2, TrendingUp, Users, Target, Shield, KeyRound } from "lucide-react";
 import * as React from "react";
 import { useLocation, useParams } from "wouter";
 import { MainLayout } from "@/components/layout/MainLayout";
@@ -232,8 +232,6 @@ export default function ProfilePage() {
   const [currentPassword, setCurrentPassword] = React.useState("");
   const [newPassword, setNewPassword] = React.useState("");
   const [confirmPassword, setConfirmPassword] = React.useState("");
-  const [newEmail, setNewEmail] = React.useState(user?.email ?? "");
-  const [emailPassword, setEmailPassword] = React.useState("");
 
   // Определяем isOwnProfile здесь, перед использованием
   const currentUserId = user?.id || null;
@@ -332,42 +330,6 @@ export default function ProfilePage() {
     },
   });
 
-  const changeEmailMutation = useMutation({
-    mutationFn: async (data: { currentPassword: string; newEmail: string }) => {
-      const response = await authFetch('/api/auth/change-email', {
-        method: 'POST',
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(data),
-      });
-
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(payload.message || 'Не удалось сменить email');
-      }
-      return payload as { message?: string };
-    },
-    onSuccess: async (data) => {
-      toast({
-        title: "Email обновлен",
-        description: data.message || "Подтвердите новый email и войдите заново",
-      });
-
-      setEmailPassword("");
-
-      await logout();
-      setLocation('/auth/login');
-    },
-    onError: (error) => {
-      toast({
-        title: "Ошибка смены email",
-        description: error instanceof Error ? error.message : "Попробуйте позже",
-        variant: "destructive",
-      });
-    },
-  });
-
   const handlePasswordSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
@@ -392,24 +354,6 @@ export default function ProfilePage() {
     changePasswordMutation.mutate({
       currentPassword,
       newPassword,
-    });
-  };
-
-  const handleEmailSubmit = (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-
-    if (!newEmail || !emailPassword) {
-      toast({
-        title: "Заполните все поля",
-        description: "Для смены email введите новый адрес и текущий пароль",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    changeEmailMutation.mutate({
-      currentPassword: emailPassword,
-      newEmail,
     });
   };
 
@@ -826,41 +770,6 @@ export default function ProfilePage() {
 
                     <Button type="submit" disabled={changePasswordMutation.isPending}>
                       {changePasswordMutation.isPending ? 'Сохранение...' : 'Сменить пароль'}
-                    </Button>
-                  </form>
-
-                  <form onSubmit={handleEmailSubmit} className="space-y-4">
-                    <div className="flex items-center gap-2 pb-2 border-b">
-                      <Mail className="h-4 w-4 text-muted-foreground" />
-                      <h3 className="font-semibold">Смена email</h3>
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="new-email">Новый email</Label>
-                      <Input
-                        id="new-email"
-                        type="email"
-                        value={newEmail}
-                        onChange={(event) => setNewEmail(event.target.value)}
-                        autoComplete="email"
-                        disabled={changeEmailMutation.isPending}
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="email-password">Текущий пароль</Label>
-                      <Input
-                        id="email-password"
-                        type="password"
-                        value={emailPassword}
-                        onChange={(event) => setEmailPassword(event.target.value)}
-                        autoComplete="current-password"
-                        disabled={changeEmailMutation.isPending}
-                      />
-                    </div>
-
-                    <Button type="submit" disabled={changeEmailMutation.isPending}>
-                      {changeEmailMutation.isPending ? 'Сохранение...' : 'Сменить email'}
                     </Button>
                   </form>
                 </CardContent>
