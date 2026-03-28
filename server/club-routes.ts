@@ -8,7 +8,7 @@ import type { InsertClub, ClubMemberRole, InsertClubInvitation, Club, UserRole }
 import { emailService } from './services/email-service.js';
 import crypto from 'node:crypto';
 import { logger } from './lib/logger.js';
-import { serializeClub, serializeClubList, serializeClubMembers } from './lib/client-serializers.js';
+import { serializeClub, serializeClubList, serializeClubMembers, serializePublicCatalogClubList } from './lib/client-serializers.js';
 import { getPublicBaseUrl } from './lib/public-base-url.js';
 import { sanitizeClubSettingsInput } from './lib/club-settings-sanitizer.js';
 
@@ -172,7 +172,7 @@ router.post('/', jwtAuth, requireActiveUser, async (req, res) => {
 router.get('/catalog', async (req, res) => {
   try {
     const clubs = await storage.getAllClubs();
-    res.json(serializeClubList(clubs));
+    res.json(serializePublicCatalogClubList(clubs));
   } catch (error) {
     console.error('Error getting catalog clubs:', error);
     res.status(500).json({ message: 'Failed to get clubs' });

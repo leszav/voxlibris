@@ -48,6 +48,8 @@ import {
   type PersonalBook,
 } from "@/hooks/use-books-v2";
 import { useClearReadingHistory, useReadingHistory } from "@/hooks/use-reading-history";
+import { useAllBookmarks, useDeleteBookmarkEntry } from "@/hooks/use-reader";
+import { savePendingReaderBookmarkNavigation } from "@/lib/reader-bookmark-navigation";
 import { toast } from "@/hooks/use-toast";
 
 export default function Library() {
@@ -55,6 +57,7 @@ export default function Library() {
   const [, setLocation] = useLocation();
   const { data: userBooksResponse, isLoading, refetch } = usePersonalBooks();
   const books = userBooksResponse || [];
+  const { bookmarks, isLoading: bookmarksLoading } = useAllBookmarks();
 
   // Reading history data
   const { data: historyData } = useReadingHistory();
@@ -73,6 +76,7 @@ export default function Library() {
   // Mutations for book management
   const deleteBookMutation = useDeletePersonalBook();
   const updateBookMutation = useUpdatePersonalBook();
+  const deleteBookmarkMutation = useDeleteBookmarkEntry();
 
   // Проверка авторизации
   if (!isAuthenticated) {
@@ -174,6 +178,36 @@ export default function Library() {
 
   const handleReadBook = (book: PersonalBook) => {
     setLocation(`/books/${book.id}/read`);
+  };
+
+  const handleOpenBookmark = (bookmark: {
+    bookId: string;
+    position: string;
+  }) => {
+    savePendingReaderBookmarkNavigation({
+      bookId: bookmark.bookId,
+      position: bookmark.position,
+    });
+    setLocation(`/books/${bookmark.bookId}/read`);
+  };
+
+  const handleDeleteBookmark = async (bookmark: {
+    id: string;
+    bookId: string;
+  }) => {
+    try {
+      await deleteBookmarkMutation.mutateAsync({
+        bookId: bookmark.bookId,
+        bookmarkId: bookmark.id,
+      });
+    } catch (error) {
+      console.error("Error deleting bookmark:", error);
+      toast({
+        title: "Ошибка",
+        description: "Не удалось удалить закладку",
+        variant: "destructive",
+      });
+    }
   };
 
   return (
@@ -400,14 +434,94 @@ export default function Library() {
           </TabsContent>
 
           <TabsContent value="bookmarks">
-            <div className="text-center py-16 bg-secondary/20 rounded-xl border border-dashed">
-              <Bookmark className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
-              <h3 className="font-medium">Нет сохраненных закладок</h3>
-              <p className="text-muted-foreground max-w-sm mx-auto mt-2">
-                Вы можете ставить закладки во время живых эфиров, чтобы вернуться к интересным
-                моментам.
-              </p>
-            </div>
+            {bookmarksLoading ? (
+              <div className="space-y-4">
+                {[1, 2, 3].map((i) => (
+                  <div key={i} className="flex gap-4 bg-card p-4 rounded-xl border">
+                    <Skeleton className="w-20 h-28 rounded-lg shrink-0" />
+                    <div className="flex-1 space-y-3">
+                      <Skeleton className="h-5 w-2/3" />
+                      <Skeleton className="h-4 w-1/3" />
+                      <Skeleton className="h-4 w-1/4" />
+                      <Skeleton className="h-9 w-32" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : bookmarks.length === 0 ? (
+              <div className="text-center py-16 bg-secondary/20 rounded-xl border border-dashed">
+                <Bookmark className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
+                <h3 className="font-medium">Нет сохраненных закладок</h3>
+                <p className="text-muted-foreground max-w-sm mx-auto mt-2">
+                  Ставьте закладки прямо во время чтения, чтобы быстро возвращаться к важным местам книги.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {bookmarks.map((bookmark) => (
+                  <div
+                    key={bookmark.id}
+                    className="group flex flex-col sm:flex-row gap-4 bg-card p-4 rounded-xl border hover:border-primary/20 transition-all"
+                  >
+                    <div className="w-20 h-28 rounded-lg overflow-hidden shadow-sm shrink-0 bg-muted">
+                      {bookmark.bookCoverUrl ? (
+                        <img
+                          src={bookmark.bookCoverUrl}
+                          alt={bookmark.bookTitle || "Обложка книги"}
+                          className="w-full h-full object-cover"
+                          onError={(e) => {
+                            e.currentTarget.src = fallbackCover;
+                          }}
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-muted-foreground">
+                          <BookOpen className="w-6 h-6" />
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex-1 flex flex-col justify-between gap-3 min-w-0">
+                      <div className="min-w-0">
+                        <h3 className="text-lg font-semibold line-clamp-2 break-words">
+                          {bookmark.title || "Без названия"}
+                        </h3>
+                        <p className="text-sm text-muted-foreground truncate">
+                          {bookmark.bookTitle || "Книга"}{bookmark.bookAuthor ? ` • ${bookmark.bookAuthor}` : ""}
+                        </p>
+                        {bookmark.chapterNumber && (
+                          <p className="text-sm text-muted-foreground mt-2">
+                            Глава {bookmark.chapterNumber}
+                          </p>
+                        )}
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Создано: {new Date(bookmark.createdAt).toLocaleString("ru-RU")}
+                        </p>
+                      </div>
+
+                      <div className="flex flex-wrap gap-2">
+                        <Button onClick={() => handleOpenBookmark(bookmark)}>
+                          <BookOpen className="w-4 h-4 mr-2" />
+                          Открыть закладку
+                        </Button>
+                        <Button
+                          variant="outline"
+                          onClick={() => {
+                            void handleDeleteBookmark({
+                              id: bookmark.id,
+                              bookId: bookmark.bookId,
+                            });
+                          }}
+                          disabled={deleteBookmarkMutation.isPending}
+                        >
+                          <Trash2 className="w-4 h-4 mr-2" />
+                          Удалить
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </TabsContent>
         </Tabs>
       </div>

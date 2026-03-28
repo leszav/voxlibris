@@ -17,6 +17,13 @@ export interface ClientClubMember {
   joinedAt: Date;
 }
 
+export interface ClientPublicCatalogClub {
+  id: string;
+  title: string;
+  description: string | null;
+  coverImage: string | null;
+}
+
 export type ClientAuthUser = {
   id: string;
   username: string;
@@ -98,6 +105,15 @@ export function serializeClub(club: ClubWithDetails, viewerMembershipRole?: Club
 
 export function serializeClubList(clubs: ClubWithDetails[]): ClientClub[] {
   return clubs.map((club) => serializeClub(club));
+}
+
+export function serializePublicCatalogClubList(clubs: ClubWithDetails[]): ClientPublicCatalogClub[] {
+  return clubs.map((club) => ({
+    id: club.id,
+    title: club.title,
+    description: club.description ?? null,
+    coverImage: club.coverImage ?? null,
+  }));
 }
 
 export function serializeClubMember(member: ClientClubMember): ClientClubMember {

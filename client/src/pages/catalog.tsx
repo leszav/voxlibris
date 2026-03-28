@@ -132,26 +132,22 @@ export default function Catalog() {
               <>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                   {clubs.map((club) => {
-                    const parsed = parseSettings(club.settings);
+                    const parsed = parseSettings(null);
                     const cover = club.coverImage || undefined;
-                    const bookCover = club.book?.coverUrl || undefined;
-                    const description = parsed.shortDescription || club.description || club.book?.description;
+                    const description = parsed.shortDescription || club.description;
                     return (
                     <ClubCard
                       key={club.id}
                       id={club.id}
                       title={club.title}
-                      bookTitle={club.book?.title}
-                      author={club.book?.author}
                       coverUrl={cover}
-                      bookCoverUrl={bookCover}
                       description={description || undefined}
-                      members={club.memberCount}
-                      maxMembers={club.maxMembers}
-                      isLive={club.isLive}
-                      isPrivate={club.isPrivate}
-                      type={club.type}
-                      tags={club.tags}
+                      members={0}
+                      maxMembers={0}
+                      isLive={false}
+                      isPrivate={false}
+                      type={"standard"}
+                      tags={[]}
                     />
                     );
                   })}

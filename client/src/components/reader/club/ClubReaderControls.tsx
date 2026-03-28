@@ -2,24 +2,13 @@ import { useMemo } from "react";
 import { Button } from "../../ui/button";
 import { Slider } from "../../ui/slider";
 import { Sun, Moon, Type, AlignJustify } from "lucide-react";
+import {
+  DEFAULT_READER_SETTINGS,
+  type ReaderSettings as ClubReaderSettings,
+} from "@/lib/reader-settings";
 
-export type ClubReaderSettings = {
-  fontSize: number;
-  fontFamily: string;
-  theme: "light" | "dark" | "sepia";
-  lineHeight: number;
-  textAlign: "left" | "justify";
-  contentWidth: number;
-};
-
-export const DEFAULT_CLUB_SETTINGS: ClubReaderSettings = {
-  fontSize: 18,
-  fontFamily: "Georgia",
-  theme: "light",
-  lineHeight: 1.8,
-  textAlign: "justify",
-  contentWidth: 80,
-};
+export { DEFAULT_READER_SETTINGS as DEFAULT_CLUB_SETTINGS };
+export type { ReaderSettings as ClubReaderSettings } from "@/lib/reader-settings";
 
 const FONT_FAMILIES = [
   { value: "Georgia", label: "Georgia" },
@@ -30,36 +19,34 @@ const FONT_FAMILIES = [
 ];
 
 interface ClubReaderControlsProps {
-  clubId: string;
-  bookId: string;
   settings: ClubReaderSettings;
   onSettingsChange: (settings: ClubReaderSettings) => void;
+  onResetSettings?: () => void;
+  isSaving?: boolean;
 }
 
-export function ClubReaderControls({ clubId, bookId, settings, onSettingsChange }: ClubReaderControlsProps) {
-  // Мемоизация для оптимизации
+export function ClubReaderControls({
+  settings,
+  onSettingsChange,
+  onResetSettings,
+  isSaving = false,
+}: ClubReaderControlsProps) {
   const updateSetting = useMemo(
     () => (key: keyof ClubReaderSettings, value: ClubReaderSettings[typeof key]) => {
-      const newSettings = { ...settings, [key]: value };
-      // Сохраняем в localStorage
-      localStorage.setItem(`clubReaderSettings_${clubId}_${bookId}`, JSON.stringify(newSettings));
-      // Уведомляем родителя
-      onSettingsChange(newSettings);
+      onSettingsChange({ ...settings, [key]: value });
     },
-    [settings, clubId, bookId, onSettingsChange]
+    [settings, onSettingsChange]
   );
-
-  // Сброс настроек
-  const resetSettings = () => {
-    localStorage.setItem(`clubReaderSettings_${clubId}_${bookId}`, JSON.stringify(DEFAULT_CLUB_SETTINGS));
-    onSettingsChange(DEFAULT_CLUB_SETTINGS);
-  };
 
   return (
     <div className="space-y-4 sm:space-y-6">
-      <h3 className="font-semibold text-sm sm:text-lg mb-3 sm:mb-4">Настройки чтения</h3>
+      <div className="space-y-1">
+        <h3 className="font-semibold text-sm sm:text-lg">Настройки чтения</h3>
+        {isSaving && (
+          <p className="text-xs text-muted-foreground">Сохраняем настройки...</p>
+        )}
+      </div>
 
-      {/* Размер шрифта */}
       <div className="space-y-2">
         <div className="flex items-center justify-between">
           <label className="text-xs sm:text-sm flex items-center">
@@ -80,7 +67,6 @@ export function ClubReaderControls({ clubId, bookId, settings, onSettingsChange 
         />
       </div>
 
-      {/* Шрифт */}
       <div className="space-y-2">
         <label className="text-sm">Шрифт</label>
         <div className="grid grid-cols-2 gap-2">
@@ -98,7 +84,6 @@ export function ClubReaderControls({ clubId, bookId, settings, onSettingsChange 
         </div>
       </div>
 
-      {/* Межстрочный интервал */}
       <div className="space-y-2">
         <div className="flex items-center justify-between">
           <label className="text-sm flex items-center">
@@ -119,7 +104,6 @@ export function ClubReaderControls({ clubId, bookId, settings, onSettingsChange 
         />
       </div>
 
-      {/* Ширина текста */}
       <div className="space-y-2">
         <div className="flex items-center justify-between">
           <label className="text-sm">Ширина текста</label>
@@ -137,7 +121,6 @@ export function ClubReaderControls({ clubId, bookId, settings, onSettingsChange 
         />
       </div>
 
-      {/* Тема */}
       <div className="space-y-2">
         <label className="text-xs sm:text-sm">Тема</label>
         <div className="flex gap-1 sm:gap-2">
@@ -173,7 +156,6 @@ export function ClubReaderControls({ clubId, bookId, settings, onSettingsChange 
         </div>
       </div>
 
-      {/* Выравнивание */}
       <div className="space-y-2">
         <label className="text-xs sm:text-sm">Выравнивание</label>
         <div className="flex gap-1 sm:gap-2">
@@ -198,11 +180,10 @@ export function ClubReaderControls({ clubId, bookId, settings, onSettingsChange 
         </div>
       </div>
 
-      {/* Сброс */}
       <Button
         variant="outline"
         size="sm"
-        onClick={resetSettings}
+        onClick={onResetSettings ?? (() => onSettingsChange(DEFAULT_READER_SETTINGS))}
         className="w-full mt-4"
       >
         Сбросить настройки

@@ -12,6 +12,12 @@ export interface ReaderProgressPayload {
   progress: number;
 }
 
+export interface ReaderProgressSnapshot {
+  currentChapter: number;
+  currentPosition: string;
+  progress: number;
+}
+
 export interface ReaderProgressBuildInput {
   currentChapter: number;
   totalChapters: number;
@@ -107,4 +113,12 @@ export function createReaderProgressPayload(input: ReaderProgressBuildInput): Re
     }),
     progress,
   };
+}
+
+export function getReaderProgressSignature(progress: ReaderProgressSnapshot): string {
+  return [
+    progress.currentChapter,
+    progress.progress,
+    progress.currentPosition,
+  ].join("|");
 }

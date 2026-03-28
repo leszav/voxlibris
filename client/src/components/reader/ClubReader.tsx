@@ -3,9 +3,10 @@ import { useParams } from "wouter";
 import { useClubBookmarks } from "../../hooks/use-club-reader";
 import { useAnalytics } from "../../hooks/use-analytics";
 import { ClubContentRenderer } from "./club/ClubContentRenderer";
-import { ClubReaderControls, ClubReaderSettings, DEFAULT_CLUB_SETTINGS } from "./club/ClubReaderControls";
+import { ClubReaderControls } from "./club/ClubReaderControls";
 import { ClubChapterList } from "./club/ClubNavigation";
 import { BookmarksPanel } from "./BookmarksPanel";
+import { LatestPositionPrompt } from "./LatestPositionPrompt";
 import { LoadingIndicator, ChapterLoadingIndicator, ContentLoadingSkeleton } from "./LoadingIndicator";
 import { ReaderProgressIndicators } from "./ReaderProgressIndicators";
 import { useKeyboardShortcuts, readerShortcuts } from "./useKeyboardShortcuts";
@@ -20,9 +21,13 @@ import {
 } from "./core/reader-progress-core";
 import {
   useDebouncedReaderProgressSave,
+  restoreReaderScrollPosition,
   useRestoreReaderScroll,
 } from "./core/use-reader-progress-sync";
+import { useReaderLatestProgress } from "./core/use-reader-latest-progress";
+import { useSmoothReaderSpaceScroll } from "./core/use-smooth-reader-space-scroll";
 import { useClubReaderAdapter } from "./core/use-reader-data-adapters";
+import { useSyncedReaderSettings } from "./core/use-synced-reader-settings";
 import { useReaderSyncState } from "./core/use-reader-sync-state";
 import { ChatWidget } from "@/components/chat/ChatWidget";
 
@@ -55,61 +60,29 @@ interface ClubReaderInnerProps {
   bookId: string;
 }
 
+interface PendingScrollRestore {
+  chapter: number;
+  positionRaw: string;
+}
+
 function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
   const [currentChapter, setCurrentChapter] = useState<number | null>(null);
   const [tocOpen, setTocOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [bookmarksOpen, setBookmarksOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [pendingScrollRestore, setPendingScrollRestore] = useState<PendingScrollRestore | null>(null);
   const chapterScrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const bookmarkScrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const manualRestoreCleanupRef = useRef<(() => void) | null>(null);
   
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-
-  // Управление шрифтом для горячих клавиш
-  const [fontSize, setFontSize] = useState(16);
-
-  // Настройки ридера - загружаем из localStorage
-  const [settings, setSettings] = useState<ClubReaderSettings>(() => {
-    const saved = localStorage.getItem(`clubReaderSettings_${clubId}_${bookId}`);
-    return saved ? JSON.parse(saved) : DEFAULT_CLUB_SETTINGS;
-  });
-
-  // Применение настроек к документу
-  const applyClubSettings = (newSettings: ClubReaderSettings) => {
-    const root = document.documentElement;
-    root.style.setProperty("--club-reader-font-size", `${newSettings.fontSize}px`);
-    root.style.setProperty("--club-reader-font-family", newSettings.fontFamily);
-    root.style.setProperty("--club-reader-line-height", newSettings.lineHeight.toString());
-    root.style.setProperty("--club-reader-text-align", newSettings.textAlign);
-    root.style.setProperty("--club-reader-content-width", `${newSettings.contentWidth}%`);
-    root.dataset.clubReaderTheme = newSettings.theme;
-    document.body.classList.remove("club-reader-light", "club-reader-dark", "club-reader-sepia");
-    document.body.classList.add(`club-reader-${newSettings.theme}`);
-  };
-
-  // Обработчик изменения настроек
-  const handleSettingsChange = (newSettings: ClubReaderSettings) => {
-    setSettings(newSettings);
-    applyClubSettings(newSettings);
-  };
-
-  // Применяем настройки при монтировании и очищаем только при размонтировании ридера
-  useEffect(() => {
-    applyClubSettings(settings);
-    
-    // Cleanup только при полном выходе из ридера
-    return () => {
-      document.body.classList.remove("club-reader-light", "club-reader-dark", "club-reader-sepia");
-      const root = document.documentElement;
-      root.style.removeProperty("--club-reader-font-size");
-      root.style.removeProperty("--club-reader-font-family");
-      root.style.removeProperty("--club-reader-line-height");
-      root.style.removeProperty("--club-reader-text-align");
-      root.style.removeProperty("--club-reader-content-width");
-      delete root.dataset.clubReaderTheme;
-    };
-  }, []);
+  const {
+    settings,
+    updateSettings,
+    resetSettings,
+    isSaving: isSavingReaderSettings,
+  } = useSyncedReaderSettings("club", { cleanupOnUnmount: true });
 
   // Загрузка закладок
   const { bookmarks, isLoading: bookmarksLoading } = useClubBookmarks(clubId);
@@ -124,6 +97,7 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
     bookData,
     chapters,
     currentChapterContent,
+    refetchProgress,
     saveProgress,
   } = useClubReaderAdapter({
     clubId,
@@ -131,7 +105,14 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
     currentChapter,
   });
   const totalChapters = bookData.totalChapters || chapters.length || 1;
-  const { saveWithSync, isSyncing, syncError, lastSyncTime } = useReaderSyncState({ saveProgress });
+  const {
+    rememberLocalProgress,
+    saveWithSync,
+    isLocalSessionProgress,
+    isSyncing,
+    syncError,
+    lastSyncTime,
+  } = useReaderSyncState({ saveProgress });
 
   // Analytics tracking
   const analytics = useAnalytics();
@@ -203,6 +184,7 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
         });
 
         // Сохраняем позицию без индикатора синхронизации (фоновое сохранение)
+        rememberLocalProgress(payload);
         saveProgress(payload);
       }
       
@@ -223,15 +205,15 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
     try {
       const position = parseReaderPosition(bookmark.position);
       if (position?.chapter) {
+        setPendingScrollRestore({
+          chapter: position.chapter,
+          positionRaw: bookmark.position,
+        });
         setCurrentChapter(position.chapter);
         if (bookmarkScrollTimeoutRef.current) {
           clearTimeout(bookmarkScrollTimeoutRef.current);
         }
-        bookmarkScrollTimeoutRef.current = setTimeout(() => {
-          if (scrollContainerRef.current) {
-            scrollContainerRef.current.scrollTop = Math.max(0, position.scrollTop);
-          }
-        }, 200);
+        bookmarkScrollTimeoutRef.current = null;
       }
     } catch (error) {
       if (import.meta.env.DEV) {
@@ -242,11 +224,17 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
 
   // Функции для горячих клавиш
   const increaseFontSize = () => {
-    setFontSize(prev => Math.min(32, prev + 2));
+    updateSettings({
+      ...settings,
+      fontSize: Math.min(32, settings.fontSize + 2),
+    });
   };
 
   const decreaseFontSize = () => {
-    setFontSize(prev => Math.max(12, prev - 2));
+    updateSettings({
+      ...settings,
+      fontSize: Math.max(12, settings.fontSize - 2),
+    });
   };
 
   const toggleFullscreen = () => {
@@ -321,6 +309,15 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
   }, []);
 
   const scrollElementRef = scrollContainerRef as RefObject<HTMLElement | null>;
+  const { suggestedProgress, dismissSuggestion } = useReaderLatestProgress({
+    currentChapter,
+    totalChapters,
+    scrollContainerRef: scrollElementRef,
+    remoteProgress: userProgress ?? null,
+    refreshProgress: refetchProgress,
+    enabled: currentChapter !== null && !progressLoading && totalChapters > 0,
+    isLocalSessionProgress,
+  });
   const { scheduleSave: scheduleProgressSave, saveNow: saveProgressNow } = useDebouncedReaderProgressSave({
     scrollContainerRef: scrollElementRef,
     currentChapter,
@@ -344,10 +341,50 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
     currentPositionRaw: userProgress?.currentPosition,
     contentReady: !contentLoading && !!chapterContent,
   });
+  useSmoothReaderSpaceScroll({
+    scrollContainerRef: scrollElementRef,
+    enabled: currentChapter !== null,
+  });
+
+  useEffect(() => {
+    return () => {
+      manualRestoreCleanupRef.current?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!pendingScrollRestore || contentLoading || currentChapter !== pendingScrollRestore.chapter) {
+      return;
+    }
+
+    manualRestoreCleanupRef.current?.();
+    manualRestoreCleanupRef.current = restoreReaderScrollPosition({
+      scrollContainerRef: scrollElementRef,
+      currentChapter,
+      currentPositionRaw: pendingScrollRestore.positionRaw,
+      delayMs: 120,
+      retryAttempts: 5,
+      retryDelayMs: 120,
+    });
+    setPendingScrollRestore(null);
+  }, [contentLoading, currentChapter, pendingScrollRestore, scrollElementRef]);
 
   // Обработка скролла с дебаунсингом
   const handleScroll = () => {
     scheduleProgressSave();
+  };
+
+  const openLatestPosition = () => {
+    if (!suggestedProgress) {
+      return;
+    }
+
+    dismissSuggestion();
+    setPendingScrollRestore({
+      chapter: suggestedProgress.currentChapter,
+      positionRaw: suggestedProgress.currentPosition,
+    });
+    setCurrentChapter(suggestedProgress.currentChapter);
   };
 
   const renderMainContent = () => {
@@ -408,6 +445,15 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
 
   return (
     <div className="h-screen flex flex-col bg-background">
+      {suggestedProgress && (
+        <LatestPositionPrompt
+          currentChapter={currentChapter}
+          remoteChapter={suggestedProgress.currentChapter}
+          onOpenLatest={openLatestPosition}
+          onDismiss={dismissSuggestion}
+        />
+      )}
+
       {/* Верхняя панель */}
       <section className="border-b bg-card p-2 sm:p-4 shrink-0">
         <div className="flex items-center justify-between gap-2 min-w-0">
@@ -486,10 +532,10 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
             </div>
             <div className="p-3 sm:p-4">
               <ClubReaderControls
-                clubId={clubId}
-                bookId={bookId}
                 settings={settings}
-                onSettingsChange={handleSettingsChange}
+                onSettingsChange={updateSettings}
+                onResetSettings={resetSettings}
+                isSaving={isSavingReaderSettings}
               />
             </div>
           </div>
@@ -579,7 +625,7 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
               className="p-4 sm:p-6 md:p-8"
               style={{
                 fontFamily: 'var(--club-reader-font-family, inherit)',
-                fontSize: `${fontSize}px`,
+                fontSize: 'var(--club-reader-font-size, 18px)',
                 lineHeight: 'var(--club-reader-line-height, 1.6)',
                 maxWidth: 'var(--club-reader-content-width, 800px)',
                 margin: '0 auto'

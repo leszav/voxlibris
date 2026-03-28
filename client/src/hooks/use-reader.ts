@@ -2,6 +2,10 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { apiRequest } from "../lib/queryClient";
 import type { Bookmark, Note } from "@shared/schema";
+import {
+  normalizeReaderSettings,
+  type ReaderSettings,
+} from "@/lib/reader-settings";
 
 interface BookContentResponse {
   title?: string;
@@ -19,8 +23,37 @@ interface ReadingProgress {
   progress: number;
 }
 
+interface UpdateProgressPayload {
+  currentChapter: number;
+  currentPosition: string;
+  progress: number;
+  clubId?: string;
+}
+
+interface UpdateProgressContext {
+  previousProgress?: ReadingProgress;
+}
+
+interface ReaderSettingsResponse {
+  settings: ReaderSettings;
+}
+
+interface UpdateReaderSettingsContext {
+  previousSettings?: ReaderSettings;
+}
+
+export interface UserBookmarkListItem extends Bookmark {
+  bookTitle: string | null;
+  bookAuthor: string | null;
+  bookCoverUrl: string | null;
+}
+
 interface BookmarksResponse {
   bookmarks: Bookmark[];
+}
+
+interface UserBookmarksResponse {
+  bookmarks: UserBookmarkListItem[];
 }
 
 interface BookmarkResponse {
@@ -92,27 +125,100 @@ export function useReadingProgress(bookId: string) {
 // Обновление прогресса чтения
 export function useUpdateProgress(bookId: string) {
   const queryClient = useQueryClient();
+  const progressQueryKey = ["/api/v1/books", bookId, "progress"] as const;
 
   return useMutation({
-    mutationFn: async (data: {
-      currentChapter: number;
-      currentPosition: string;
-      progress: number;
-      clubId?: string;
-    }) => {
+    mutationFn: async (data: UpdateProgressPayload) => {
       const response = await apiRequest(`/api/v1/books/${bookId}/progress`, {
         method: "PUT",
         body: JSON.stringify(data),
       });
       return response;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: ["/api/v1/books", bookId, "progress"],
-      });
+    onMutate: async (data): Promise<UpdateProgressContext> => {
+      await queryClient.cancelQueries({ queryKey: progressQueryKey });
+      const previousProgress = queryClient.getQueryData<ReadingProgress>(progressQueryKey);
+
+      queryClient.setQueryData<ReadingProgress>(progressQueryKey, (current) => ({
+        ...current,
+        currentChapter: data.currentChapter,
+        currentPosition: data.currentPosition,
+        progress: data.progress,
+      }));
+
+      return { previousProgress };
+    },
+    onError: (_error, _data, context) => {
+      if (context?.previousProgress) {
+        queryClient.setQueryData(progressQueryKey, context.previousProgress);
+      }
+    },
+    onSuccess: (_response, data) => {
+      queryClient.setQueryData<ReadingProgress>(progressQueryKey, (current) => ({
+        ...current,
+        currentChapter: data.currentChapter,
+        currentPosition: data.currentPosition,
+        progress: data.progress,
+      }));
       queryClient.invalidateQueries({ queryKey: ["reading-status"] });
       queryClient.invalidateQueries({ queryKey: ["reading-stats"] });
       queryClient.invalidateQueries({ queryKey: ["reading-goal"] });
+    },
+  });
+}
+
+export function useReaderSettings() {
+  return useQuery({
+    queryKey: ["reader-settings"],
+    queryFn: async () => {
+      const response = await apiRequest<ReaderSettingsResponse>("/api/v1/books/reader-settings");
+      return normalizeReaderSettings(response.settings);
+    },
+    staleTime: 0,
+  });
+}
+
+export function useAllBookmarks() {
+  const query = useQuery({
+    queryKey: ["reader-all-bookmarks"],
+    queryFn: async () => {
+      const response = await apiRequest<UserBookmarksResponse>("/api/v1/books/all-bookmarks");
+      return response.bookmarks;
+    },
+  });
+
+  return {
+    ...query,
+    bookmarks: query.data || [],
+  };
+}
+
+export function useUpdateReaderSettings() {
+  const queryClient = useQueryClient();
+  const queryKey = ["reader-settings"] as const;
+
+  return useMutation({
+    mutationFn: async (settings: ReaderSettings) => {
+      const response = await apiRequest<ReaderSettingsResponse>("/api/v1/books/reader-settings", {
+        method: "PUT",
+        body: JSON.stringify({ settings }),
+      });
+
+      return normalizeReaderSettings(response.settings);
+    },
+    onMutate: async (settings): Promise<UpdateReaderSettingsContext> => {
+      await queryClient.cancelQueries({ queryKey });
+      const previousSettings = queryClient.getQueryData<ReaderSettings>(queryKey);
+      queryClient.setQueryData(queryKey, normalizeReaderSettings(settings));
+      return { previousSettings };
+    },
+    onError: (_error, _settings, context) => {
+      if (context?.previousSettings) {
+        queryClient.setQueryData(queryKey, context.previousSettings);
+      }
+    },
+    onSuccess: (settings) => {
+      queryClient.setQueryData(queryKey, settings);
     },
   });
 }
@@ -157,6 +263,9 @@ export function useAddBookmark(bookId: string) {
       queryClient.invalidateQueries({
         queryKey: ["/api/v1/books", bookId, "bookmarks"],
       });
+      queryClient.invalidateQueries({
+        queryKey: ["reader-all-bookmarks"],
+      });
     },
   });
 }
@@ -174,6 +283,29 @@ export function useDeleteBookmark(bookId: string) {
     onSuccess: () => {
       queryClient.invalidateQueries({
         queryKey: ["/api/v1/books", bookId, "bookmarks"],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["reader-all-bookmarks"],
+      });
+    },
+  });
+}
+
+export function useDeleteBookmarkEntry() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ bookId, bookmarkId }: { bookId: string; bookmarkId: string }) => {
+      await apiRequest(`/api/v1/books/${bookId}/bookmarks/${bookmarkId}`, {
+        method: "DELETE",
+      });
+    },
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({
+        queryKey: ["/api/v1/books", variables.bookId, "bookmarks"],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["reader-all-bookmarks"],
       });
     },
   });

@@ -1,21 +1,33 @@
 import { useState, useEffect, useRef, useCallback, type RefObject } from "react";
 import { useParams } from "wouter";
 import { useAnalytics } from "../../hooks/use-analytics";
+import { useAddBookmark, useBookmarks, useDeleteBookmark } from "../../hooks/use-reader";
 import { ContentRenderer } from "./ContentRenderer";
+import { BookmarksPanel } from "./BookmarksPanel";
+import { LatestPositionPrompt } from "./LatestPositionPrompt";
 import { ReaderControls } from "./ReaderControls";
+import { SelectionBookmarkPrompt } from "./SelectionBookmarkPrompt";
 import { Button } from "../ui/button";
-import { Maximize2, Minimize2, List, Settings, ArrowLeft } from "lucide-react";
+import { Maximize2, Minimize2, List, Settings, ArrowLeft, Bookmark } from "lucide-react";
 import { getAccessToken } from "@/lib/token-store";
 import {
   createReaderProgressPayload,
+  parseReaderPosition,
 } from "./core/reader-progress-core";
 import {
+  restoreReaderScrollPosition,
   useDebouncedReaderProgressSave,
   useRestoreReaderScroll,
 } from "./core/use-reader-progress-sync";
+import { useReaderLatestProgress } from "./core/use-reader-latest-progress";
+import { useReaderSelectionBookmark } from "./core/use-reader-selection-bookmark";
+import { useSmoothReaderSpaceScroll } from "./core/use-smooth-reader-space-scroll";
 import { usePersonalReaderAdapter } from "./core/use-reader-data-adapters";
+import { useSyncedReaderSettings } from "./core/use-synced-reader-settings";
 import { useReaderSyncState } from "./core/use-reader-sync-state";
 import { ReaderProgressIndicators } from "./ReaderProgressIndicators";
+import { consumePendingReaderBookmarkNavigation } from "@/lib/reader-bookmark-navigation";
+import { toast } from "@/hooks/use-toast";
 
 interface Chapter {
   chapterNumber: number;
@@ -39,12 +51,33 @@ interface ReaderWorkspaceProps {
   };
 }
 
+interface PendingScrollRestore {
+  chapter: number;
+  positionRaw: string;
+}
+
 function getInitialChapter(
   progress: { currentChapter: number } | null | undefined,
   progressLoading: boolean
 ): number | null {
   if (progressLoading) return null;
   return progress?.currentChapter || 1;
+}
+
+function createBookmarkTitleFromSelection(selectedText: string): string {
+  const normalized = selectedText.trim().replace(/\s+/g, " ");
+  if (!normalized) {
+    return "Без названия";
+  }
+
+  const words = normalized.split(" ").filter(Boolean);
+  const snippetByWords = words.slice(0, 12).join(" ");
+  const baseSnippet = snippetByWords || normalized;
+  const boundedSnippet = baseSnippet.length > 72
+    ? `${baseSnippet.slice(0, 69).trimEnd()}...`
+    : baseSnippet;
+
+  return boundedSnippet;
 }
 
 function ReaderMainContent({
@@ -112,60 +145,6 @@ function ReaderMainContent({
       <p className="text-muted-foreground">Контент не найден</p>
     </div>
   );
-}
-
-function useApplyReaderSettings() {
-  // Функция для применения настроек из localStorage
-  const applyStoredSettings = () => {
-    const saved = localStorage.getItem("readerSettings");
-    if (!saved) return;
-
-    try {
-      interface ReaderSettings {
-        fontSize: number;
-        fontFamily: string;
-        lineHeight: number;
-        textAlign: string;
-        contentWidth: number;
-        theme: string;
-      }
-      
-      const settings: ReaderSettings = JSON.parse(saved);
-      const root = document.documentElement;
-      root.style.setProperty("--reader-font-size", `${settings.fontSize}px`);
-      root.style.setProperty("--reader-font-family", settings.fontFamily);
-      root.style.setProperty("--reader-line-height", settings.lineHeight.toString());
-      root.style.setProperty("--reader-text-align", settings.textAlign);
-      root.style.setProperty("--reader-content-width", `${settings.contentWidth}%`);
-      (root.dataset as Record<string, string>).readerTheme = settings.theme;
-      document.body.classList.remove("reader-light", "reader-dark", "reader-sepia");
-      document.body.classList.add(`reader-${settings.theme}`);
-    } catch (e) {
-      if (import.meta.env.DEV) {
-        console.error('Ошибка применения настроек:', e);
-      }
-    }
-  };
-
-  // Применяем настройки при монтировании
-  useEffect(() => {
-    applyStoredSettings();
-  }, []);
-
-  // Отслеживаем изменения в localStorage (например, при изменении настроек в панели)
-  useEffect(() => {
-    const handleStorageChange = (e: StorageEvent) => {
-      if (e.key === "readerSettings" && e.newValue) {
-        applyStoredSettings();
-      }
-    };
-
-    globalThis.addEventListener("storage", handleStorageChange);
-    return () => globalThis.removeEventListener("storage", handleStorageChange);
-  }, []);
-
-  // Cleanup при размонтировании - НЕ удаляем настройки, они должны сохраняться
-  // при закрытии панели настроек
 }
 
 function useTrackReaderAnalytics({
@@ -271,13 +250,20 @@ export function ReaderWorkspace({ bookId: propBookId, clubId, params }: Readonly
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [currentChapter, setCurrentChapter] = useState<number | null>(null); // null пока не загрузится progress
   const [tocOpen, setTocOpen] = useState(false);
+  const [bookmarksOpen, setBookmarksOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [pendingScrollRestore, setPendingScrollRestore] = useState<PendingScrollRestore | null>(null);
   
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const manualRestoreCleanupRef = useRef<(() => void) | null>(null);
+  const { bookmarks, isLoading: bookmarksLoading } = useBookmarks(bookId || "");
+  const { mutate: addBookmark, isPending: isAddingBookmark } = useAddBookmark(bookId || "");
+  const { mutate: deleteBookmark } = useDeleteBookmark(bookId || "");
 
   const {
     progress,
     progressLoading,
+    refetchProgress,
     contentLoading,
     bookData,
     currentChapterContent,
@@ -287,7 +273,19 @@ export function ReaderWorkspace({ bookId: propBookId, clubId, params }: Readonly
     currentChapter,
     clubId,
   });
-  const { saveWithSync, isSyncing, syncError, lastSyncTime } = useReaderSyncState({ saveProgress });
+  const {
+    saveWithSync,
+    isLocalSessionProgress,
+    isSyncing,
+    syncError,
+    lastSyncTime,
+  } = useReaderSyncState({ saveProgress });
+  const {
+    settings,
+    updateSettings,
+    resetSettings,
+    isSaving: isSavingReaderSettings,
+  } = useSyncedReaderSettings("personal");
   
   // Analytics hooks
   const analytics = useAnalytics();
@@ -301,8 +299,6 @@ export function ReaderWorkspace({ bookId: propBookId, clubId, params }: Readonly
     }
   }, [progress, progressLoading, currentChapter]);
 
-  useApplyReaderSettings();
-
   useTrackReaderAnalytics({
     bookId,
     currentChapter,
@@ -312,6 +308,15 @@ export function ReaderWorkspace({ bookId: propBookId, clubId, params }: Readonly
   });
 
   const scrollElementRef = scrollContainerRef as RefObject<HTMLElement | null>;
+  const { suggestedProgress, dismissSuggestion } = useReaderLatestProgress({
+    currentChapter,
+    totalChapters: bookData.totalChapters,
+    scrollContainerRef: scrollElementRef,
+    remoteProgress: progress ?? null,
+    refreshProgress: refetchProgress,
+    enabled: currentChapter !== null && !progressLoading && bookData.totalChapters > 0,
+    isLocalSessionProgress,
+  });
 
   const { scheduleSave: scheduleProgressSave, saveNow: saveProgressNow } = useDebouncedReaderProgressSave({
     currentChapter,
@@ -328,6 +333,14 @@ export function ReaderWorkspace({ bookId: propBookId, clubId, params }: Readonly
     currentPositionRaw: progress?.currentPosition,
     contentReady: !contentLoading,
   });
+  useSmoothReaderSpaceScroll({
+    scrollContainerRef: scrollElementRef,
+    enabled: currentChapter !== null,
+  });
+  const { selectionState, clearSelection } = useReaderSelectionBookmark({
+    containerRef: scrollElementRef,
+    enabled: currentChapter !== null && !contentLoading,
+  });
 
   usePersistProgressOnUnmount({
     scrollContainerRef,
@@ -336,6 +349,51 @@ export function ReaderWorkspace({ bookId: propBookId, clubId, params }: Readonly
     clubId,
     bookId
   });
+
+  useEffect(() => {
+    return () => {
+      manualRestoreCleanupRef.current?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!bookId || currentChapter === null) {
+      return;
+    }
+
+    const pendingBookmark = consumePendingReaderBookmarkNavigation(bookId);
+    if (!pendingBookmark) {
+      return;
+    }
+
+    const position = parseReaderPosition(pendingBookmark.position);
+    if (!position?.chapter) {
+      return;
+    }
+
+    setPendingScrollRestore({
+      chapter: position.chapter,
+      positionRaw: pendingBookmark.position,
+    });
+    setCurrentChapter(position.chapter);
+  }, [bookId, currentChapter]);
+
+  useEffect(() => {
+    if (!pendingScrollRestore || contentLoading || currentChapter !== pendingScrollRestore.chapter) {
+      return;
+    }
+
+    manualRestoreCleanupRef.current?.();
+    manualRestoreCleanupRef.current = restoreReaderScrollPosition({
+      scrollContainerRef: scrollElementRef,
+      currentChapter,
+      currentPositionRaw: pendingScrollRestore.positionRaw,
+      delayMs: 120,
+      retryAttempts: 5,
+      retryDelayMs: 120,
+    });
+    setPendingScrollRestore(null);
+  }, [contentLoading, currentChapter, pendingScrollRestore, scrollElementRef]);
 
   // Fullscreen API
   const toggleFullscreen = () => {
@@ -373,6 +431,83 @@ export function ReaderWorkspace({ bookId: propBookId, clubId, params }: Readonly
       }
     }, 100);
   };
+
+  const createCurrentBookmarkDraft = useCallback(() => {
+    const container = scrollContainerRef.current;
+    if (!container || currentChapter === null) {
+      return null;
+    }
+
+    const payload = createReaderProgressPayload({
+      currentChapter,
+      totalChapters: bookData.totalChapters,
+      scrollTop: container.scrollTop,
+      scrollHeight: container.scrollHeight,
+      clientHeight: container.clientHeight,
+    });
+
+    return {
+      chapterNumber: currentChapter,
+      position: payload.currentPosition,
+    };
+  }, [bookData.totalChapters, currentChapter]);
+
+  const navigateToSavedPosition = useCallback((chapter: number, positionRaw: string) => {
+    setPendingScrollRestore({
+      chapter,
+      positionRaw,
+    });
+    setCurrentChapter(chapter);
+  }, []);
+
+  const navigateToBookmark = useCallback((positionRaw: string) => {
+    const position = parseReaderPosition(positionRaw);
+    if (!position?.chapter) {
+      return;
+    }
+
+    navigateToSavedPosition(position.chapter, positionRaw);
+  }, [navigateToSavedPosition]);
+
+  const addBookmarkFromSelection = useCallback(() => {
+    if (!selectionState) {
+      return;
+    }
+
+    const currentBookmarkDraft = createCurrentBookmarkDraft();
+    if (!currentBookmarkDraft) {
+      clearSelection();
+      return;
+    }
+
+    const bookmarkTitle = createBookmarkTitleFromSelection(selectionState.text);
+
+    addBookmark(
+      {
+        chapterNumber: currentBookmarkDraft.chapterNumber,
+        position: currentBookmarkDraft.position,
+        title: bookmarkTitle,
+      },
+      {
+        onSuccess: () => {
+          toast({
+            title: "Закладка сохранена",
+            description: "Выделенный фрагмент добавлен в закладки.",
+          });
+          clearSelection();
+        },
+      }
+    );
+  }, [addBookmark, clearSelection, createCurrentBookmarkDraft, selectionState]);
+
+  const openLatestPosition = useCallback(() => {
+    if (!suggestedProgress) {
+      return;
+    }
+
+    dismissSuggestion();
+    navigateToSavedPosition(suggestedProgress.currentChapter, suggestedProgress.currentPosition);
+  }, [dismissSuggestion, navigateToSavedPosition, suggestedProgress]);
 
   // Рендер контента без вложенных тернариев
   const renderMainContent = () => {
@@ -414,6 +549,24 @@ export function ReaderWorkspace({ bookId: propBookId, clubId, params }: Readonly
 
   return (
     <div className="flex flex-col h-screen bg-background text-foreground overflow-hidden">
+      {selectionState && (
+        <SelectionBookmarkPrompt
+          text={selectionState.text}
+          top={selectionState.top}
+          left={selectionState.left}
+          onConfirm={addBookmarkFromSelection}
+          onDismiss={clearSelection}
+        />
+      )}
+      {suggestedProgress && (
+        <LatestPositionPrompt
+          currentChapter={currentChapter}
+          remoteChapter={suggestedProgress.currentChapter}
+          onOpenLatest={openLatestPosition}
+          onDismiss={dismissSuggestion}
+        />
+      )}
+
       {/* Top Navigation Bar */}
       <header className="border-b bg-background relative z-50">
         <div className="flex flex-wrap items-center gap-2 sm:gap-4 p-2 sm:p-4">
@@ -436,6 +589,7 @@ export function ReaderWorkspace({ bookId: propBookId, clubId, params }: Readonly
                 size="sm"
                 onClick={() => {
                   setTocOpen(!tocOpen);
+                  setBookmarksOpen(false);
                   setSettingsOpen(false);
                 }}
                 className="text-xs sm:text-sm"
@@ -477,6 +631,42 @@ export function ReaderWorkspace({ bookId: propBookId, clubId, params }: Readonly
                 </div>
               )}
             </div>
+
+            <div className="relative">
+              <Button
+                variant={bookmarksOpen ? "secondary" : "ghost"}
+                size="sm"
+                onClick={() => {
+                  setBookmarksOpen(!bookmarksOpen);
+                  setTocOpen(false);
+                  setSettingsOpen(false);
+                }}
+                className="text-xs sm:text-sm"
+              >
+                <Bookmark className="w-4 h-4 mr-1 sm:mr-2" />
+                <span className="hidden xs:inline">Закладки</span>
+              </Button>
+              {bookmarksOpen && (
+                <div className="absolute left-0 top-full mt-2 w-[85vw] max-w-[360px] sm:w-96 max-h-96 overflow-y-auto bg-background text-foreground border rounded-md shadow-lg p-3 sm:p-4 z-50">
+                  {bookmarksLoading ? (
+                    <p className="text-sm text-muted-foreground">Загрузка закладок...</p>
+                  ) : (
+                    <BookmarksPanel
+                      bookId={bookId}
+                      bookmarks={bookmarks}
+                      isCreatingBookmark={isAddingBookmark}
+                      getCurrentBookmarkDraft={createCurrentBookmarkDraft}
+                      onCreateBookmark={(bookmarkData) => addBookmark(bookmarkData)}
+                      onDeleteBookmark={(bookmarkId) => deleteBookmark(bookmarkId)}
+                      onNavigateToBookmark={(bookmark) => {
+                        navigateToBookmark(bookmark.position);
+                        setBookmarksOpen(false);
+                      }}
+                    />
+                  )}
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Правая часть - информация о книге и действия */}
@@ -505,6 +695,7 @@ export function ReaderWorkspace({ bookId: propBookId, clubId, params }: Readonly
                 onClick={() => {
                   setSettingsOpen(!settingsOpen);
                   setTocOpen(false);
+                  setBookmarksOpen(false);
                 }}
                 title="Настройки чтения"
                 className="w-8 h-8 sm:w-10 sm:h-10"
@@ -513,7 +704,12 @@ export function ReaderWorkspace({ bookId: propBookId, clubId, params }: Readonly
               </Button>
               {settingsOpen && (
                 <div className="absolute right-0 top-full mt-2 w-[85vw] max-w-[320px] sm:w-80 bg-background text-foreground border rounded-md shadow-lg p-3 sm:p-4 z-50">
-                  <ReaderControls bookId={bookId} />
+                  <ReaderControls
+                    settings={settings}
+                    onSettingsChange={updateSettings}
+                    onResetSettings={resetSettings}
+                    isSaving={isSavingReaderSettings}
+                  />
                 </div>
               )}
             </div>

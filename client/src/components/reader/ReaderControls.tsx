@@ -1,25 +1,8 @@
-import { useState, useEffect, useMemo } from "react";
+import { useMemo } from "react";
 import { Button } from "../ui/button";
 import { Slider } from "../ui/slider";
 import { Sun, Moon, Type, AlignJustify } from "lucide-react";
-
-export interface ReaderSettings {
-  fontSize: number;
-  fontFamily: string;
-  theme: "light" | "dark" | "sepia";
-  lineHeight: number;
-  textAlign: "left" | "justify";
-  contentWidth: number;
-}
-
-const DEFAULT_SETTINGS: ReaderSettings = {
-  fontSize: 18,
-  fontFamily: "Georgia",
-  theme: "light",
-  lineHeight: 1.8,
-  textAlign: "justify",
-  contentWidth: 80,
-};
+import type { ReaderSettings } from "@/lib/reader-settings";
 
 const FONT_FAMILIES = [
   { value: "Georgia", label: "Georgia" },
@@ -30,62 +13,34 @@ const FONT_FAMILIES = [
 ];
 
 interface ReaderControlsProps {
-  readonly bookId: string;
+  readonly settings: ReaderSettings;
+  readonly onSettingsChange: (settings: ReaderSettings) => void;
+  readonly onResetSettings?: () => void;
+  readonly isSaving?: boolean;
 }
 
-export function ReaderControls({ bookId: _bookId }: ReaderControlsProps) {
-  const [settings, setSettings] = useState<ReaderSettings>(() => {
-    const saved = localStorage.getItem("readerSettings");
-    return saved ? JSON.parse(saved) : DEFAULT_SETTINGS;
-  });
-
-  // Применение настроек при монтировании компонента
-  useEffect(() => {
-    const saved = localStorage.getItem("readerSettings");
-    const initialSettings = saved ? JSON.parse(saved) : DEFAULT_SETTINGS;
-    applySettings(initialSettings);
-  }, []);
-
-  // Сохранение настроек
-  useEffect(() => {
-    localStorage.setItem("readerSettings", JSON.stringify(settings));
-    applySettings(settings);
-  }, [settings]);
-
-  // Применение настроек к документу
-  const applySettings = (settings: ReaderSettings) => {
-    const root = document.documentElement;
-    root.style.setProperty("--reader-font-size", `${settings.fontSize}px`);
-    root.style.setProperty("--reader-font-family", settings.fontFamily);
-    root.style.setProperty("--reader-line-height", settings.lineHeight.toString());
-    root.style.setProperty("--reader-text-align", settings.textAlign);
-    root.style.setProperty("--reader-content-width", `${settings.contentWidth}%`);
-
-    // Тема - применяем через data-атрибут для всей страницы
-    (root.dataset as Record<string, string>).readerTheme = settings.theme;
-    
-    // Удаляем старые классы и добавляем новые
-    document.body.classList.remove("reader-light", "reader-dark", "reader-sepia");
-    document.body.classList.add(`reader-${settings.theme}`);
-  };
-
-  // Cleanup при размонтировании НЕ удаляем CSS переменные
-  // Они должны сохраняться между открытиями панели настроек
-  // и очищаются только при уходе со страницы ридера
-
-  // Мемоизация для оптимизации
+export function ReaderControls({
+  settings,
+  onSettingsChange,
+  onResetSettings,
+  isSaving = false,
+}: ReaderControlsProps) {
   const updateSetting = useMemo(
     () => (key: keyof ReaderSettings, value: ReaderSettings[typeof key]) => {
-      setSettings((prev) => ({ ...prev, [key]: value }));
+      onSettingsChange({ ...settings, [key]: value });
     },
-    []
+    [onSettingsChange, settings]
   );
 
   return (
     <div className="space-y-6">
-      <h3 className="font-semibold text-lg mb-4">Настройки чтения</h3>
+      <div className="space-y-1">
+        <h3 className="font-semibold text-lg">Настройки чтения</h3>
+        {isSaving && (
+          <p className="text-xs text-muted-foreground">Сохраняем настройки...</p>
+        )}
+      </div>
 
-      {/* Размер шрифта */}
       <div className="space-y-2">
         <div className="flex items-center justify-between">
           <label htmlFor="font-size-slider" className="text-sm flex items-center">
@@ -107,7 +62,6 @@ export function ReaderControls({ bookId: _bookId }: ReaderControlsProps) {
         />
       </div>
 
-      {/* Шрифт */}
       <div className="space-y-2">
         <span className="text-sm">Шрифт</span>
         <div className="grid grid-cols-2 gap-2">
@@ -125,7 +79,6 @@ export function ReaderControls({ bookId: _bookId }: ReaderControlsProps) {
         </div>
       </div>
 
-      {/* Межстрочный интервал */}
       <div className="space-y-2">
         <div className="flex items-center justify-between">
           <label htmlFor="line-height-slider" className="text-sm flex items-center">
@@ -147,7 +100,6 @@ export function ReaderControls({ bookId: _bookId }: ReaderControlsProps) {
         />
       </div>
 
-      {/* Ширина текста */}
       <div className="space-y-2">
         <div className="flex items-center justify-between">
           <label htmlFor="content-width-slider" className="text-sm">Ширина текста</label>
@@ -166,7 +118,6 @@ export function ReaderControls({ bookId: _bookId }: ReaderControlsProps) {
         />
       </div>
 
-      {/* Тема */}
       <div className="space-y-2">
         <span className="text-sm">Тема</span>
         <div className="flex gap-2">
@@ -199,7 +150,6 @@ export function ReaderControls({ bookId: _bookId }: ReaderControlsProps) {
         </div>
       </div>
 
-      {/* Выравнивание */}
       <div className="space-y-2">
         <span className="text-sm">Выравнивание</span>
         <div className="flex gap-2">
@@ -222,15 +172,16 @@ export function ReaderControls({ bookId: _bookId }: ReaderControlsProps) {
         </div>
       </div>
 
-      {/* Сброс */}
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={() => setSettings(DEFAULT_SETTINGS)}
-        className="w-full mt-4"
-      >
-        Сбросить настройки
-      </Button>
+      {onResetSettings && (
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={onResetSettings}
+          className="w-full mt-4"
+        >
+          Сбросить настройки
+        </Button>
+      )}
     </div>
   );
 }

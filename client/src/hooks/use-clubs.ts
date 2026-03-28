@@ -73,11 +73,18 @@ export interface ClubDetailsResponse extends ClubWithDetails {
   viewerMembershipRole?: ClubMemberRole | null;
 }
 
+export interface PublicCatalogClub {
+  id: string;
+  title: string;
+  description: string | null;
+  coverImage: string | null;
+}
+
 // Получить все клубы для каталога (не требует аутентификации)
 export function useCatalogClubs() {
   return useQuery({
     queryKey: ["catalog-clubs"],
-    queryFn: async (): Promise<ClubWithDetails[]> => {
+    queryFn: async (): Promise<PublicCatalogClub[]> => {
       // Используем простой fetch без авторизации для публичного эндпоинта
       const res = await fetch("/api/clubs/catalog");
       if (!res.ok) {

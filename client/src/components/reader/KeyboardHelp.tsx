@@ -14,6 +14,8 @@ export function KeyboardHelp({ isOpen, onClose }: KeyboardHelpProps) {
     { ...readerShortcuts.toggleToc, keys: 'T' },
     { ...readerShortcuts.toggleBookmarks, keys: 'B' },
     { ...readerShortcuts.toggleSettings, keys: 'S' },
+    { key: 'space', description: 'Плавная прокрутка вниз', keys: 'Space' },
+    { key: 'shift-space', description: 'Плавная прокрутка вверх', keys: 'Shift + Space' },
     { ...readerShortcuts.prevChapter, keys: '←' },
     { ...readerShortcuts.nextChapter, keys: '→' },
     { ...readerShortcuts.fontSizeIncrease, keys: 'Ctrl + +' },

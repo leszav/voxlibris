@@ -23,6 +23,10 @@ interface ClubReadingProgressResponse {
   clubProgress?: ReadingProgress;
 }
 
+interface UpdateClubProgressContext {
+  previousQueries: Array<[readonly unknown[], ClubReadingProgressResponse | undefined]>;
+}
+
 // Получение контента клубной книги
 export function useClubBookContent(
   clubId: string,
@@ -75,6 +79,7 @@ export function useClubReadingProgress(clubId: string, clubBookId: string) {
 // Обновление прогресса чтения клубной книги
 export function useUpdateClubProgress(clubId: string) {
   const queryClient = useQueryClient();
+  const progressQueryPrefix = ["club", clubId, "reading-progress"] as const;
 
   return useMutation({
     mutationFn: async (data: {
@@ -88,10 +93,46 @@ export function useUpdateClubProgress(clubId: string) {
       });
       return response;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: ["club", clubId, "reading-progress"],
+    onMutate: async (data): Promise<UpdateClubProgressContext> => {
+      await queryClient.cancelQueries({
+        queryKey: progressQueryPrefix,
       });
+
+      const previousQueries = queryClient.getQueriesData<ClubReadingProgressResponse>({
+        queryKey: progressQueryPrefix,
+      });
+
+      queryClient.setQueriesData<ClubReadingProgressResponse>(
+        { queryKey: progressQueryPrefix },
+        (current) => ({
+          ...current,
+          userProgress: {
+            currentChapter: data.currentChapter,
+            currentPosition: data.currentPosition,
+            progress: data.progress,
+          },
+        })
+      );
+
+      return { previousQueries };
+    },
+    onError: (_error, _data, context) => {
+      context?.previousQueries.forEach(([queryKey, previousValue]) => {
+        queryClient.setQueryData(queryKey, previousValue);
+      });
+    },
+    onSuccess: (_response, data) => {
+      queryClient.setQueriesData<ClubReadingProgressResponse>(
+        { queryKey: progressQueryPrefix },
+        (current) => ({
+          ...current,
+          userProgress: {
+            currentChapter: data.currentChapter,
+            currentPosition: data.currentPosition,
+            progress: data.progress,
+          },
+        })
+      );
       queryClient.invalidateQueries({
         queryKey: ["club", clubId, "reading-plan"],
       });

@@ -101,17 +101,14 @@ export default function Home() {
                 key={club.id}
                 id={club.id}
                 title={club.title}
-                bookTitle={club.book?.title ?? undefined}
-                author={club.book?.author ?? undefined}
                 coverUrl={club.coverImage ?? undefined}
-                bookCoverUrl={club.book?.coverUrl ?? undefined}
                 description={club.description ?? undefined}
-                members={club.memberCount}
-                maxMembers={club.maxMembers}
-                isLive={club.isLive}
-                isPrivate={club.isPrivate}
-                type={club.type}
-                tags={club.tags}
+                members={0}
+                maxMembers={0}
+                isLive={false}
+                isPrivate={false}
+                type={"standard"}
+                tags={[]}
               />
             ))}
             

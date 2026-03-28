@@ -3,7 +3,7 @@ import { Server, Socket } from "socket.io";
 import jwt, { JwtPayload } from "jsonwebtoken";
 import { db } from "./db.js";
 import { users, readingProgress, bookmarks, notes, books, clubMembers, bookReadingStatus } from "../shared/schema.js";
-import { eq, and, isNull } from "drizzle-orm";
+import { eq, and, desc, isNull } from "drizzle-orm";
 import type {
   ReaderProgressUpdate,
   BookmarkUpdate,
@@ -14,6 +14,46 @@ import { logger } from "./lib/logger.js";
 interface AuthenticatedSocket extends Socket {
   userId: string;
   username: string;
+}
+
+interface ReaderPositionWithTimestamp {
+  timestamp?: number;
+}
+
+interface DatabaseErrorLike {
+  code?: string;
+}
+
+function extractPositionTimestamp(raw: string | null | undefined): number | null {
+  if (!raw) return null;
+
+  try {
+    const parsed = JSON.parse(raw) as ReaderPositionWithTimestamp;
+    if (typeof parsed.timestamp === "number" && Number.isFinite(parsed.timestamp)) {
+      return parsed.timestamp;
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+function isStaleProgressUpdate(existingPosition: string | null, nextPosition: string): boolean {
+  const existingTimestamp = extractPositionTimestamp(existingPosition);
+  const nextTimestamp = extractPositionTimestamp(nextPosition);
+
+  if (existingTimestamp === null || nextTimestamp === null) {
+    return false;
+  }
+
+  return nextTimestamp < existingTimestamp;
+}
+
+function isUniqueViolation(error: unknown): boolean {
+  return typeof error === "object"
+    && error !== null
+    && (error as DatabaseErrorLike).code === "23505";
 }
 
 // Улучшенная аутентификация через JWT с проверкой пользователя в БД
@@ -121,16 +161,25 @@ export function initializeReaderWebSocket(httpServer: HttpServer) {
 
         // Сохранение прогресса без ON CONFLICT: в reading_progress нет unique(user_id, book_id)
         const [existingProgress] = await db
-          .select({ id: readingProgress.id })
+          .select({
+            id: readingProgress.id,
+            currentPosition: readingProgress.currentPosition,
+          })
           .from(readingProgress)
           .where(and(
             eq(readingProgress.userId, authSocket.userId),
             eq(readingProgress.bookId, data.bookId),
             normalizedClubId ? eq(readingProgress.clubId, normalizedClubId) : isNull(readingProgress.clubId),
           ))
+          .orderBy(desc(readingProgress.updatedAt), desc(readingProgress.lastReadAt))
           .limit(1);
 
         if (existingProgress) {
+          if (isStaleProgressUpdate(existingProgress.currentPosition, normalizedCurrentPosition)) {
+            socket.emit("progress_saved", { success: true, ignored: true, reason: "stale_progress_update" });
+            return;
+          }
+
           await db
             .update(readingProgress)
             .set({
@@ -143,18 +192,52 @@ export function initializeReaderWebSocket(httpServer: HttpServer) {
             })
             .where(eq(readingProgress.id, existingProgress.id));
         } else {
-          await db
-            .insert(readingProgress)
-            .values({
-              userId: authSocket.userId,
-              bookId: data.bookId,
-              clubId: normalizedClubId,
-              currentChapter: normalizedCurrentChapter,
-              currentPosition: normalizedCurrentPosition,
-              progress: normalizedProgress,
-              lastReadAt: new Date(),
-              updatedAt: new Date(),
-            });
+          try {
+            await db
+              .insert(readingProgress)
+              .values({
+                userId: authSocket.userId,
+                bookId: data.bookId,
+                clubId: normalizedClubId,
+                currentChapter: normalizedCurrentChapter,
+                currentPosition: normalizedCurrentPosition,
+                progress: normalizedProgress,
+                lastReadAt: new Date(),
+                updatedAt: new Date(),
+              });
+          } catch (error) {
+            if (!isUniqueViolation(error)) {
+              throw error;
+            }
+
+            const [currentProgress] = await db
+              .select({
+                id: readingProgress.id,
+                currentPosition: readingProgress.currentPosition,
+              })
+              .from(readingProgress)
+              .where(and(
+                eq(readingProgress.userId, authSocket.userId),
+                eq(readingProgress.bookId, data.bookId),
+                normalizedClubId ? eq(readingProgress.clubId, normalizedClubId) : isNull(readingProgress.clubId),
+              ))
+              .orderBy(desc(readingProgress.updatedAt), desc(readingProgress.lastReadAt))
+              .limit(1);
+
+            if (currentProgress && !isStaleProgressUpdate(currentProgress.currentPosition, normalizedCurrentPosition)) {
+              await db
+                .update(readingProgress)
+                .set({
+                  currentChapter: normalizedCurrentChapter,
+                  currentPosition: normalizedCurrentPosition,
+                  progress: normalizedProgress,
+                  clubId: normalizedClubId,
+                  lastReadAt: new Date(),
+                  updatedAt: new Date(),
+                })
+                .where(eq(readingProgress.id, currentProgress.id));
+            }
+          }
         }
 
         // Обновляем статус книги в book_reading_status

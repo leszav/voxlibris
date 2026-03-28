@@ -1,6 +1,17 @@
 import { BaseRepository } from './BaseRepository.js';
 import { eq, desc, and, count, sql, ne, inArray } from 'drizzle-orm';
-import { clubs, clubMembers, clubInvitations, users, clubBooks, tags, clubTags } from '../../shared/schema.js';
+import {
+  clubs,
+  clubMembers,
+  clubInvitations,
+  users,
+  clubBooks,
+  tags,
+  clubTags,
+  bookReadingStatus,
+  bookAccessLogs,
+  analyticsEvents,
+} from '../../shared/schema.js';
 import type {
   Club,
   InsertClub,
@@ -330,15 +341,49 @@ export class ClubRepository extends BaseRepository {
     this.validateRequired(id, 'id');
     
     try {
-      // Сначала удаляем все связанные данные
-      await this.db.delete(clubInvitations).where(eq(clubInvitations.clubId, id));
-      await this.db.delete(clubMembers).where(eq(clubMembers.clubId, id));
-      
-      // Затем удаляем сам клуб
-      const result = await this.db
-        .delete(clubs)
-        .where(eq(clubs.id, id))
-        .returning();
+      const result = await this.db.transaction(async (tx) => {
+        const clubBookRows = await tx
+          .select({ id: clubBooks.id })
+          .from(clubBooks)
+          .where(eq(clubBooks.clubId, id));
+
+        const clubBookIds = clubBookRows.map((row) => row.id);
+
+        if (clubBookIds.length > 0) {
+          await tx
+            .delete(bookReadingStatus)
+            .where(and(
+              inArray(bookReadingStatus.bookId, clubBookIds),
+              eq(bookReadingStatus.bookType, 'club')
+            ));
+
+          await tx
+            .delete(bookAccessLogs)
+            .where(and(
+              inArray(bookAccessLogs.bookId, clubBookIds),
+              eq(bookAccessLogs.bookType, 'club')
+            ))
+            .catch((error: unknown) => {
+              const pgError = error as { code?: string };
+              if (pgError?.code === '42P01') return;
+              throw error;
+            });
+
+          await tx
+            .delete(analyticsEvents)
+            .where(inArray(analyticsEvents.bookId, clubBookIds));
+        }
+
+        // Сначала удаляем все связанные данные
+        await tx.delete(clubInvitations).where(eq(clubInvitations.clubId, id));
+        await tx.delete(clubMembers).where(eq(clubMembers.clubId, id));
+        
+        // Затем удаляем сам клуб
+        return await tx
+          .delete(clubs)
+          .where(eq(clubs.id, id))
+          .returning();
+      });
       
       return result.length > 0;
     } catch (error) {

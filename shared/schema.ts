@@ -413,6 +413,7 @@ export const userProfiles = pgTable("user_profiles", {
   coverImage: text("cover_image"), // URL обложки профиля
   bio: text("bio"),
   favoriteGenres: text("favorite_genres"), // JSON array
+  readerSettings: text("reader_settings"), // JSON с настройками ридера для синхронизации между устройствами
   isReader: boolean("is_reader").notNull().default(false),
   readerRating: integer("reader_rating").notNull().default(0), // 0-500 (5.0 * 100)
   totalReadingSessions: integer("total_reading_sessions").notNull().default(0),
@@ -775,7 +776,7 @@ export interface UserWithProfile extends User {
 export const bookmarks = pgTable("bookmarks", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
-  bookId: varchar("book_id").notNull().references(() => books.id, { onDelete: "cascade" }),
+  bookId: varchar("book_id").notNull(),
   chapterNumber: integer("chapter_number"),
   position: text("position").notNull(), // JSON: {scrollTop, paragraph, offset}
   title: text("title"),
@@ -789,7 +790,7 @@ export type NoteColor = typeof noteColors[number];
 export const notes = pgTable("notes", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
-  bookId: varchar("book_id").notNull().references(() => books.id, { onDelete: "cascade" }),
+  bookId: varchar("book_id").notNull(),
   chapterNumber: integer("chapter_number"),
   position: text("position").notNull(), // JSON: {scrollTop, paragraph, offset}
   highlightedText: text("highlighted_text"),
