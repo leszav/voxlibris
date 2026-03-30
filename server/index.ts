@@ -42,6 +42,7 @@ import questionsRoutes from "./routes/questions.js";
 import scheduleRoutes from "./routes/schedule.js";
 import { logger } from "./lib/logger.js";
 import { loadFeatureFlags } from "./lib/feature-flags.js";
+import { responseCompression } from "./lib/response-compression.js";
 
 export const app = express();
 
@@ -132,15 +133,15 @@ function maskSensitiveData(obj: unknown): unknown {
 
 // Security headers configuration
 app.use(
-	helmet({
-		contentSecurityPolicy: {
-			directives: {
-				defaultSrc: ["'self'"],
-				styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
-				fontSrc: ["'self'", "https://fonts.gstatic.com"],
-				imgSrc: ["'self'", "data:", "https:"],
-				scriptSrc: ["'self'", "https://mc.yandex.ru", "https://mc.yandex.com"],
-				connectSrc: ["'self'", "wss:", "https:"],
+		helmet({
+			contentSecurityPolicy: {
+				directives: {
+					defaultSrc: ["'self'"],
+					styleSrc: ["'self'", "'unsafe-inline'"],
+					fontSrc: ["'self'"],
+					imgSrc: ["'self'", "data:", "https:"],
+					scriptSrc: ["'self'", "https://mc.yandex.ru", "https://mc.yandex.com"],
+					connectSrc: ["'self'", "wss:", "https:"],
 				frameSrc: ["'none'"],
 				objectSrc: ["'none'"],
 				baseUri: ["'self'"],
@@ -169,6 +170,9 @@ app.use(
 		exposedHeaders: ["X-Total-Count"],
 	}),
 );
+
+// Dynamic JSON/text compression for API responses.
+app.use(responseCompression);
 
 declare global {
 	namespace Express {
@@ -369,10 +373,30 @@ function getAuthIdentifier(req: Request): string | null {
 	return null;
 }
 
+function getResendConfirmationIdentifier(req: Request): string | null {
+	if (!req.body || typeof req.body !== "object") {
+		return null;
+	}
+
+	const userId = (req.body as Record<string, unknown>).userId;
+	if (typeof userId !== "string") {
+		return null;
+	}
+
+	const normalized = userId.trim().toLowerCase();
+	return normalized.length > 0 ? normalized.slice(0, 128) : null;
+}
+
 function getAuthRateLimitKey(req: Request): string {
 	const ipKey = getClientIpKey(req);
 	const identifier = getAuthIdentifier(req);
 	return identifier ? `auth:${identifier}:${ipKey}` : `auth:${ipKey}`;
+}
+
+function getResendConfirmationRateLimitKey(req: Request): string {
+	const ipKey = getClientIpKey(req);
+	const identifier = getResendConfirmationIdentifier(req);
+	return identifier ? `resend:${identifier}:${ipKey}` : `resend:${ipKey}`;
 }
 
 function getGeneralRateLimitKey(req: Request): string {
@@ -397,6 +421,23 @@ const authLimiter = rateLimit({
 		retryAfter: "15 minutes",
 	},
 	skipSuccessfulRequests: true,
+});
+
+const resendConfirmationWindowMs = parsePositiveIntEnv("RL_RESEND_CONFIRMATION_WINDOW_MS", 60 * 60 * 1000);
+const resendConfirmationMax = parsePositiveIntEnv("RL_RESEND_CONFIRMATION_MAX", 3);
+
+const resendConfirmationLimiter = rateLimit({
+	...rateLimitCommonOptions,
+	...rateLimitHeadersOptions,
+	...withRateLimitStore("auth-resend-confirmation"),
+	windowMs: resendConfirmationWindowMs,
+	max: resendConfirmationMax,
+	keyGenerator: getResendConfirmationRateLimitKey,
+	message: {
+		error: "Too many confirmation email requests. Please try again later.",
+		code: "RESEND_CONFIRMATION_LIMIT",
+		retryAfter: `${Math.ceil(resendConfirmationWindowMs / 1000)} seconds`,
+	},
 });
 
 // ============================================
@@ -640,6 +681,7 @@ app.use("/api/auth/login", authLimiter);
 app.use("/api/auth/register", authLimiter);
 app.use("/api/auth/forgot-password", authLimiter);
 app.use("/api/auth/reset-password", authLimiter);
+app.use("/api/auth/resend-confirmation", resendConfirmationLimiter);
 app.use("/api/auth", speedLimiter);
 app.use("/api", anonymousBurstLimiter);
 app.use("/api", anonymousReadLimiter);
@@ -835,7 +877,7 @@ try {
         <head>
           <meta charset="UTF-8">
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>xLibris Backend</title>
+          <title>Voxlibris Platform Backend</title>
           <style>
             body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
                    margin: 0; padding: 2rem; background: #f5f5f5; color: #333; }
@@ -850,10 +892,10 @@ try {
         </head>
         <body>
           <div class="container">
-            <div class="logo">📚 xLibris</div>
+            <div class="logo">📚 Voxlibris Platform</div>
             <h1>Backend Server</h1>
             <p class="status">✅ Backend сервер работает</p>
-            <p>Это backend API сервер проекта xLibris.</p>
+            <p>Это backend API сервер проекта Voxlibris Platform.</p>
             <div class="info">
               <strong>Для открытия интерфейса приложения перейдите на:</strong><br>
               <a href="http://localhost:3000" class="link">http://localhost:3000</a>
