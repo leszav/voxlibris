@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # =============================================================================
-# xLibris Compliance System Test Suite
+# Voxlibris Platform Compliance System Test Suite
 # =============================================================================
 # Комплексное тестирование всех блокировочных механизмов и систем compliance
 # Валидация aliases, hooks, xlibris-manager.sh интеграции и AI Memory
@@ -75,7 +75,7 @@ log_test_warning() {
     log_warning "Test warning: $1"
 }
 
-# Detect xLibris project root
+# Detect Voxlibris Platform project root
 detect_project_root() {
     local current_dir="$PWD"
     while [[ "$current_dir" != "/" ]]; do
@@ -101,7 +101,7 @@ init_test_environment() {
         
         log_info "Initializing compliance system testing from $project_root"
     else
-        echo -e "${RED}❌ Not in xLibris project directory${NC}"
+        echo -e "${RED}❌ Not in Voxlibris Platform project directory${NC}"
         exit 1
     fi
 }
@@ -186,9 +186,9 @@ test_aliases_functionality() {
     if [[ -f "scripts/setup-compliance-aliases.sh" && -x "scripts/setup-compliance-aliases.sh" ]]; then
         log_test_pass "Aliases setup script exists and is executable"
         
-        # Test if aliases setup script can detect xLibris project
+        # Test if aliases setup script can detect Voxlibris Platform project
         if bash scripts/setup-compliance-aliases.sh --test-mode 2>/dev/null; then
-            log_test_pass "Aliases setup script can detect xLibris project"
+            log_test_pass "Aliases setup script can detect Voxlibris Platform project"
         else
             log_test_warning "Aliases setup script test mode failed"
         fi
@@ -578,7 +578,7 @@ generate_compliance_report() {
 <content>#!/bin/bash
 
 # =============================================================================
-# xLibris Compliance System Testing
+# Voxlibris Platform Compliance System Testing
 # =============================================================================
 # Комплексное тестирование всех блокировочных механизмов и систем соблюдения
 # Валидация aliases, hooks, xlibris-manager.sh интеграции и AI Memory
@@ -642,7 +642,7 @@ run_test() {
     fi
 }
 
-# Detect xLibris project root
+# Detect Voxlibris Platform project root
 detect_project_root() {
     local current_dir="$PWD"
     while [[ "$current_dir" != "/" ]]; do
@@ -668,7 +668,7 @@ init_test_environment() {
         
         log_info "Starting compliance system testing from $project_root"
     else
-        echo -e "${RED}❌ Not in xLibris project directory${NC}"
+        echo -e "${RED}❌ Not in Voxlibris Platform project directory${NC}"
         exit 1
     fi
 }
@@ -756,13 +756,13 @@ test_blocking_aliases() {
 #!/bin/bash
 
 # Source the aliases if they exist
-if [[ -f "$HOME/.bashrc" ]] && grep -q "xLibris Compliance Aliases" "$HOME/.bashrc"; then
+if [[ -f "$HOME/.bashrc" ]] && grep -q "Voxlibris Platform Compliance Aliases" "$HOME/.bashrc"; then
     source "$HOME/.bashrc"
-elif [[ -f "$HOME/.zshrc" ]] && grep -q "xLibris Compliance Aliases" "$HOME/.zshrc"; then
+elif [[ -f "$HOME/.zshrc" ]] && grep -q "Voxlibris Platform Compliance Aliases" "$HOME/.zshrc"; then
     source "$HOME/.zshrc"
 fi
 
-# Test if we're in xLibris project
+# Test if we're in Voxlibris Platform project
 if [[ -f "xlibris-manager.sh" && -f "pnpm-workspace.yaml" ]]; then
     # Try to run npm - should be blocked
     if type npm >/dev/null 2>&1; then
@@ -815,7 +815,7 @@ test_git_hooks() {
             echo "✅ Pre-commit hook exists and is executable"
             
             # Test hook content
-            if grep -q "xLibris compliance checks" ".git/hooks/pre-commit"; then
+            if grep -q "Voxlibris Platform compliance checks" ".git/hooks/pre-commit"; then
                 echo "✅ Pre-commit hook contains compliance checks"
             else
                 echo "⚠️  Pre-commit hook missing compliance checks"

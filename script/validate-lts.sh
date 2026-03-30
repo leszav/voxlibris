@@ -1,9 +1,9 @@
 #!/bin/bash
 
 # =============================================================================
-# xLibris LTS Compliance Validator
+# Voxlibris Platform LTS Compliance Validator
 # =============================================================================
-# Автоматическая проверка соблюдения LTS требований проекта xLibris
+# Автоматическая проверка соблюдения LTS требований проекта Voxlibris Platform
 # Валидация Node.js версии и зависимостей на предмет non-LTS пакетов
 
 set -euo pipefail
@@ -46,9 +46,9 @@ log_error() {
 #!/bin/bash
 
 # =============================================================================
-# xLibris LTS Compliance Validator (improved)
+# Voxlibris Platform LTS Compliance Validator (improved)
 # =============================================================================
-# Автоматическая проверка соблюдения LTS требований проекта xLibris
+# Автоматическая проверка соблюдения LTS требований проекта Voxlibris Platform
 # Валидация Node.js версии и зависимостей на предмет non-LTS пакетов
 
 set -euo pipefail
@@ -96,7 +96,7 @@ EXIT_CODE=0
 # Display help
 show_help() {
     cat << EOF
-xLibris LTS Compliance Validator
+Voxlibris Platform LTS Compliance Validator
 
 USAGE:
     ./script/validate-lts.sh [OPTIONS]
@@ -108,7 +108,7 @@ OPTIONS:
     --ignore-warnings   Ignore warnings and only fail on critical errors
 
 DESCRIPTION:
-    Validates LTS compliance for xLibris project:
+    Validates LTS compliance for Voxlibris Platform project:
     
     CHECKS:
     • Node.js LTS version validation
@@ -410,9 +410,9 @@ else
 fi
 
 # =============================================================================
-# 7. Additional xLibris-specific checks
+# 7. Additional Voxlibris Platform-specific checks
 # =============================================================================
-log_info "Running xLibris-specific LTS checks..."
+log_info "Running Voxlibris Platform-specific LTS checks..."
 
 # Check for required LTS-compatible tools
 REQUIRED_TOOLS=("pnpm" "node" "git")
@@ -427,7 +427,7 @@ if [[ $EXIT_CODE -eq 0 ]]; then
     log_success "All required tools available"
 fi
 
-# Check Node.js features required by xLibris
+# Check Node.js features required by Voxlibris Platform
 if command -v node >/dev/null 2>&1; then
     # Check for ES modules support
     if node -e "import('fs')" 2>/dev/null; then
@@ -444,10 +444,10 @@ echo -e "\n${BLUE}===========================================${NC}"
 
 if [[ $EXIT_CODE -eq 0 ]]; then
     log_success "LTS compliance check passed"
-    echo -e "${GREEN}🎉 xLibris project is LTS compliant!${NC}"
+    echo -e "${GREEN}🎉 Voxlibris Platform project is LTS compliant!${NC}"
 else
     log_error "LTS compliance violations detected"
-    echo -e "${RED}🚫 xLibris project has LTS compliance issues${NC}"
+    echo -e "${RED}🚫 Voxlibris Platform project has LTS compliance issues${NC}"
     
     if [[ "$FIX_MODE" = true ]]; then
         echo -e "${YELLOW}💡 Run with --fix flag for automatic fixes (where possible)${NC}"

@@ -2,7 +2,7 @@
   "name": "rest-express",
   "version": "1.0.0",
   "type": "module",
-  "license": "MIT",
+  "license": "UNLICENSED",
   "packageManager": "pnpm@9.0.0",
   "engines": {
     "node": ">=20.0.0",
@@ -28,6 +28,8 @@
     "lint:eslint:fix": "eslint . --ext .ts,.tsx --fix",
     "db:push": "drizzle-kit push",
     "db:migrate": "drizzle-kit migrate",
+    "images:check:static": "tsx script/check-static-images.ts",
+    "images:optimize:static": "tsx script/optimize-static-images.ts",
     "seed": "tsx script/seed.ts",
     "prepare": "husky"
   },
@@ -137,6 +139,7 @@
     "@replit/vite-plugin-cartographer": "^0.4.4",
     "@replit/vite-plugin-dev-banner": "^0.1.1",
     "@replit/vite-plugin-runtime-error-modal": "^0.0.4",
+    "@tailwindcss/postcss": "^4.1.18",
     "@tailwindcss/vite": "^4.1.18",
     "@types/dompurify": "^3.2.0",
     "@types/express": "5.0.6",
@@ -148,6 +151,7 @@
     "@typescript-eslint/eslint-plugin": "^8.53.0",
     "@typescript-eslint/parser": "^8.53.0",
     "@vitejs/plugin-react": "^5.0.4",
+    "autoprefixer": "^10.4.23",
     "concurrently": "^9.2.1",
     "drizzle-kit": "^0.31.8",
     "esbuild": "^0.27.2",

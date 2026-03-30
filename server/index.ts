@@ -19,7 +19,9 @@ import { Server as SocketIOServer } from "socket.io";
 import adminRoutes from "./admin-routes.js";
 import analyticsRoutes from "./analytics-routes.js";
 import { setupAuthRoutes } from "./auth-routes.js";
+import guestRoutes from "./guest-routes.js";
 import { authService } from "./auth-service.js";
+import debugRoutes from "./debug-routes.js";
 import clubReaderRoutes from "./club-reader-routes.js";
 import clubRoutes from "./club-routes.js";
 import readingStatusRoutes from "./reading-status-routes.js";
@@ -27,6 +29,7 @@ import { validateEnvironment } from "./config/validate.js";
 import { jwtAuth } from "./jwt-middleware.js";
 import { registerRoutes } from "./routes.js";
 import readerRoutes from "./routes/reader.js";
+import feedbackRoutes from "./routes/feedback.js";
 import { serveStatic } from "./static.js";
 import { setupWebSocketHandlers } from "./websocket.js";
 import { initializeReaderWebSocket } from "./websocket-reader.js";
@@ -38,6 +41,8 @@ import reactionsRoutes from "./routes/reactions.js";
 import questionsRoutes from "./routes/questions.js";
 import scheduleRoutes from "./routes/schedule.js";
 import { logger } from "./lib/logger.js";
+import { loadFeatureFlags } from "./lib/feature-flags.js";
+import { responseCompression } from "./lib/response-compression.js";
 
 export const app = express();
 
@@ -128,15 +133,15 @@ function maskSensitiveData(obj: unknown): unknown {
 
 // Security headers configuration
 app.use(
-	helmet({
-		contentSecurityPolicy: {
-			directives: {
-				defaultSrc: ["'self'"],
-				styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
-				fontSrc: ["'self'", "https://fonts.gstatic.com"],
-				imgSrc: ["'self'", "data:", "https:"],
-				scriptSrc: ["'self'", "https://mc.yandex.ru", "https://mc.yandex.com"],
-				connectSrc: ["'self'", "wss:", "https:"],
+		helmet({
+			contentSecurityPolicy: {
+				directives: {
+					defaultSrc: ["'self'"],
+					styleSrc: ["'self'", "'unsafe-inline'"],
+					fontSrc: ["'self'"],
+					imgSrc: ["'self'", "data:", "https:"],
+					scriptSrc: ["'self'", "https://mc.yandex.ru", "https://mc.yandex.com"],
+					connectSrc: ["'self'", "wss:", "https:"],
 				frameSrc: ["'none'"],
 				objectSrc: ["'none'"],
 				baseUri: ["'self'"],
@@ -165,6 +170,9 @@ app.use(
 		exposedHeaders: ["X-Total-Count"],
 	}),
 );
+
+// Dynamic JSON/text compression for API responses.
+app.use(responseCompression);
 
 declare global {
 	namespace Express {
@@ -222,13 +230,14 @@ function redactRedisUrl(redisUrl: string): string {
 }
 
 const isProduction = process.env.NODE_ENV === "production";
-const redisPassword = process.env.REDIS_PASSWORD || (!isProduction ? "redis_dev" : "");
+const redisPassword = process.env.REDIS_PASSWORD || (isProduction ? "" : "redis_dev");
 const configuredRedisUrl = process.env.RATE_LIMIT_REDIS_URL || process.env.REDIS_URL || "";
-const redisUrl = configuredRedisUrl
-	? withRedisPasswordIfMissing(configuredRedisUrl, redisPassword)
-	: !isProduction
-		? `redis://:${encodeURIComponent(redisPassword)}@127.0.0.1:6379`
-		: "";
+let redisUrl = "";
+if (configuredRedisUrl) {
+	redisUrl = withRedisPasswordIfMissing(configuredRedisUrl, redisPassword);
+} else if (!isProduction) {
+	redisUrl = `redis://:${encodeURIComponent(redisPassword)}@127.0.0.1:6379`;
+}
 const redisLogTarget = redisUrl ? redactRedisUrl(redisUrl) : "";
 const redisEnabled = parseBooleanEnv(
 	"RATE_LIMIT_REDIS_ENABLED",
@@ -243,14 +252,12 @@ if (redisEnabled && redisUrl) {
 	redisClient.on("error", (error) => {
 		logger.warn({ error }, "[rate-limit] Redis client error");
 	});
-	void redisClient
-		.connect()
-		.then(() => {
-			logger.info({ redisTarget: redisLogTarget }, "[rate-limit] Redis store connected");
-		})
-		.catch((error) => {
-			logger.warn({ error, redisTarget: redisLogTarget }, "[rate-limit] Redis connect failed, using memory fallback");
-		});
+	try {
+		await redisClient.connect();
+		logger.info({ redisTarget: redisLogTarget }, "[rate-limit] Redis store connected");
+	} catch (error) {
+		logger.warn({ error, redisTarget: redisLogTarget }, "[rate-limit] Redis connect failed, using memory fallback");
+	}
 
 	createRedisStore = (namespace: string) =>
 		new RedisStore({
@@ -341,7 +348,7 @@ function resolveAuthenticatedRateLimitKey(req: Request): string | null {
 }
 
 function getAuthenticatedRateLimitKey(req: Request): string | null {
-	if (typeof req._rateLimitUserKey !== "undefined") {
+	if (req._rateLimitUserKey !== undefined) {
 		return req._rateLimitUserKey;
 	}
 	const resolved = resolveAuthenticatedRateLimitKey(req);
@@ -366,10 +373,30 @@ function getAuthIdentifier(req: Request): string | null {
 	return null;
 }
 
+function getResendConfirmationIdentifier(req: Request): string | null {
+	if (!req.body || typeof req.body !== "object") {
+		return null;
+	}
+
+	const userId = (req.body as Record<string, unknown>).userId;
+	if (typeof userId !== "string") {
+		return null;
+	}
+
+	const normalized = userId.trim().toLowerCase();
+	return normalized.length > 0 ? normalized.slice(0, 128) : null;
+}
+
 function getAuthRateLimitKey(req: Request): string {
 	const ipKey = getClientIpKey(req);
 	const identifier = getAuthIdentifier(req);
 	return identifier ? `auth:${identifier}:${ipKey}` : `auth:${ipKey}`;
+}
+
+function getResendConfirmationRateLimitKey(req: Request): string {
+	const ipKey = getClientIpKey(req);
+	const identifier = getResendConfirmationIdentifier(req);
+	return identifier ? `resend:${identifier}:${ipKey}` : `resend:${ipKey}`;
 }
 
 function getGeneralRateLimitKey(req: Request): string {
@@ -396,6 +423,99 @@ const authLimiter = rateLimit({
 	skipSuccessfulRequests: true,
 });
 
+const resendConfirmationWindowMs = parsePositiveIntEnv("RL_RESEND_CONFIRMATION_WINDOW_MS", 60 * 60 * 1000);
+const resendConfirmationMax = parsePositiveIntEnv("RL_RESEND_CONFIRMATION_MAX", 3);
+
+const resendConfirmationLimiter = rateLimit({
+	...rateLimitCommonOptions,
+	...rateLimitHeadersOptions,
+	...withRateLimitStore("auth-resend-confirmation"),
+	windowMs: resendConfirmationWindowMs,
+	max: resendConfirmationMax,
+	keyGenerator: getResendConfirmationRateLimitKey,
+	message: {
+		error: "Too many confirmation email requests. Please try again later.",
+		code: "RESEND_CONFIRMATION_LIMIT",
+		retryAfter: `${Math.ceil(resendConfirmationWindowMs / 1000)} seconds`,
+	},
+});
+
+// ============================================
+// Guest System Rate Limiting
+// ============================================
+
+const guestInitWindowMs = parsePositiveIntEnv("RL_GUEST_INIT_WINDOW_MS", 15 * 60 * 1000);
+const guestInitMax = parsePositiveIntEnv("RL_GUEST_INIT_MAX", 10);
+
+// Guest init: 10 requests per 15 minutes
+const guestInitLimiter = rateLimit({
+	...rateLimitCommonOptions,
+	...rateLimitHeadersOptions,
+	...withRateLimitStore("guest-init"),
+	windowMs: guestInitWindowMs,
+	max: guestInitMax,
+	keyGenerator: getGeneralRateLimitKey,
+	message: {
+		error: "Too many guest accounts created. Please try again later.",
+		code: "GUEST_INIT_LIMIT",
+		retryAfter: `${Math.ceil(guestInitWindowMs / 1000)} seconds`,
+	},
+});
+
+const guestRestoreWindowMs = parsePositiveIntEnv("RL_GUEST_RESTORE_WINDOW_MS", 5 * 60 * 1000);
+const guestRestoreMax = parsePositiveIntEnv("RL_GUEST_RESTORE_MAX", 5);
+
+// Guest restore: 5 attempts per 5 minutes with exponential backoff
+const guestRestoreLimiter = rateLimit({
+	...rateLimitCommonOptions,
+	...rateLimitHeadersOptions,
+	...withRateLimitStore("guest-restore"),
+	windowMs: guestRestoreWindowMs,
+	max: guestRestoreMax,
+	keyGenerator: getGeneralRateLimitKey,
+	message: {
+		error: "Too many restore attempts. Please try again later.",
+		code: "GUEST_RESTORE_LIMIT",
+		retryAfter: `${Math.ceil(guestRestoreWindowMs / 1000)} seconds`,
+	},
+});
+
+const guestUploadWindowMs = parsePositiveIntEnv("RL_GUEST_UPLOAD_WINDOW_MS", 30 * 60 * 1000);
+const guestUploadMax = parsePositiveIntEnv("RL_GUEST_UPLOAD_MAX", 3);
+
+// Guest upload: 3 uploads per 30 minutes per IP
+const guestUploadLimiter = rateLimit({
+	...rateLimitCommonOptions,
+	...rateLimitHeadersOptions,
+	...withRateLimitStore("guest-upload"),
+	windowMs: guestUploadWindowMs,
+	max: guestUploadMax,
+	keyGenerator: getGeneralRateLimitKey,
+	message: {
+		error: "Too many uploads. Please try again later.",
+		code: "GUEST_UPLOAD_LIMIT",
+		retryAfter: `${Math.ceil(guestUploadWindowMs / 1000)} seconds`,
+	},
+});
+
+const guestAnalyticsWindowMs = parsePositiveIntEnv("RL_GUEST_ANALYTICS_WINDOW_MS", 60 * 60 * 1000);
+const guestAnalyticsMax = parsePositiveIntEnv("RL_GUEST_ANALYTICS_MAX", 100);
+
+// Guest analytics: 100 events per hour, burst 20
+const guestAnalyticsLimiter = rateLimit({
+	...rateLimitCommonOptions,
+	...rateLimitHeadersOptions,
+	...withRateLimitStore("guest-analytics"),
+	windowMs: guestAnalyticsWindowMs,
+	max: guestAnalyticsMax,
+	keyGenerator: getGeneralRateLimitKey,
+	message: {
+		error: "Too many analytics events. Please slow down.",
+		code: "GUEST_ANALYTICS_LIMIT",
+		retryAfter: `${Math.ceil(guestAnalyticsWindowMs / 1000)} seconds`,
+	},
+});
+
 const authSlowDownDelayAfter = parsePositiveIntEnv("RL_AUTH_DELAY_AFTER", 1000);
 const authSlowDownWindowMs = parsePositiveIntEnv("RL_AUTH_DELAY_WINDOW_MS", 15 * 60 * 1000);
 
@@ -414,11 +534,11 @@ const speedLimiter = slowDown({
 });
 
 const anonBurstWindowMs = parsePositiveIntEnv("RL_ANON_BURST_WINDOW_MS", 5 * 1000);
-const anonBurstMax = parsePositiveIntEnv("RL_ANON_BURST_MAX", 5);
+const anonBurstMax = parsePositiveIntEnv("RL_ANON_BURST_MAX", 10);
 const anonReadWindowMs = parsePositiveIntEnv("RL_ANON_READ_WINDOW_MS", 60 * 1000);
 const anonReadMax = parsePositiveIntEnv("RL_ANON_READ_MAX", 120);
 const anonWriteWindowMs = parsePositiveIntEnv("RL_ANON_WRITE_WINDOW_MS", 15 * 60 * 1000);
-const anonWriteMax = parsePositiveIntEnv("RL_ANON_WRITE_MAX", 30);
+const anonWriteMax = parsePositiveIntEnv("RL_ANON_WRITE_MAX", 120);
 
 const authReadWindowMs = parsePositiveIntEnv("RL_AUTH_READ_WINDOW_MS", 15 * 60 * 1000);
 const authReadMax = parsePositiveIntEnv("RL_AUTH_READ_MAX", 1200);
@@ -561,6 +681,7 @@ app.use("/api/auth/login", authLimiter);
 app.use("/api/auth/register", authLimiter);
 app.use("/api/auth/forgot-password", authLimiter);
 app.use("/api/auth/reset-password", authLimiter);
+app.use("/api/auth/resend-confirmation", resendConfirmationLimiter);
 app.use("/api/auth", speedLimiter);
 app.use("/api", anonymousBurstLimiter);
 app.use("/api", anonymousReadLimiter);
@@ -569,7 +690,22 @@ app.use("/api", expensiveLimiter);
 app.use("/api", authenticatedReadLimiter);
 app.use("/api", authenticatedWriteLimiter);
 
+// Guest System Rate Limiting
+app.use("/api/v1/guest/init", guestInitLimiter);
+app.use("/api/v1/guest/restore", guestRestoreLimiter);
+app.use("/api/v1/guest/books/upload", guestUploadLimiter);
+app.use("/api/v1/guest/analytics", guestAnalyticsLimiter);
+
 setupAuthRoutes(app);
+
+// Guest System API (feature flag checked in middleware)
+app.use("/api/v1/guest", guestRoutes);
+logger.info("Guest routes mounted (controlled by feature flag in database)");
+
+// Debug API (development only)
+if (process.env.NODE_ENV !== "production") {
+	app.use("/api/debug", debugRoutes);
+}
 
 // Periodic cleanup of expired refresh tokens (every hour)
 	setInterval(
@@ -642,11 +778,23 @@ try {
 
 // Асинхронная инициализация
 try {
+	// Load feature flags from database
+	// NOSONAR typescript:S7785 - await inside try-catch, not top-level
+	await loadFeatureFlags();
+
 	// Регистрация основных роутов
 	await registerRoutes(httpServer, app);
 
 	// Setup Admin routes
 	app.use("/api/v1/admin", adminRoutes);
+
+	// Setup Admin Guest routes
+	const { default: adminGuestRoutes } = await import("./admin-guest-routes.js");
+	app.use("/api/v1/admin", adminGuestRoutes);
+
+	// Setup Admin Feature Flags routes
+	const { default: adminFeatureFlagsRoutes } = await import("./admin-feature-flags.js");
+	app.use("/api/v1/admin", adminFeatureFlagsRoutes);
 
 	// Setup Analytics routes
 	app.use("/api/v1/analytics", analyticsRoutes);
@@ -674,6 +822,9 @@ try {
 
 	// Setup Schedule routes (JWT protected)
 	app.use("/api/schedule", jwtAuth, scheduleRoutes);
+
+	// Setup Feedback routes (no JWT required - public endpoint)
+	app.use("/api/v1/feedback", feedbackRoutes);
 
 	// Start scheduler for notifications (only in production or if enabled)
 	if (process.env.NODE_ENV === 'production' || process.env.ENABLE_SCHEDULER === 'true') {
@@ -726,7 +877,7 @@ try {
         <head>
           <meta charset="UTF-8">
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>xLibris Backend</title>
+          <title>Voxlibris Platform Backend</title>
           <style>
             body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
                    margin: 0; padding: 2rem; background: #f5f5f5; color: #333; }
@@ -741,10 +892,10 @@ try {
         </head>
         <body>
           <div class="container">
-            <div class="logo">📚 xLibris</div>
+            <div class="logo">📚 Voxlibris Platform</div>
             <h1>Backend Server</h1>
             <p class="status">✅ Backend сервер работает</p>
-            <p>Это backend API сервер проекта xLibris.</p>
+            <p>Это backend API сервер проекта Voxlibris Platform.</p>
             <div class="info">
               <strong>Для открытия интерфейса приложения перейдите на:</strong><br>
               <a href="http://localhost:3000" class="link">http://localhost:3000</a>
