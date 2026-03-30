@@ -42,6 +42,7 @@ import questionsRoutes from "./routes/questions.js";
 import scheduleRoutes from "./routes/schedule.js";
 import { logger } from "./lib/logger.js";
 import { loadFeatureFlags } from "./lib/feature-flags.js";
+import { responseCompression } from "./lib/response-compression.js";
 
 export const app = express();
 
@@ -132,15 +133,15 @@ function maskSensitiveData(obj: unknown): unknown {
 
 // Security headers configuration
 app.use(
-	helmet({
-		contentSecurityPolicy: {
-			directives: {
-				defaultSrc: ["'self'"],
-				styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
-				fontSrc: ["'self'", "https://fonts.gstatic.com"],
-				imgSrc: ["'self'", "data:", "https:"],
-				scriptSrc: ["'self'", "https://mc.yandex.ru", "https://mc.yandex.com"],
-				connectSrc: ["'self'", "wss:", "https:"],
+		helmet({
+			contentSecurityPolicy: {
+				directives: {
+					defaultSrc: ["'self'"],
+					styleSrc: ["'self'", "'unsafe-inline'"],
+					fontSrc: ["'self'"],
+					imgSrc: ["'self'", "data:", "https:"],
+					scriptSrc: ["'self'", "https://mc.yandex.ru", "https://mc.yandex.com"],
+					connectSrc: ["'self'", "wss:", "https:"],
 				frameSrc: ["'none'"],
 				objectSrc: ["'none'"],
 				baseUri: ["'self'"],
@@ -169,6 +170,9 @@ app.use(
 		exposedHeaders: ["X-Total-Count"],
 	}),
 );
+
+// Dynamic JSON/text compression for API responses.
+app.use(responseCompression);
 
 declare global {
 	namespace Express {
@@ -873,7 +877,7 @@ try {
         <head>
           <meta charset="UTF-8">
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>xLibris Backend</title>
+          <title>Voxlibris Platform Backend</title>
           <style>
             body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
                    margin: 0; padding: 2rem; background: #f5f5f5; color: #333; }
@@ -888,10 +892,10 @@ try {
         </head>
         <body>
           <div class="container">
-            <div class="logo">📚 xLibris</div>
+            <div class="logo">📚 Voxlibris Platform</div>
             <h1>Backend Server</h1>
             <p class="status">✅ Backend сервер работает</p>
-            <p>Это backend API сервер проекта xLibris.</p>
+            <p>Это backend API сервер проекта Voxlibris Platform.</p>
             <div class="info">
               <strong>Для открытия интерфейса приложения перейдите на:</strong><br>
               <a href="http://localhost:3000" class="link">http://localhost:3000</a>
