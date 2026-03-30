@@ -1,4 +1,4 @@
-# xLibris - Docker Compose v2 Configuration
+# Voxlibris Platform - Docker Compose v2 Configuration
 # Используй: docker compose up -d
 
 services:
