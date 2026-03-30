@@ -77,6 +77,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+SOURCE_COMMIT="$(git rev-parse --verify "$SOURCE_REF")"
+
 if [[ ${#TARGET_BRANCHES[@]} -eq 0 ]]; then
   while IFS= read -r branch; do
     [[ "$branch" == "$CURRENT_BRANCH" ]] && continue
@@ -85,6 +87,7 @@ if [[ ${#TARGET_BRANCHES[@]} -eq 0 ]]; then
 fi
 
 echo "Source ref: $SOURCE_REF"
+echo "Source commit: $SOURCE_COMMIT"
 echo "Current branch: $CURRENT_BRANCH"
 echo "Target branches: ${TARGET_BRANCHES[*]:-<none>}"
 echo "Files to copy:"
@@ -106,7 +109,14 @@ for branch in "${TARGET_BRANCHES[@]}"; do
   echo
   echo "==> Updating $branch"
   git checkout "$branch" >/dev/null
-  git restore --source="$SOURCE_REF" -- "${FILES[@]}"
+
+  for file in "${FILES[@]}"; do
+    if git cat-file -e "$SOURCE_COMMIT:$file" 2>/dev/null; then
+      git checkout "$SOURCE_COMMIT" -- "$file"
+    else
+      echo "Skipping missing source file: $file"
+    fi
+  done
 
   if git diff --quiet -- "${FILES[@]}"; then
     echo "No changes needed on $branch"
