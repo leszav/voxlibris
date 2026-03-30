@@ -16,6 +16,7 @@ import readerQualityRouter from "./routes/reader-quality.js";
 import { jwtAuth, requireActiveUser } from "./jwt-middleware.js";
 import { logger } from "./lib/logger.js";
 import { getPublicBaseUrl } from "./lib/public-base-url.js";
+import { storeOptimizedImageIfNeeded } from "./lib/uploaded-image-storage.js";
 import { db } from "./db.js";
 import {
   analyticsEvents,
@@ -1218,7 +1219,17 @@ export async function registerRoutes(
         return res.status(401).json({ message: "Пользователь не аутентифицирован" });
       }
 
-      const { displayName, avatar, coverImage, bio, favoriteGenres, isReader } = req.body;
+      const { displayName, bio, favoriteGenres, isReader } = req.body;
+      const avatar = await storeOptimizedImageIfNeeded(req.body.avatar, {
+        type: "avatar",
+        keyPrefix: `avatars/${currentUser.id}`,
+        filenamePrefix: "avatar",
+      });
+      const coverImage = await storeOptimizedImageIfNeeded(req.body.coverImage, {
+        type: "background",
+        keyPrefix: `profiles/${currentUser.id}`,
+        filenamePrefix: "cover",
+      });
 
       const profileData = {
         displayName,
@@ -1255,7 +1266,17 @@ export async function registerRoutes(
         return res.status(403).json({ message: "Недостаточно прав" });
       }
 
-      const { displayName, avatar, coverImage, bio, favoriteGenres, isReader } = req.body;
+      const { displayName, bio, favoriteGenres, isReader } = req.body;
+      const avatar = await storeOptimizedImageIfNeeded(req.body.avatar, {
+        type: "avatar",
+        keyPrefix: `avatars/${profileUserId}`,
+        filenamePrefix: "avatar",
+      });
+      const coverImage = await storeOptimizedImageIfNeeded(req.body.coverImage, {
+        type: "background",
+        keyPrefix: `profiles/${profileUserId}`,
+        filenamePrefix: "cover",
+      });
 
       const profileData = {
         displayName,

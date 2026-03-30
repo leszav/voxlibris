@@ -1,8 +1,14 @@
-import { useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../ui/button";
 import { Slider } from "../ui/slider";
 import { Sun, Moon, Type, AlignJustify } from "lucide-react";
-import type { ReaderSettings } from "@/lib/reader-settings";
+import {
+  applyReaderSettings,
+  DEFAULT_READER_SETTINGS,
+  normalizeReaderSettings,
+  type ReaderSettings,
+} from "@/lib/reader-settings";
+import { SyncStatusIndicator } from "./SyncStatusIndicator";
 
 const FONT_FAMILIES = [
   { value: "Georgia", label: "Georgia" },
@@ -16,6 +22,7 @@ interface ReaderControlsProps {
   readonly settings: ReaderSettings;
   readonly onSettingsChange: (settings: ReaderSettings) => void;
   readonly onResetSettings?: () => void;
+  /** @deprecated Use SyncStatusIndicator component instead */
   readonly isSaving?: boolean;
 }
 
@@ -23,22 +30,68 @@ export function ReaderControls({
   settings,
   onSettingsChange,
   onResetSettings,
-  isSaving = false,
+  isSaving: _isSaving = false,
 }: ReaderControlsProps) {
+  const [localSettings, setLocalSettings] = useState<ReaderSettings>(() => normalizeReaderSettings(settings));
+  const commitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const commitSettings = useCallback((nextSettings: ReaderSettings, delayMs = 180) => {
+    if (commitTimeoutRef.current) {
+      clearTimeout(commitTimeoutRef.current);
+    }
+
+    commitTimeoutRef.current = setTimeout(() => {
+      onSettingsChange(nextSettings);
+      commitTimeoutRef.current = null;
+    }, delayMs);
+  }, [onSettingsChange]);
+
+  useEffect(() => {
+    const normalizedIncoming = normalizeReaderSettings(settings);
+    setLocalSettings(normalizedIncoming);
+    applyReaderSettings(normalizedIncoming, "personal");
+  }, [settings]);
+
+  useEffect(() => {
+    return () => {
+      if (commitTimeoutRef.current) {
+        clearTimeout(commitTimeoutRef.current);
+      }
+    };
+  }, []);
+
   const updateSetting = useMemo(
     () => (key: keyof ReaderSettings, value: ReaderSettings[typeof key]) => {
-      onSettingsChange({ ...settings, [key]: value });
+      setLocalSettings((prev) => {
+        const nextSettings = normalizeReaderSettings({ ...prev, [key]: value });
+        applyReaderSettings(nextSettings, "personal");
+        commitSettings(nextSettings);
+        return nextSettings;
+      });
     },
-    [onSettingsChange, settings]
+    [commitSettings]
   );
+
+  const handleReset = useCallback(() => {
+    const nextSettings = normalizeReaderSettings(DEFAULT_READER_SETTINGS);
+    setLocalSettings(nextSettings);
+    applyReaderSettings(nextSettings, "personal");
+
+    if (onResetSettings) {
+      onResetSettings();
+      return;
+    }
+
+    onSettingsChange(nextSettings);
+  }, [onResetSettings, onSettingsChange]);
 
   return (
     <div className="space-y-6">
       <div className="space-y-1">
-        <h3 className="font-semibold text-lg">Настройки чтения</h3>
-        {isSaving && (
-          <p className="text-xs text-muted-foreground">Сохраняем настройки...</p>
-        )}
+        <div className="flex items-center justify-between">
+          <h3 className="font-semibold text-lg">Настройки чтения</h3>
+          <SyncStatusIndicator showText size="sm" />
+        </div>
       </div>
 
       <div className="space-y-2">
@@ -48,12 +101,12 @@ export function ReaderControls({
             Размер шрифта
           </label>
           <span className="text-sm text-muted-foreground">
-            {settings.fontSize}px
+            {localSettings.fontSize}px
           </span>
         </div>
         <Slider
           id="font-size-slider"
-          value={[settings.fontSize]}
+          value={[localSettings.fontSize]}
           onValueChange={(value) => updateSetting("fontSize", value[0])}
           min={12}
           max={32}
@@ -68,7 +121,7 @@ export function ReaderControls({
           {FONT_FAMILIES.map((font) => (
             <Button
               key={font.value}
-              variant={settings.fontFamily === font.value ? "secondary" : "outline"}
+              variant={localSettings.fontFamily === font.value ? "secondary" : "outline"}
               size="sm"
               onClick={() => updateSetting("fontFamily", font.value)}
               className="text-xs"
@@ -86,12 +139,12 @@ export function ReaderControls({
             Интервал
           </label>
           <span className="text-sm text-muted-foreground">
-            {settings.lineHeight.toFixed(1)}
+            {localSettings.lineHeight.toFixed(1)}
           </span>
         </div>
         <Slider
           id="line-height-slider"
-          value={[settings.lineHeight]}
+          value={[localSettings.lineHeight]}
           onValueChange={(value) => updateSetting("lineHeight", value[0])}
           min={1.2}
           max={2.5}
@@ -104,12 +157,12 @@ export function ReaderControls({
         <div className="flex items-center justify-between">
           <label htmlFor="content-width-slider" className="text-sm">Ширина текста</label>
           <span className="text-sm text-muted-foreground">
-            {settings.contentWidth}%
+            {localSettings.contentWidth}%
           </span>
         </div>
         <Slider
           id="content-width-slider"
-          value={[settings.contentWidth]}
+          value={[localSettings.contentWidth]}
           onValueChange={(value) => updateSetting("contentWidth", value[0])}
           min={60}
           max={95}
@@ -122,7 +175,7 @@ export function ReaderControls({
         <span className="text-sm">Тема</span>
         <div className="flex gap-2">
           <Button
-            variant={settings.theme === "light" ? "secondary" : "outline"}
+            variant={localSettings.theme === "light" ? "secondary" : "outline"}
             size="sm"
             onClick={() => updateSetting("theme", "light")}
             className="flex-1"
@@ -131,7 +184,7 @@ export function ReaderControls({
             Светлая
           </Button>
           <Button
-            variant={settings.theme === "dark" ? "secondary" : "outline"}
+            variant={localSettings.theme === "dark" ? "secondary" : "outline"}
             size="sm"
             onClick={() => updateSetting("theme", "dark")}
             className="flex-1"
@@ -140,7 +193,7 @@ export function ReaderControls({
             Темная
           </Button>
           <Button
-            variant={settings.theme === "sepia" ? "secondary" : "outline"}
+            variant={localSettings.theme === "sepia" ? "secondary" : "outline"}
             size="sm"
             onClick={() => updateSetting("theme", "sepia")}
             className="flex-1 text-xs"
@@ -154,7 +207,7 @@ export function ReaderControls({
         <span className="text-sm">Выравнивание</span>
         <div className="flex gap-2">
           <Button
-            variant={settings.textAlign === "left" ? "secondary" : "outline"}
+            variant={localSettings.textAlign === "left" ? "secondary" : "outline"}
             size="sm"
             onClick={() => updateSetting("textAlign", "left")}
             className="flex-1 text-xs"
@@ -162,7 +215,7 @@ export function ReaderControls({
             По левому краю
           </Button>
           <Button
-            variant={settings.textAlign === "justify" ? "secondary" : "outline"}
+            variant={localSettings.textAlign === "justify" ? "secondary" : "outline"}
             size="sm"
             onClick={() => updateSetting("textAlign", "justify")}
             className="flex-1 text-xs"
@@ -176,7 +229,7 @@ export function ReaderControls({
         <Button
           variant="outline"
           size="sm"
-          onClick={onResetSettings}
+          onClick={handleReset}
           className="w-full mt-4"
         >
           Сбросить настройки

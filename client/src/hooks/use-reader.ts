@@ -174,7 +174,10 @@ export function useReaderSettings() {
       const response = await apiRequest<ReaderSettingsResponse>("/api/v1/books/reader-settings");
       return normalizeReaderSettings(response.settings);
     },
-    staleTime: 0,
+    staleTime: 5 * 60 * 1000, // 5 minutes - settings don't change often
+    gcTime: 10 * 60 * 1000, // 10 minutes garbage collection
+    retry: 3,
+    retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000),
   });
 }
 
@@ -193,6 +196,11 @@ export function useAllBookmarks() {
   };
 }
 
+/**
+ * Legacy hook for backward compatibility
+ * New code should use the offline-first sync manager directly
+ * This hook is kept for components that still use the old pattern
+ */
 export function useUpdateReaderSettings() {
   const queryClient = useQueryClient();
   const queryKey = ["reader-settings"] as const;
@@ -207,17 +215,20 @@ export function useUpdateReaderSettings() {
       return normalizeReaderSettings(response.settings);
     },
     onMutate: async (settings): Promise<UpdateReaderSettingsContext> => {
-      await queryClient.cancelQueries({ queryKey });
+      // Don't cancel queries - let them continue in background
       const previousSettings = queryClient.getQueryData<ReaderSettings>(queryKey);
+      // Optimistically update cache immediately
       queryClient.setQueryData(queryKey, normalizeReaderSettings(settings));
       return { previousSettings };
     },
     onError: (_error, _settings, context) => {
+      // Only rollback if we have previous settings
       if (context?.previousSettings) {
         queryClient.setQueryData(queryKey, context.previousSettings);
       }
     },
     onSuccess: (settings) => {
+      // Update cache with server response
       queryClient.setQueryData(queryKey, settings);
     },
   });

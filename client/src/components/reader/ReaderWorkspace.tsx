@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, type RefObject } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo, type RefObject } from "react";
 import { useParams } from "wouter";
 import { useAnalytics } from "../../hooks/use-analytics";
 import { useAddBookmark, useBookmarks, useDeleteBookmark } from "../../hooks/use-reader";
@@ -284,7 +284,9 @@ export function ReaderWorkspace({ bookId: propBookId, clubId, params }: Readonly
     settings,
     updateSettings,
     resetSettings,
-    isSaving: isSavingReaderSettings,
+    syncStatus: _syncStatus,
+    isLoading: _isLoadingReaderSettings,
+    // isSaving is deprecated, replaced with syncStatus
   } = useSyncedReaderSettings("personal");
   
   // Analytics hooks
@@ -509,26 +511,30 @@ export function ReaderWorkspace({ bookId: propBookId, clubId, params }: Readonly
     navigateToSavedPosition(suggestedProgress.currentChapter, suggestedProgress.currentPosition);
   }, [dismissSuggestion, navigateToSavedPosition, suggestedProgress]);
 
-  // Рендер контента без вложенных тернариев
-  const renderMainContent = () => {
-    const onMarkAsRead = () => {
-      saveProgressNow({
-        chapter: currentChapter ?? 1,
-        progressOverride: 100,
-      });
-    };
+  const handleMarkAsRead = useCallback(() => {
+    saveProgressNow({
+      chapter: currentChapter ?? 1,
+      progressOverride: 100,
+    });
+  }, [currentChapter, saveProgressNow]);
 
-    return (
-      <ReaderMainContent
-        contentLoading={contentLoading}
-        currentChapterContent={currentChapterContent}
-        currentChapter={currentChapter}
-        bookData={bookData}
-        setCurrentChapter={changeChapter}
-        onMarkAsRead={onMarkAsRead}
-      />
-    );
-  };
+  const mainContent = useMemo(() => (
+    <ReaderMainContent
+      contentLoading={contentLoading}
+      currentChapterContent={currentChapterContent}
+      currentChapter={currentChapter}
+      bookData={bookData}
+      setCurrentChapter={changeChapter}
+      onMarkAsRead={handleMarkAsRead}
+    />
+  ), [
+    contentLoading,
+    currentChapterContent,
+    currentChapter,
+    bookData,
+    changeChapter,
+    handleMarkAsRead,
+  ]);
 
   if (!bookId) {
     return (
@@ -708,7 +714,6 @@ export function ReaderWorkspace({ bookId: propBookId, clubId, params }: Readonly
                     settings={settings}
                     onSettingsChange={updateSettings}
                     onResetSettings={resetSettings}
-                    isSaving={isSavingReaderSettings}
                   />
                 </div>
               )}
@@ -743,7 +748,7 @@ export function ReaderWorkspace({ bookId: propBookId, clubId, params }: Readonly
             width: "var(--reader-content-width, 90%)"
           }}
         >
-          {renderMainContent()}
+          {mainContent}
         </div>
       </main>
 

@@ -81,7 +81,9 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
     settings,
     updateSettings,
     resetSettings,
-    isSaving: isSavingReaderSettings,
+    syncStatus: _syncStatus,
+    isLoading: _isLoadingReaderSettings,
+    // isSaving is deprecated, replaced with syncStatus
   } = useSyncedReaderSettings("club", { cleanupOnUnmount: true });
 
   // Загрузка закладок
@@ -387,7 +389,7 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
     setCurrentChapter(suggestedProgress.currentChapter);
   };
 
-  const renderMainContent = () => {
+  const mainContent = useMemo(() => {
     if (contentLoading && currentChapter != null) {
       return <ChapterLoadingIndicator />;
     }
@@ -441,7 +443,15 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
       );
     }
     return <ContentLoadingSkeleton />;
-  };
+  }, [
+    contentLoading,
+    currentChapter,
+    currentChapterContent,
+    chapters.length,
+    bookData.totalChapters,
+    changeChapter,
+    saveProgressNow,
+  ]);
 
   return (
     <div className="h-screen flex flex-col bg-background">
@@ -535,7 +545,6 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
                 settings={settings}
                 onSettingsChange={updateSettings}
                 onResetSettings={resetSettings}
-                isSaving={isSavingReaderSettings}
               />
             </div>
           </div>
@@ -631,7 +640,7 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
                 margin: '0 auto'
               } as CSSProperties}
             >
-              {renderMainContent()}
+              {mainContent}
             </div>
           </div>
         </main>

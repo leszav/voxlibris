@@ -11,6 +11,7 @@ import { logger } from './lib/logger.js';
 import { serializeClub, serializeClubList, serializeClubMembers, serializePublicCatalogClubList } from './lib/client-serializers.js';
 import { getPublicBaseUrl } from './lib/public-base-url.js';
 import { sanitizeClubSettingsInput } from './lib/club-settings-sanitizer.js';
+import { storeOptimizedImageIfNeeded } from './lib/uploaded-image-storage.js';
 
 const router = express.Router();
 
@@ -75,19 +76,24 @@ async function findInvitationByToken(token: string) {
  * POST /api/clubs
  * Создание нового клуба (только для активных пользователей)
  */
-router.post('/', jwtAuth, requireActiveUser, async (req, res) => {
+  router.post('/', jwtAuth, requireActiveUser, async (req, res) => {
   try {
     if (!req.user) {
       return res.status(401).json({ message: 'Authentication required' });
     }
 
     const sanitizedSettings = sanitizeClubSettingsInput(req.body.settings);
+    const coverImage = await storeOptimizedImageIfNeeded(req.body.coverImage, {
+      type: 'background',
+      keyPrefix: `clubs/${req.user.userId}`,
+      filenamePrefix: 'cover',
+    });
 
     // Валидация данных
     const clubData: InsertClub & { ownerId: string; status: Club['status'] } = {
       title: req.body.title,
       description: req.body.description,
-      coverImage: req.body.coverImage,
+      coverImage,
       bookId: req.body.bookId, // необязательное - книга загружается отдельно
       ownerId: req.user.userId,
       type: req.body.type || 'standard',
@@ -260,11 +266,16 @@ router.put('/:id', jwtAuth, async (req, res) => {
     }
 
     const sanitizedSettings = sanitizeClubSettingsInput(req.body.settings);
+    const coverImage = await storeOptimizedImageIfNeeded(req.body.coverImage, {
+      type: 'background',
+      keyPrefix: `clubs/${club.id}`,
+      filenamePrefix: 'cover',
+    });
 
     const updates: Partial<InsertClub> = {
       title: req.body.title,
       description: req.body.description,
-      coverImage: req.body.coverImage,
+      coverImage,
       maxMembers: req.body.maxMembers,
       isPrivate: req.body.isPrivate,
       schedule: req.body.schedule,

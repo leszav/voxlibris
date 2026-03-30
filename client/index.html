@@ -4,9 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     
-    <!-- Yandex.Metrika counter (SPA) -->
-    <!-- Инициализация и загрузка скрипта выполняется из JS-бандла (см. client/src/lib/yandexMetrika.tsx) -->
-    <!-- /Yandex.Metrika counter -->
+    <!-- Yandex.Metrika: здесь только noscript fallback.
+         Инициализация tag.js и SPA hit выполняются из JS-бандла (client/src/lib/yandexMetrika.tsx). -->
     
     <!-- Primary Meta Tags -->
     <title>{{TITLE}}</title>
@@ -76,7 +75,7 @@
     </script>
   </head>
   <body>
-    <!-- Yandex.Metrika noscript (for users without JS) -->
+    <!-- Yandex.Metrika noscript fallback (основной код счетчика загружается из React-приложения) -->
     <noscript><div><img src="https://mc.yandex.ru/watch/106167747" style="position:absolute; left:-9999px;" alt="" /></div></noscript>
 
     <div id="root"></div>

@@ -1136,22 +1136,111 @@ export class FB2Parser extends BaseBookParser {
           return;
         }
 
-        const chapterContent = this.extractSectionContent(section);
-        if (chapterContent.trim()) {
-          // Попытаться извлечь заголовок
-          const title = this.extractSectionTitle(section) || `Chapter ${chapterNumber}`;
-
-          chapters.push({
-            chapterNumber: chapterNumber++,
-            title,
-            content: chapterContent,
-            wordCount: this.countWords(chapterContent),
-          });
-        }
+        chapterNumber = this.appendSectionChapters(section, chapters, chapterNumber);
       });
     });
 
     return chapters;
+  }
+
+  private appendSectionChapters(section: XmlElement, chapters: BookChapter[], chapterNumber: number): number {
+    if (chapters.length >= MAX_BOOK_CHAPTERS) {
+      return chapterNumber;
+    }
+
+    const childSections = asArray<XmlElement>(section?.section);
+    const directContent = this.extractSectionOwnContent(section);
+    const directWordCount = this.countWords(directContent);
+
+    if (this.shouldSplitSectionIntoChildChapters(section, childSections, directWordCount)) {
+      const hasMeaningfulIntro = directWordCount >= 80;
+
+      if (hasMeaningfulIntro) {
+        const title = this.extractSectionTitle(section) || `Chapter ${chapterNumber}`;
+        chapters.push({
+          chapterNumber,
+          title,
+          content: directContent,
+          wordCount: directWordCount,
+        });
+        chapterNumber += 1;
+      }
+
+      for (const childSection of childSections) {
+        if (chapters.length >= MAX_BOOK_CHAPTERS) {
+          break;
+        }
+
+        chapterNumber = this.appendSectionChapters(childSection, chapters, chapterNumber);
+      }
+
+      return chapterNumber;
+    }
+
+    const chapterContent = this.extractSectionContent(section);
+    if (chapterContent.trim()) {
+      const title = this.extractSectionTitle(section) || `Chapter ${chapterNumber}`;
+
+      chapters.push({
+        chapterNumber,
+        title,
+        content: chapterContent,
+        wordCount: this.countWords(chapterContent),
+      });
+      return chapterNumber + 1;
+    }
+
+    return chapterNumber;
+  }
+
+  private shouldSplitSectionIntoChildChapters(
+    section: XmlElement,
+    childSections: XmlElement[],
+    directWordCount: number,
+  ): boolean {
+    if (childSections.length === 0) {
+      return false;
+    }
+
+    const titledChildSections = childSections.filter((childSection) => {
+      const title = this.extractSectionTitle(childSection);
+      return Boolean(title && title.trim().length > 0);
+    });
+
+    if (titledChildSections.length === 0) {
+      return false;
+    }
+
+    const sectionTitle = this.extractSectionTitle(section);
+    const isContainerLike = directWordCount < 80;
+    const nonStructuralChildTitles = titledChildSections.filter((childSection) => {
+      const title = this.extractSectionTitle(childSection);
+      return title ? !this.isStructuralSubsectionTitle(title) : false;
+    });
+
+    if (sectionTitle && nonStructuralChildTitles.length === 0) {
+      return false;
+    }
+
+    if (childSections.length >= 2 && isContainerLike && nonStructuralChildTitles.length >= 2) {
+      return true;
+    }
+
+    if (childSections.length === 1 && !sectionTitle && directWordCount < 30 && nonStructuralChildTitles.length === 1) {
+      return true;
+    }
+
+    return false;
+  }
+
+  private isStructuralSubsectionTitle(title: string): boolean {
+    const normalized = title.trim().replaceAll(/\s+/g, ' ').toLowerCase();
+
+    if (!normalized) {
+      return true;
+    }
+
+    return /^(?:\d+|\d+[.)]|[ivxlcdm]+|[ivxlcdm]+[.)]|часть\s+\d+|глава\s+\d+)$/i.test(normalized);
   }
 
   private extractSectionTitle(section: XmlElement): string | undefined {
@@ -1225,6 +1314,51 @@ export class FB2Parser extends BaseBookParser {
     const subsections = section?.section as XmlElement[] | undefined ?? [];
     subsections.forEach((subsection) => {
       content += this.extractSectionContent(subsection);
+    });
+
+    return content;
+  }
+
+  private extractSectionOwnContent(section: XmlElement): string {
+    let content = '';
+
+    const sectionTitle = this.extractSectionTitle(section);
+    if (sectionTitle?.trim()) {
+      content += `<h3>${this.escapeHtml(sectionTitle)}</h3>\n`;
+    }
+
+    const paragraphs = section?.p as XmlElement[] | undefined ?? [];
+    paragraphs.forEach((paragraph) => {
+      const paragraphText = this.extractTextFromFB2Element(paragraph);
+      if (paragraphText.trim()) {
+        content += `<p>${this.escapeHtml(paragraphText)}</p>\n`;
+      }
+    });
+
+    const epigraphs = section?.epigraph as XmlElement[] | undefined ?? [];
+    epigraphs.forEach((epigraph) => {
+      const epigraphText = this.extractTextFromFB2Element(epigraph);
+      if (epigraphText.trim()) {
+        content += `<blockquote class="epigraph">${this.escapeHtml(epigraphText)}</blockquote>\n`;
+      }
+    });
+
+    const poems = section?.poem as XmlElement[] | undefined ?? [];
+    poems.forEach((poem) => {
+      content += '<div class="poem">';
+      const stanzas = poem?.stanza as XmlElement[] | undefined ?? [];
+      stanzas.forEach((stanza) => {
+        content += '<div class="stanza">';
+        const verses = stanza?.v as XmlElement[] | undefined ?? [];
+        verses.forEach((verse) => {
+          const verseText = this.extractTextFromFB2Element(verse);
+          if (verseText.trim()) {
+            content += `<p class="verse">${this.escapeHtml(verseText)}</p>`;
+          }
+        });
+        content += '</div>';
+      });
+      content += '</div>\n';
     });
 
     return content;

@@ -11,6 +11,7 @@ import { fileStorage } from './file-storage.js';
 import { duplicateDetectionService } from './duplicate-detection-service.js';
 import { logger } from './lib/logger.js';
 import { optimizeImage } from './image-optimizer.js';
+import { storeOptimizedImageIfNeeded } from './lib/uploaded-image-storage.js';
 
 const router = Router();
 
@@ -526,14 +527,28 @@ router.patch('/clubs/:clubId/books/:bookId', jwtAuth, requireActiveUser, async (
         const canEdit = membership.role === 'owner' || membership.role === 'moderator' || book.uploadedByUserId === req.user?.id;
         if (!canEdit) return res.status(403).json({ error: 'You do not have permission to edit this book' });
 
-        const updatedBook = await storage.updateClubBook(bookId, {
+        const normalizedCoverUrl = await storeOptimizedImageIfNeeded(coverUrl, {
+            type: 'cover',
+            keyPrefix: `covers/club/${clubId}/manual`,
+            filenamePrefix: bookId,
+        });
+
+        const updatePayload = {
             title,
             description,
-            coverUrl,
+            coverUrl: normalizedCoverUrl,
             genre,
             language,
-            publicationYear: publicationYear ? Number.parseInt(publicationYear) : undefined,
+            publicationYear: publicationYear ? Number.parseInt(publicationYear, 10) : undefined,
+        };
+
+        Object.keys(updatePayload).forEach((key) => {
+            if (updatePayload[key as keyof typeof updatePayload] === undefined) {
+                delete updatePayload[key as keyof typeof updatePayload];
+            }
         });
+
+        const updatedBook = await storage.updateClubBook(bookId, updatePayload);
 
         res.json(updatedBook);
     } catch (error) {

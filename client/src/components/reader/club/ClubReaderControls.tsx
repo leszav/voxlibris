@@ -6,6 +6,7 @@ import {
   DEFAULT_READER_SETTINGS,
   type ReaderSettings as ClubReaderSettings,
 } from "@/lib/reader-settings";
+import { SyncStatusIndicator } from "../SyncStatusIndicator";
 
 export { DEFAULT_READER_SETTINGS as DEFAULT_CLUB_SETTINGS };
 export type { ReaderSettings as ClubReaderSettings } from "@/lib/reader-settings";
@@ -22,6 +23,7 @@ interface ClubReaderControlsProps {
   settings: ClubReaderSettings;
   onSettingsChange: (settings: ClubReaderSettings) => void;
   onResetSettings?: () => void;
+  /** @deprecated Use SyncStatusIndicator component instead */
   isSaving?: boolean;
 }
 
@@ -29,7 +31,7 @@ export function ClubReaderControls({
   settings,
   onSettingsChange,
   onResetSettings,
-  isSaving = false,
+  isSaving: _isSaving = false,
 }: ClubReaderControlsProps) {
   const updateSetting = useMemo(
     () => (key: keyof ClubReaderSettings, value: ClubReaderSettings[typeof key]) => {
@@ -41,10 +43,10 @@ export function ClubReaderControls({
   return (
     <div className="space-y-4 sm:space-y-6">
       <div className="space-y-1">
-        <h3 className="font-semibold text-sm sm:text-lg">Настройки чтения</h3>
-        {isSaving && (
-          <p className="text-xs text-muted-foreground">Сохраняем настройки...</p>
-        )}
+        <div className="flex items-center justify-between">
+          <h3 className="font-semibold text-sm sm:text-lg">Настройки чтения</h3>
+          <SyncStatusIndicator showText size="sm" />
+        </div>
       </div>
 
       <div className="space-y-2">
