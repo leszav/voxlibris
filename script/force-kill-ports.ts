@@ -6,7 +6,7 @@ const execAsync = promisify(exec);
 const PORTS = [3000, 5000, 5432];
 
 async function killPortProcesses() {
-  console.log('🔥 Принудительно освобождаю порты для проекта xLibris...');
+  console.log('🔥 Принудительно освобождаю порты для проекта Voxlibris Platform...');
   
   for (const port of PORTS) {
     try {
