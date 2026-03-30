@@ -1,9 +1,9 @@
 #!/bin/bash
 
-# Простой тест системы compliance xLibris
+# Простой тест системы compliance Voxlibris Platform
 # Минималистичная проверка без излишних украшений
 
-echo "=== xLibris Compliance Test ==="
+echo "=== Voxlibris Platform Compliance Test ==="
 
 # Проверка структуры проекта
 echo -n "1. Project structure: "

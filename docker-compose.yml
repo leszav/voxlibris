@@ -1,4 +1,4 @@
-# xLibris - Docker Compose v2 Configuration
+# Voxlibris Platform - Docker Compose v2 Configuration
 # Используй: docker compose up -d
 
 services:
@@ -38,28 +38,6 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
-
-  # STUN/TURN Server для WebRTC
-  coturn:
-    image: coturn/coturn:latest
-    container_name: xlibris-coturn
-    restart: unless-stopped
-    network_mode: host
-    environment:
-      TURN_USERNAME: ${TURN_USERNAME:-xlibris}
-      TURN_PASSWORD: ${TURN_PASSWORD:-turn_dev}
-    command: >
-      -n
-      --log-file=stdout
-      --lt-cred-mech
-      --fingerprint
-      --no-multicast-peers
-      --no-cli
-      --no-tlsv1
-      --no-tlsv1_1
-      --realm=xlibris.local
-      --user=${TURN_USERNAME:-xlibris}:${TURN_PASSWORD:-turn_dev}
-      --external-ip=$$(detect-external-ip)
 
   # MinIO для Object Storage (S3-совместимое)
   minio:

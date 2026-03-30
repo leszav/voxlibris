@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # =============================================================================
-# xLibris CI/CD Setup & Integration 
+# Voxlibris Platform CI/CD Setup & Integration 
 # =============================================================================
 # Настройка автоматических проверок и CI/CD pipeline
 # Интеграция всех compliance компонентов в автоматизированный workflow
@@ -39,7 +39,7 @@ log_error() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') [ERROR] $1" >> logs/xlibris-manager.log
 }
 
-# Detect xLibris project root
+# Detect Voxlibris Platform project root
 detect_project_root() {
     local current_dir="$PWD"
     while [[ "$current_dir" != "/" ]]; do
@@ -65,7 +65,7 @@ init_ci_cd_setup() {
         
         log_info "Initializing CI/CD setup from $project_root"
     else
-        echo -e "${RED}❌ Not in xLibris project directory${NC}"
+        echo -e "${RED}❌ Not in Voxlibris Platform project directory${NC}"
         exit 1
     fi
 }
@@ -81,14 +81,14 @@ setup_precommit_hooks() {
 #!/bin/bash
 
 # =============================================================================
-# xLibris Pre-commit Hook
+# Voxlibris Platform Pre-commit Hook
 # =============================================================================
 # Автоматическая проверка соблюдения принципов проекта перед коммитом
 # Точная реализация согласно .tmp/err-fix.md:258-284
 
 set -euo pipefail
 
-echo "🔍 Running xLibris compliance checks..."
+echo "🔍 Running Voxlibris Platform compliance checks..."
 
 # Colors
 RED='\033[0;31m'
@@ -167,13 +167,13 @@ EOF
 #!/bin/bash
 
 # =============================================================================
-# xLibris Pre-push Hook
+# Voxlibris Platform Pre-push Hook
 # =============================================================================
 # Дополнительные проверки перед push в удаленный репозиторий
 
 set -euo pipefail
 
-echo "🚀 Running pre-push xLibris checks..."
+echo "🚀 Running pre-push Voxlibris Platform checks..."
 
 # Colors
 RED='\033[0;31m'
@@ -214,7 +214,7 @@ setup_github_actions() {
     mkdir -p .github/workflows
     
     cat > .github/workflows/xlibris-compliance.yml << 'EOF'
-name: xLibris Compliance Checks
+name: Voxlibris Platform Compliance Checks
 
 on:
   push:
@@ -224,7 +224,7 @@ on:
 
 jobs:
   compliance:
-    name: xLibris Compliance Validation
+    name: Voxlibris Platform Compliance Validation
     runs-on: ubuntu-latest
     
     steps:
@@ -349,7 +349,7 @@ setup_gitlab_ci() {
     
     cat > .gitlab-ci.yml << 'EOF'
 # =============================================================================
-# xLibris GitLab CI/CD Configuration
+# Voxlibris Platform GitLab CI/CD Configuration
 # =============================================================================
 
 stages:
@@ -377,7 +377,7 @@ compliance_check:
   stage: compliance
   image: node:lts
   script:
-    - echo "🔍 Running xLibris compliance checks..."
+    - echo "🔍 Running Voxlibris Platform compliance checks..."
     - chmod +x xlibris-manager.sh scripts/*.sh script/*.sh
     
     # Check for violations
@@ -506,7 +506,7 @@ setup_ci_monitoring() {
 #!/bin/bash
 
 # =============================================================================
-# xLibris CI/CD Monitor
+# Voxlibris Platform CI/CD Monitor
 # =============================================================================
 # Мониторинг статуса CI/CD pipeline и compliance проверок
 
@@ -519,7 +519,7 @@ YELLOW='\033[0;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-echo -e "${BLUE}📊 xLibris CI/CD Monitor${NC}"
+echo -e "${BLUE}📊 Voxlibris Platform CI/CD Monitor${NC}"
 echo "=========================="
 
 # Check Git hooks status
@@ -581,7 +581,7 @@ setup_manager_integration() {
 #!/bin/bash
 
 # =============================================================================
-# xLibris Manager CI/CD Integration
+# Voxlibris Platform Manager CI/CD Integration
 # =============================================================================
 # Интеграция xlibris-manager.sh с CI/CD процессами
 
@@ -646,7 +646,7 @@ case "${1:-help}" in
 <content>#!/bin/bash
 
 # =============================================================================
-# xLibris CI/CD Setup
+# Voxlibris Platform CI/CD Setup
 # =============================================================================
 # Настройка CI/CD автоматизации и интеграция compliance проверок
 # Часть ЭТАП 5: АВТОМАТИЗАЦИЯ И МОНИТОРИНГ 
@@ -684,7 +684,7 @@ log_error() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') [ERROR] $1" >> logs/xlibris-manager.log
 }
 
-# Detect xLibris project root
+# Detect Voxlibris Platform project root
 detect_project_root() {
     local current_dir="$PWD"
     while [[ "$current_dir" != "/" ]]; do
@@ -708,9 +708,9 @@ init_cicd_setup() {
             touch "logs/xlibris-manager.log"
         fi
         
-        log_info "Initializing CI/CD setup for xLibris project at $project_root"
+        log_info "Initializing CI/CD setup for Voxlibris Platform project at $project_root"
     else
-        echo -e "${RED}❌ Not in xLibris project directory${NC}"
+        echo -e "${RED}❌ Not in Voxlibris Platform project directory${NC}"
         exit 1
     fi
 }
@@ -733,7 +733,7 @@ setup_pre_commit_hooks() {
     cat > .git/hooks/pre-commit << 'EOF'
 #!/bin/bash
 
-echo "🔍 Running xLibris compliance checks..."
+echo "🔍 Running Voxlibris Platform compliance checks..."
 
 # Check for npm usage
 if grep -R --exclude-dir={node_modules,.git,docs,plans,specs,.specify} -nE '^[[:space:]]*(npm|npx)\b' . 2>/dev/null; then
@@ -790,7 +790,7 @@ EOF
     cat > .git/hooks/pre-push << 'EOF'
 #!/bin/bash
 
-echo "🚀 Running pre-push xLibris compliance checks..."
+echo "🚀 Running pre-push Voxlibris Platform compliance checks..."
 
 # Run comprehensive compliance test if available
 if [[ -f "./scripts/test-compliance-system.sh" ]]; then
@@ -817,7 +817,7 @@ setup_github_actions() {
     mkdir -p .github/workflows
     
     cat > .github/workflows/xlibris-compliance.yml << 'EOF'
-name: xLibris Compliance Checks
+name: Voxlibris Platform Compliance Checks
 
 on:
   push:
@@ -832,7 +832,7 @@ env:
 jobs:
   compliance-check:
     runs-on: ubuntu-latest
-    name: xLibris Compliance Validation
+    name: Voxlibris Platform Compliance Validation
     
     steps:
     - name: Checkout code
@@ -952,7 +952,7 @@ setup_gitlab_ci() {
     echo -e "${CYAN}🦊 Setting up GitLab CI configuration...${NC}"
     
     cat > .gitlab-ci.yml << 'EOF'
-# xLibris GitLab CI/CD Pipeline
+# Voxlibris Platform GitLab CI/CD Pipeline
 # Compliance and Quality Assurance
 
 stages:
@@ -976,7 +976,7 @@ cache:
 <content>#!/bin/bash
 
 # =============================================================================
-# xLibris CI/CD Setup Script
+# Voxlibris Platform CI/CD Setup Script
 # =============================================================================
 # Автоматическая настройка CI/CD pipeline с compliance проверками
 # Интеграция всех созданных скриптов и блокирующих механизмов
@@ -1014,7 +1014,7 @@ log_error() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') [ERROR] $1" >> logs/xlibris-manager.log
 }
 
-# Detect xLibris project root
+# Detect Voxlibris Platform project root
 detect_project_root() {
     local current_dir="$PWD"
     while [[ "$current_dir" != "/" ]]; do
@@ -1040,7 +1040,7 @@ init_setup() {
         
         log_info "Starting CI/CD setup from $project_root"
     else
-        echo -e "${RED}❌ Not in xLibris project directory${NC}"
+        echo -e "${RED}❌ Not in Voxlibris Platform project directory${NC}"
         exit 1
     fi
 }
@@ -1066,7 +1066,7 @@ setup_pre_commit_hooks() {
 #!/bin/bash
 
 # =============================================================================
-# xLibris Pre-commit Hook - Compliance Checks
+# Voxlibris Platform Pre-commit Hook - Compliance Checks
 # =============================================================================
 # Автоматические проверки перед коммитом
 # Точная реализация согласно .tmp/err-fix.md:258-284
@@ -1079,7 +1079,7 @@ GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 NC='\033[0m'
 
-echo -e "${YELLOW}🔍 Running xLibris compliance checks...${NC}"
+echo -e "${YELLOW}🔍 Running Voxlibris Platform compliance checks...${NC}"
 
 # Detect project root
 project_root=""
@@ -1093,7 +1093,7 @@ while [[ "$current_dir" != "/" ]]; do
 done
 
 if [[ -z "$project_root" ]]; then
-    echo -e "${RED}❌ Not in xLibris project directory${NC}"
+    echo -e "${RED}❌ Not in Voxlibris Platform project directory${NC}"
     exit 1
 fi
 
@@ -1162,7 +1162,7 @@ EOF
 #!/bin/bash
 
 # =============================================================================
-# xLibris Pre-push Hook - Extended Compliance Checks
+# Voxlibris Platform Pre-push Hook - Extended Compliance Checks
 # =============================================================================
 
 set -e
@@ -1208,7 +1208,7 @@ setup_github_actions() {
     mkdir -p ".github/workflows"
     
     cat > ".github/workflows/xlibris-compliance.yml" << 'EOF'
-name: xLibris Compliance Checks
+name: Voxlibris Platform Compliance Checks
 
 on:
   push:
@@ -1351,7 +1351,7 @@ setup_gitlab_ci() {
     log_info "Setting up GitLab CI configuration..."
     
     cat > ".gitlab-ci.yml" << 'EOF'
-# xLibris GitLab CI/CD Configuration
+# Voxlibris Platform GitLab CI/CD Configuration
 # Compliance-first pipeline with automated checks
 
 stages:
@@ -1382,7 +1382,7 @@ compliance-check:
     - corepack prepare pnpm@$PNPM_VERSION --activate
     - pnpm config set store-dir .pnpm-store
   script:
-    - echo "🔍 Running xLibris compliance checks..."
+    - echo "🔍 Running Voxlibris Platform compliance checks..."
     
     # Check tool versions
     - echo "Node version:" $(node --version)
@@ -1526,7 +1526,7 @@ setup_package_scripts() {
 {
   "name": "xlibris",
   "version": "1.0.0",
-  "description": "xLibris AI-powered reading platform",
+  "description": "Voxlibris Platform AI-powered reading platform",
   "packageManager": "pnpm@latest",
   "scripts": {},
   "private": true
@@ -1590,11 +1590,11 @@ create_cicd_documentation() {
     mkdir -p docs
     
     cat > "docs/ci-cd-setup.md" << 'EOF'
-# xLibris CI/CD Pipeline Documentation
+# Voxlibris Platform CI/CD Pipeline Documentation
 
 ## Overview
 
-The xLibris project uses a compliance-first CI/CD approach that ensures all architectural principles and tool requirements are enforced automatically.
+The Voxlibris Platform project uses a compliance-first CI/CD approach that ensures all architectural principles and tool requirements are enforced automatically.
 
 ## Pipeline Components
 
@@ -1605,7 +1605,7 @@ The xLibris project uses a compliance-first CI/CD approach that ensures all arch
 <content>#!/bin/bash
 
 # =============================================================================
-# xLibris CI/CD Setup - Автоматизация проверок соблюдения принципов
+# Voxlibris Platform CI/CD Setup - Автоматизация проверок соблюдения принципов
 # =============================================================================
 # Настройка автоматических проверок для GitHub Actions/GitLab CI
 # Интеграция всех созданных скриптов в CI pipeline
@@ -1643,7 +1643,7 @@ log_error() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') [ERROR] $1" >> logs/xlibris-manager.log
 }
 
-# Detect xLibris project root
+# Detect Voxlibris Platform project root
 detect_project_root() {
     local current_dir="$PWD"
     while [[ "$current_dir" != "/" ]]; do
@@ -1667,9 +1667,9 @@ init_cicd_setup() {
             touch "logs/xlibris-manager.log"
         fi
         
-        log_info "Starting xLibris CI/CD setup from $project_root"
+        log_info "Starting Voxlibris Platform CI/CD setup from $project_root"
     else
-        echo -e "${RED}❌ Not in xLibris project directory${NC}"
+        echo -e "${RED}❌ Not in Voxlibris Platform project directory${NC}"
         exit 1
     fi
 }
@@ -1692,7 +1692,7 @@ setup_precommit_hooks() {
 #!/bin/bash
 # .git/hooks/pre-commit
 
-echo "🔍 Running xLibris compliance checks..."
+echo "🔍 Running Voxlibris Platform compliance checks..."
 
 # Check for npm usage
 if grep -R --exclude-dir={node_modules,.git,docs,plans,specs,.specify} -nE '^[[:space:]]*(npm|npx)\b' . 2>/dev/null; then
@@ -1730,7 +1730,7 @@ setup_github_actions() {
     
     # Create main CI workflow
     cat > .github/workflows/compliance-ci.yml << 'EOF'
-name: xLibris Compliance CI
+name: Voxlibris Platform Compliance CI
 
 on:
   push:
@@ -1847,7 +1847,7 @@ jobs:
 
   xlibris-manager-integration:
     runs-on: ubuntu-latest
-    name: xLibris Manager Integration
+    name: Voxlibris Platform Manager Integration
     needs: compliance-check
     
     steps:
