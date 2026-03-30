@@ -7,27 +7,38 @@ import { ArrowRight, Sparkles, Loader2 } from "lucide-react";
 import { ReadingDreamIllustration } from "@/components/illustrations/reading-dream";
 import { Link } from "wouter";
 import { useCatalogClubs } from "@/hooks/use-clubs";
-// Import generated assets using aliases
-import heroImage from "@assets/generated_images/cozy_library_atmosphere_with_warm_lighting.png";
+import heroImageAvif from "@assets/generated_images/cozy_library_atmosphere_with_warm_lighting.avif";
+import heroImagePng from "@assets/generated_images/cozy_library_atmosphere_with_warm_lighting.png";
+import heroImageWebp from "@assets/generated_images/cozy_library_atmosphere_with_warm_lighting.webp";
 
 
 export default function Home() {
   // Получаем реальные клубы для каталога с автообновлением каждые 30 секунд
-  const { data: clubs, isLoading, error } = useCatalogClubs();
+  const { data: clubs, isLoading, error } = useCatalogClubs(6);
   
-  // Берем только первые 6 клубов для главной страницы (TOP-6)
-  const featuredClubs = clubs?.slice(0, 6) || [];
+  // Главная больше не тянет весь каталог: сервер возвращает только TOP-6.
+  const featuredClubs = clubs || [];
 
   return (
     <MainLayout>
       {/* Hero Section */}
       <section className="relative w-full h-[600px] flex items-center justify-center overflow-hidden">
         <div className="absolute inset-0 z-0">
-          <img
-            src={heroImage}
-            alt="Уютный уголок для чтения"
-            className="w-full h-full object-cover"
-          />
+          <picture>
+            <source srcSet={heroImageAvif} type="image/avif" />
+            <source srcSet={heroImageWebp} type="image/webp" />
+            <img
+              src={heroImagePng}
+              alt="Уютный уголок для чтения"
+              className="w-full h-full object-cover"
+              width={1408}
+              height={768}
+              sizes="100vw"
+              fetchPriority="high"
+              loading="eager"
+              decoding="async"
+            />
+          </picture>
           <div className="absolute inset-0 bg-primary/40 mix-blend-multiply" />
           <div className="absolute inset-0 bg-gradient-to-t from-background via-transparent to-transparent" />
         </div>
@@ -101,7 +112,10 @@ export default function Home() {
                 key={club.id}
                 id={club.id}
                 title={club.title}
+                bookTitle={club.bookTitle ?? undefined}
+                author={club.author ?? undefined}
                 coverUrl={club.coverImage ?? undefined}
+                bookCoverUrl={club.bookCoverUrl ?? undefined}
                 description={club.description ?? undefined}
                 members={0}
                 maxMembers={0}

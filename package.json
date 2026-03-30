@@ -28,6 +28,7 @@
     "lint:eslint:fix": "eslint . --ext .ts,.tsx --fix",
     "db:push": "drizzle-kit push",
     "db:migrate": "drizzle-kit migrate",
+    "images:check:static": "tsx script/check-static-images.ts",
     "images:optimize:static": "tsx script/optimize-static-images.ts",
     "seed": "tsx script/seed.ts",
     "prepare": "husky"

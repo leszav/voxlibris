@@ -24,6 +24,7 @@ import type {
   ClubWithDetails
 } from '../../shared/schema.js';
 import { logger } from '../lib/logger.js';
+import type { ClientPublicCatalogClub } from '../lib/client-serializers.js';
 
 /**
  * Club Domain Repository - единственная ответственность: управление клубами
@@ -129,6 +130,73 @@ export class ClubRepository extends BaseRepository {
       return this.enrichClubList(clubsData);
     } catch (error) {
       this.logError('getClubs', error);
+      return [];
+    }
+  }
+
+  async getPublicCatalogClubs(limit?: number): Promise<ClientPublicCatalogClub[]> {
+    try {
+      const normalizedLimit = typeof limit === 'number' && Number.isFinite(limit) && limit > 0
+        ? Math.min(Math.trunc(limit), 100)
+        : undefined;
+
+      let query = this.db
+        .select({
+          id: clubs.id,
+          title: clubs.title,
+          description: clubs.description,
+          coverImage: clubs.coverImage,
+        })
+        .from(clubs)
+        .where(ne(clubs.status, 'pending'))
+        .orderBy(desc(clubs.popularityScore), desc(clubs.createdAt))
+        .$dynamic();
+
+      if (normalizedLimit) {
+        query = query.limit(normalizedLimit);
+      }
+
+      const result = await query;
+      if (result.length === 0) {
+        return [];
+      }
+
+      const latestBooks = await this.db
+        .select({
+          clubId: clubBooks.clubId,
+          title: clubBooks.title,
+          author: clubBooks.author,
+          coverUrl: clubBooks.coverUrl,
+        })
+        .from(clubBooks)
+        .where(and(
+          inArray(clubBooks.clubId, result.map((club) => club.id)),
+          eq(clubBooks.isDeleted, false),
+        ))
+        .orderBy(desc(clubBooks.uploadedAt));
+
+      const latestBookMap = new Map<string, { title: string | null; author: string | null; coverUrl: string | null }>();
+      for (const book of latestBooks) {
+        if (!latestBookMap.has(book.clubId)) {
+          latestBookMap.set(book.clubId, {
+            title: book.title ?? null,
+            author: book.author ?? null,
+            coverUrl: book.coverUrl ?? null,
+          });
+        }
+      }
+
+      return result.map((club) => ({
+        id: club.id,
+        title: club.title,
+        description: club.description ?? null,
+        coverImage: club.coverImage ?? null,
+        bookTitle: latestBookMap.get(club.id)?.title ?? null,
+        author: latestBookMap.get(club.id)?.author ?? null,
+        bookCoverUrl: latestBookMap.get(club.id)?.coverUrl ?? null,
+      }));
+    } catch (error) {
+      this.logError('getPublicCatalogClubs', error);
       return [];
     }
   }

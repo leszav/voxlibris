@@ -8,7 +8,7 @@ import type { InsertClub, ClubMemberRole, InsertClubInvitation, Club, UserRole }
 import { emailService } from './services/email-service.js';
 import crypto from 'node:crypto';
 import { logger } from './lib/logger.js';
-import { serializeClub, serializeClubList, serializeClubMembers, serializePublicCatalogClubList } from './lib/client-serializers.js';
+import { serializeClub, serializeClubList, serializeClubMembers } from './lib/client-serializers.js';
 import { getPublicBaseUrl } from './lib/public-base-url.js';
 import { sanitizeClubSettingsInput } from './lib/club-settings-sanitizer.js';
 import { storeOptimizedImageIfNeeded } from './lib/uploaded-image-storage.js';
@@ -177,8 +177,13 @@ async function findInvitationByToken(token: string) {
  */
 router.get('/catalog', async (req, res) => {
   try {
-    const clubs = await storage.getAllClubs();
-    res.json(serializePublicCatalogClubList(clubs));
+    const rawLimit = typeof req.query.limit === 'string' ? Number.parseInt(req.query.limit, 10) : undefined;
+    const limit = Number.isFinite(rawLimit) && rawLimit && rawLimit > 0 ? rawLimit : undefined;
+    const clubs = await storage.getPublicCatalogClubs(limit);
+
+    // Публичный список клубов меняется нечасто, поэтому даем браузеру и CDN короткое кеширование.
+    res.setHeader('Cache-Control', 'public, max-age=300, stale-while-revalidate=3600');
+    res.json(clubs);
   } catch (error) {
     console.error('Error getting catalog clubs:', error);
     res.status(500).json({ message: 'Failed to get clubs' });

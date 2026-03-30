@@ -22,6 +22,9 @@ export interface ClientPublicCatalogClub {
   title: string;
   description: string | null;
   coverImage: string | null;
+  bookTitle: string | null;
+  author: string | null;
+  bookCoverUrl: string | null;
 }
 
 export type ClientAuthUser = {
@@ -113,6 +116,9 @@ export function serializePublicCatalogClubList(clubs: ClubWithDetails[]): Client
     title: club.title,
     description: club.description ?? null,
     coverImage: club.coverImage ?? null,
+    bookTitle: club.book?.title ?? null,
+    author: club.book?.author ?? null,
+    bookCoverUrl: club.book?.coverUrl ?? null,
   }));
 }
 

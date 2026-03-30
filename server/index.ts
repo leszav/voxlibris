@@ -42,6 +42,7 @@ import questionsRoutes from "./routes/questions.js";
 import scheduleRoutes from "./routes/schedule.js";
 import { logger } from "./lib/logger.js";
 import { loadFeatureFlags } from "./lib/feature-flags.js";
+import { responseCompression } from "./lib/response-compression.js";
 
 export const app = express();
 
@@ -132,15 +133,15 @@ function maskSensitiveData(obj: unknown): unknown {
 
 // Security headers configuration
 app.use(
-	helmet({
-		contentSecurityPolicy: {
-			directives: {
-				defaultSrc: ["'self'"],
-				styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
-				fontSrc: ["'self'", "https://fonts.gstatic.com"],
-				imgSrc: ["'self'", "data:", "https:"],
-				scriptSrc: ["'self'", "https://mc.yandex.ru", "https://mc.yandex.com"],
-				connectSrc: ["'self'", "wss:", "https:"],
+		helmet({
+			contentSecurityPolicy: {
+				directives: {
+					defaultSrc: ["'self'"],
+					styleSrc: ["'self'", "'unsafe-inline'"],
+					fontSrc: ["'self'"],
+					imgSrc: ["'self'", "data:", "https:"],
+					scriptSrc: ["'self'", "https://mc.yandex.ru", "https://mc.yandex.com"],
+					connectSrc: ["'self'", "wss:", "https:"],
 				frameSrc: ["'none'"],
 				objectSrc: ["'none'"],
 				baseUri: ["'self'"],
@@ -169,6 +170,9 @@ app.use(
 		exposedHeaders: ["X-Total-Count"],
 	}),
 );
+
+// Dynamic JSON/text compression for API responses.
+app.use(responseCompression);
 
 declare global {
 	namespace Express {

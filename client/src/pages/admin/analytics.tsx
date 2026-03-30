@@ -23,13 +23,13 @@ import {
   Tooltip,
   ResponsiveContainer,
   BarChart,
-  Bar,
   FunnelChart,
   Funnel,
   PieChart,
   Pie,
   Cell,
 } from 'recharts';
+import { Bar } from 'recharts/es6/cartesian/Bar';
 import { BookAnalyticsModal } from "@/components/admin/BookAnalyticsModal";
 import { ActivityHeatmap } from "@/components/admin/ActivityHeatmap";
 import { ClubAnalyticsModal } from "@/components/admin/ClubAnalyticsModal";

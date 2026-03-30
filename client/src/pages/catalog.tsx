@@ -140,7 +140,10 @@ export default function Catalog() {
                       key={club.id}
                       id={club.id}
                       title={club.title}
+                      bookTitle={club.bookTitle ?? undefined}
+                      author={club.author ?? undefined}
                       coverUrl={cover}
+                      bookCoverUrl={club.bookCoverUrl ?? undefined}
                       description={description || undefined}
                       members={0}
                       maxMembers={0}

@@ -78,15 +78,21 @@ export interface PublicCatalogClub {
   title: string;
   description: string | null;
   coverImage: string | null;
+  bookTitle: string | null;
+  author: string | null;
+  bookCoverUrl: string | null;
 }
 
 // Получить все клубы для каталога (не требует аутентификации)
-export function useCatalogClubs() {
+export function useCatalogClubs(limit?: number) {
   return useQuery({
-    queryKey: ["catalog-clubs"],
+    queryKey: ["catalog-clubs", limit ?? "all"],
     queryFn: async (): Promise<PublicCatalogClub[]> => {
       // Используем простой fetch без авторизации для публичного эндпоинта
-      const res = await fetch("/api/clubs/catalog");
+      const search = typeof limit === "number" && Number.isFinite(limit) && limit > 0
+        ? `?limit=${Math.trunc(limit)}`
+        : "";
+      const res = await fetch(`/api/clubs/catalog${search}`);
       if (!res.ok) {
         throw new Error("Failed to fetch clubs");
       }
