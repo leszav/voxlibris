@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # =============================================================================
-# xLibris CI/CD Common Utilities
+# Voxlibris Platform CI/CD Common Utilities
 # =============================================================================
 # Общие утилиты для модульной CI/CD системы
 # Логирование, определение проекта, валидации
@@ -38,7 +38,7 @@ log_error() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') [CI-CD-ERROR] $1" >> logs/xlibris-manager.log 2>/dev/null || true
 }
 
-# Detect xLibris project root
+# Detect Voxlibris Platform project root
 detect_project_root() {
     local current_dir="$PWD"
     while [[ "$current_dir" != "/" ]]; do
@@ -61,7 +61,7 @@ init_environment() {
         log_success "Project root detected: $project_root"
         return 0
     else
-        log_error "Not in xLibris project directory"
+        log_error "Not in Voxlibris Platform project directory"
         return 1
     fi
 }

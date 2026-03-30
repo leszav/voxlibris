@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# xLibris Service Manager v1.0
-# Унифицированный скрипт управления всеми сервисами платформы xLibris
+# Voxlibris Platform Service Manager v1.0
+# Унифицированный скрипт управления всеми сервисами платформы Voxlibris Platform
 
 set -e
 
@@ -218,7 +218,7 @@ check_types() {
 
 # Показать статус всех сервисов
 show_status() {
-    echo -e "${CYAN}=== xLibris Service Status ===${NC}"
+    echo -e "${CYAN}=== Voxlibris Platform Service Status ===${NC}"
     echo ""
     
     check_docker_services
@@ -251,7 +251,7 @@ compliance_check() {
     print_log "$BLUE" "INFO" "🔍 Проверка системы compliance..."
     local failed_checks=0
     
-    echo -e "${CYAN}=== xLibris Compliance Check ===${NC}"
+    echo -e "${CYAN}=== Voxlibris Platform Compliance Check ===${NC}"
     echo ""
     
     # 1. Проверка структуры проекта
@@ -320,7 +320,7 @@ compliance_check() {
 compliance_dashboard() {
     print_log "$BLUE" "INFO" "📊 Запуск compliance dashboard..."
     
-    echo -e "${MAGENTA}📊 xLibris Compliance Dashboard${NC}"
+    echo -e "${MAGENTA}📊 Voxlibris Platform Compliance Dashboard${NC}"
     echo -e "${MAGENTA}================================${NC}"
     echo ""
     
@@ -548,7 +548,7 @@ compliance_dashboard() {
 compliance_setup() {
     print_log "$BLUE" "INFO" "🔧 Установка compliance системы..."
     
-    echo -e "${CYAN}=== Установка xLibris Compliance ===${NC}"
+    echo -e "${CYAN}=== Установка Voxlibris Platform Compliance ===${NC}"
     echo ""
     
     # Проверка наличия скрипта
@@ -592,7 +592,7 @@ compliance_setup() {
 
 # Показать помощь
 show_help() {
-    echo -e "${CYAN}xLibris Service Manager v1.0${NC}"
+    echo -e "${CYAN}Voxlibris Platform Service Manager v1.0${NC}"
     echo ""
     echo -e "${YELLOW}Использование:${NC}"
     echo -e "  $0 [команда]"
