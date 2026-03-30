@@ -1,9 +1,9 @@
 #!/bin/bash
 
 # =============================================================================
-# xLibris GitHub Actions Generator
+# Voxlibris Platform GitHub Actions Generator
 # =============================================================================
-# Генерация GitHub Actions workflows для xLibris compliance
+# Генерация GitHub Actions workflows для Voxlibris Platform compliance
 # Модульный компонент CI/CD системы
 
 # Import common utilities
@@ -16,7 +16,7 @@ generate_compliance_workflow() {
     create_directory ".github/workflows" "GitHub workflows directory"
     
     cat > .github/workflows/compliance-ci.yml << 'EOF'
-name: xLibris Compliance CI
+name: Voxlibris Platform Compliance CI
 
 on:
   push:
