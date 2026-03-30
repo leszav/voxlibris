@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # =============================================================================
-# xLibris Compliance System Test Suite
+# Voxlibris Platform Compliance System Test Suite
 # =============================================================================
 # Комплексное тестирование всех блокировочных механизмов и систем compliance
 # Валидация aliases, hooks, xlibris-manager.sh интеграции и AI Memory
@@ -71,7 +71,7 @@ test_warning() {
     ((TESTS_WARNINGS++))
 }
 
-# Detect xLibris project root
+# Detect Voxlibris Platform project root
 detect_project_root() {
     local current_dir="$PWD"
     while [[ "$current_dir" != "/" ]]; do
@@ -93,7 +93,7 @@ init_environment() {
         cd "$project_root"
         log_success "Project root detected: $project_root"
     else
-        log_error "Not in xLibris project directory"
+        log_error "Not in Voxlibris Platform project directory"
         exit 1
     fi
 }
@@ -200,7 +200,7 @@ test_git_hooks() {
     # Test pre-commit hook
     if [[ -f ".git/hooks/pre-commit" ]]; then
         if [[ -x ".git/hooks/pre-commit" ]]; then
-            if grep -q "xLibris compliance checks" ".git/hooks/pre-commit"; then
+            if grep -q "Voxlibris Platform compliance checks" ".git/hooks/pre-commit"; then
                 log_success "Pre-commit hook configured correctly"
             else
                 hooks_ok=false
@@ -381,7 +381,7 @@ generate_compliance_report() {
 
 # Main execution function
 main() {
-    echo -e "${CYAN}🧪 xLibris Compliance System Test Suite${NC}"
+    echo -e "${CYAN}🧪 Voxlibris Platform Compliance System Test Suite${NC}"
     echo -e "${CYAN}==========================================${NC}"
     
     # Initialize environment
@@ -415,7 +415,7 @@ main() {
 # Check for help argument
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     cat << EOF
-xLibris Compliance System Test Suite
+Voxlibris Platform Compliance System Test Suite
 
 USAGE:
     ./scripts/test-compliance-system.sh [OPTIONS]
@@ -424,7 +424,7 @@ OPTIONS:
     --help, -h          Show this help message
 
 DESCRIPTION:
-    Comprehensive testing of all xLibris compliance mechanisms:
+    Comprehensive testing of all Voxlibris Platform compliance mechanisms:
     
     TESTS:
     • Project structure validation
