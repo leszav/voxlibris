@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # =============================================================================
-# xLibris Docker Configuration Generator
+# Voxlibris Platform Docker Configuration Generator
 # =============================================================================
 # Генерация Docker конфигураций для CI/CD
 # Модульный компонент CI/CD системы
@@ -14,7 +14,7 @@ generate_dockerfile() {
     log_info "Generating optimized Dockerfile..."
     
     cat > Dockerfile << 'EOF'
-# Multi-stage build for xLibris
+# Multi-stage build for Voxlibris Platform
 FROM node:20-alpine AS base
 
 # Install pnpm
@@ -59,9 +59,9 @@ RUN pnpm install --frozen-lockfile --prod
 
 # Create non-root user
 RUN addgroup -g 1001 -S nodejs && \
-    adduser -S xLibris -u 1001
+    adduser -S xlibris -u 1001
 
-USER xLibris
+USER xlibris
 
 EXPOSE 5000
 

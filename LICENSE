@@ -1,21 +1,37 @@
-MIT License
+ЛИЦЕНЗИОННОЕ УВЕДОМЛЕНИЕ
 
-Copyright (c) 2025 xLibris
+Voxlibris Platform
+Исключительные права принадлежат Верещагину Сергею Владимировичу.
+Все права защищены.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+Настоящий репозиторий, а также все содержащиеся в нем материалы, включая, помимо
+прочего, исходный код, объектный код, архитектурные решения, структуры данных,
+документацию, тексты, графику, изображения, аудиовизуальные материалы,
+конфигурационные файлы и иные связанные с Voxlibris Platform результаты
+интеллектуальной деятельности, являются проприетарными и не относятся к
+программному обеспечению с открытым исходным кодом.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+Лицам, получившим доступ к настоящему репозиторию, не предоставляется право на
+использование, воспроизведение, копирование, изменение, переработку,
+распространение, опубликование, сублицензирование, отчуждение, коммерческую
+эксплуатацию либо иное использование репозитория или любой его части.
+Допускается исключительно ознакомление и оценка содержимого репозитория без
+предоставления каких-либо иных прав, если иное прямо не согласовано с
+правообладателем в письменной форме.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+По всем вопросам лицензирования, получения разрешений и иным юридическим
+вопросам необходимо обращаться в письменной форме:
+admin@voxli.ru
+info@8ls.ru
+
+Настоящее уведомление распространяется на текущее и последующее распространение
+репозитория правообладателем. Оно не прекращает и не отменяет права, которые
+могли быть правомерно предоставлены ранее по лицензии MIT в отношении копий,
+полученных в период действия такой лицензии.
+
+Сторонние компоненты, библиотеки, шрифты и иные материалы, включенные в состав
+репозитория, могут регулироваться собственными лицензионными условиями. Права
+на такие материалы принадлежат их соответствующим правообладателям.
+
+К настоящему уведомлению и всем связанным с ним отношениям применяется право
+Российской Федерации.

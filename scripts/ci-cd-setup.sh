@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # =============================================================================
-# xLibris CI/CD Setup - Modular Architecture
+# Voxlibris Platform CI/CD Setup - Modular Architecture
 # =============================================================================
 # Рефакторизованная модульная версия CI/CD настройки
 # Замена для монолитного scripts/ci-cd-setup.sh (1890 строк -> модули)
@@ -22,7 +22,7 @@ source "$CI_CD_DIR/docker-setup.sh"
 # Display help
 show_help() {
     cat << EOF
-xLibris CI/CD Setup (Modular)
+Voxlibris Platform CI/CD Setup (Modular)
 
 USAGE:
     ./scripts/ci-cd-setup-modular.sh [OPTIONS]
@@ -111,7 +111,7 @@ setup_environment_files() {
     # Generate .env.example
     if [[ ! -f ".env.example" ]]; then
         cat > .env.example << 'EOF'
-# xLibris Environment Configuration
+# Voxlibris Platform Environment Configuration
 
 # Database
 DATABASE_URL=postgresql://xlibris:password@localhost:5432/xlibris

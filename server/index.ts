@@ -877,7 +877,7 @@ try {
         <head>
           <meta charset="UTF-8">
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>xLibris Backend</title>
+          <title>Voxlibris Platform Backend</title>
           <style>
             body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
                    margin: 0; padding: 2rem; background: #f5f5f5; color: #333; }
@@ -892,10 +892,10 @@ try {
         </head>
         <body>
           <div class="container">
-            <div class="logo">📚 xLibris</div>
+            <div class="logo">📚 Voxlibris Platform</div>
             <h1>Backend Server</h1>
             <p class="status">✅ Backend сервер работает</p>
-            <p>Это backend API сервер проекта xLibris.</p>
+            <p>Это backend API сервер проекта Voxlibris Platform.</p>
             <div class="info">
               <strong>Для открытия интерфейса приложения перейдите на:</strong><br>
               <a href="http://localhost:3000" class="link">http://localhost:3000</a>
