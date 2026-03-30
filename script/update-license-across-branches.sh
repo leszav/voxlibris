@@ -118,7 +118,7 @@ for branch in "${TARGET_BRANCHES[@]}"; do
     fi
   done
 
-  if git diff --quiet -- "${FILES[@]}"; then
+  if git diff --quiet HEAD -- "${FILES[@]}"; then
     echo "No changes needed on $branch"
     continue
   fi
