@@ -20,6 +20,7 @@
     "build": "tsx script/build.ts",
     "start": "NODE_ENV=production node --import ./dist/server/env.js dist/server/index.js",
     "check": "tsc",
+    "quality:gate": "pnpm run check && pnpm run lint:eslint && pnpm run build",
     "test": "node --test --experimental-strip-types server/__tests__/**/*.test.ts",
     "test:watch": "node --test --watch server/__tests__/**/*.test.ts",
     "test:coverage": "node --test --experimental-test-coverage server/__tests__/**/*.test.ts",

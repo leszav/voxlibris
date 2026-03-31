@@ -360,7 +360,7 @@ export default function ProfilePage() {
   if (profileLoading) {
     return (
       <MainLayout>
-        <div className="container py-12 px-6 md:px-12">
+        <div className="container px-4 py-8 sm:px-6 md:px-12 md:py-12">
           <div className="flex items-center justify-center py-12">
             <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
             <span className="ml-2 text-muted-foreground">Загружаем профиль...</span>
@@ -373,7 +373,7 @@ export default function ProfilePage() {
   if (profileError || !profile) {
     return (
       <MainLayout>
-        <div className="container py-12 px-6 md:px-12 text-center">
+        <div className="container px-4 py-8 text-center sm:px-6 md:px-12 md:py-12">
           <p className="text-muted-foreground">Профиль не найден</p>
           <Button variant="outline" onClick={() => setLocation("/")} className="mt-4">
             <ArrowLeft className="h-4 w-4 mr-2" />
@@ -391,7 +391,7 @@ export default function ProfilePage() {
   return (
     <MainLayout>
       {/* Header / Banner с обложкой */}
-      <div className="relative h-64 md:h-80 w-full overflow-hidden">
+      <div className="relative min-h-[19rem] w-full overflow-hidden md:min-h-[22rem]">
         {profile.coverImage ? (
           <img
             src={profile.coverImage}
@@ -403,13 +403,13 @@ export default function ProfilePage() {
         )}
         <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-background/80" />
 
-        <div className="container relative h-full flex flex-col justify-between py-6 px-6 md:px-12">
+        <div className="container relative flex h-full flex-col justify-between px-4 py-6 sm:px-6 md:px-12">
           <div>
             <Button
               variant="ghost"
               size="sm"
               onClick={() => setLocation("/")}
-              className="text-white hover:bg-white/20 backdrop-blur-sm"
+              className="h-9 w-full justify-center text-white backdrop-blur-sm hover:bg-white/20 sm:w-auto"
             >
               <ArrowLeft className="h-4 w-4 mr-2" />
               Назад
@@ -417,17 +417,17 @@ export default function ProfilePage() {
           </div>
 
           {/* Блок профиля внизу обложки */}
-          <div className="flex flex-col md:flex-row gap-6 items-start md:items-end">
-            <Avatar className="h-32 w-32 border-4 border-background shadow-2xl">
+          <div className="flex flex-col items-start gap-5 md:flex-row md:items-end md:gap-6">
+            <Avatar className="h-24 w-24 border-4 border-background shadow-2xl sm:h-28 sm:w-28 md:h-32 md:w-32">
               <AvatarImage src={profile.avatar || ""} />
-              <AvatarFallback className="text-3xl bg-primary/20 text-white">
+              <AvatarFallback className="bg-primary/20 text-2xl text-white sm:text-3xl">
                 {profile.displayName?.[0] || "П"}
               </AvatarFallback>
             </Avatar>
 
             <div className="flex-1 space-y-2 text-white drop-shadow-lg">
-              <div className="flex flex-col md:flex-row md:items-center gap-3">
-                <h1 className="text-4xl md:text-5xl font-bold tracking-tight">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center">
+                <h1 className="text-3xl font-bold tracking-tight sm:text-4xl md:text-5xl">
                   {profile.displayName || "Пользователь"}
                 </h1>
                 {profile.isReader && (
@@ -440,7 +440,7 @@ export default function ProfilePage() {
                 )}
               </div>
 
-              {profile.bio && <p className="text-white/90 text-lg max-w-2xl">{profile.bio}</p>}
+              {profile.bio && <p className="max-w-2xl text-base text-white/90 sm:text-lg">{profile.bio}</p>}
             </div>
 
             {isOwnProfile && (
@@ -452,7 +452,7 @@ export default function ProfilePage() {
                 <Button
                   variant="secondary"
                   size="sm"
-                  className="backdrop-blur-sm bg-white/90 hover:bg-white"
+                  className="w-full bg-white/90 backdrop-blur-sm hover:bg-white sm:w-auto"
                 >
                   <Edit className="h-4 w-4 mr-2" />
                   Редактировать
@@ -463,7 +463,7 @@ export default function ProfilePage() {
         </div>
       </div>
 
-      <div className="container py-8 px-6 md:px-12">
+      <div className="container px-4 py-6 sm:px-6 md:px-12 md:py-8">
         {/* Жанры и статистика */}
         <div className="mb-6 space-y-4">
           {genres.length > 0 && (
@@ -477,20 +477,20 @@ export default function ProfilePage() {
           )}
 
           {/* Статистика */}
-          <div className="grid grid-cols-3 gap-4 p-6 rounded-xl border bg-card">
-            <div className="text-center">
+          <div className="grid grid-cols-1 gap-3 rounded-xl border bg-card p-4 sm:grid-cols-3 sm:gap-4 sm:p-6">
+            <div className="rounded-lg bg-muted/30 p-3 text-center sm:bg-transparent sm:p-0">
               <div className="text-2xl md:text-3xl font-bold text-primary">
                 {profile.totalReadingSessions}
               </div>
               <div className="text-sm text-muted-foreground mt-1">Сессий чтения</div>
             </div>
-            <div className="text-center border-x">
+            <div className="rounded-lg bg-muted/30 p-3 text-center sm:rounded-none sm:bg-transparent sm:p-0 sm:border-x">
               <div className="text-2xl md:text-3xl font-bold text-primary">
                 {profile.totalListeners}
               </div>
               <div className="text-sm text-muted-foreground mt-1">Слушателей</div>
             </div>
-            <div className="text-center">
+            <div className="rounded-lg bg-muted/30 p-3 text-center sm:bg-transparent sm:p-0">
               <div className="text-2xl md:text-3xl font-bold text-primary">
                 {(profile.readerRating / 100).toFixed(1)}
               </div>
@@ -501,23 +501,23 @@ export default function ProfilePage() {
 
         {/* Табы с контентом */}
         <Tabs defaultValue="reading" className="space-y-6">
-          <TabsList className={`grid w-full h-12 ${isOwnProfile ? 'grid-cols-4' : 'grid-cols-3'}`}>
-            <TabsTrigger value="reading" className="flex items-center gap-2">
+          <TabsList className={`grid h-auto w-full gap-1 rounded-xl p-1 ${isOwnProfile ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-3'}`}>
+            <TabsTrigger value="reading" className="flex min-h-10 items-center gap-2 px-2 text-xs sm:text-sm">
               <BookOpen className="h-4 w-4" />
-              <span className="hidden sm:inline">Чтение</span>
+              <span>Чтение</span>
             </TabsTrigger>
-            <TabsTrigger value="clubs" className="flex items-center gap-2">
+            <TabsTrigger value="clubs" className="flex min-h-10 items-center gap-2 px-2 text-xs sm:text-sm">
               <Users className="h-4 w-4" />
-              <span className="hidden sm:inline">Клубы</span>
+              <span>Клубы</span>
             </TabsTrigger>
-            <TabsTrigger value="stats" className="flex items-center gap-2">
+            <TabsTrigger value="stats" className="flex min-h-10 items-center gap-2 px-2 text-xs sm:text-sm">
               <TrendingUp className="h-4 w-4" />
-              <span className="hidden sm:inline">Статистика</span>
+              <span>Статистика</span>
             </TabsTrigger>
             {isOwnProfile && (
-              <TabsTrigger value="security" className="flex items-center gap-2">
+              <TabsTrigger value="security" className="flex min-h-10 items-center gap-2 px-2 text-xs sm:text-sm">
                 <Shield className="h-4 w-4" />
-                <span className="hidden sm:inline">Безопасность</span>
+                <span>Безопасность</span>
               </TabsTrigger>
             )}
           </TabsList>
@@ -563,22 +563,22 @@ export default function ProfilePage() {
                   <div className="space-y-4">
                     <h3 className="font-semibold text-lg border-b pb-2">{currentYear} год</h3>
                     <div className="space-y-3">
-                      <div className="flex justify-between items-center p-3 rounded-lg bg-muted/50">
+                      <div className="flex items-center justify-between gap-3 rounded-lg bg-muted/50 p-3">
                         <span className="text-muted-foreground">Прочитано книг</span>
                         <span className="font-semibold text-lg">{yearStats?.completedBooks || 0}</span>
                       </div>
-                      <div className="flex justify-between items-center p-3 rounded-lg bg-muted/50">
+                      <div className="flex items-center justify-between gap-3 rounded-lg bg-muted/50 p-3">
                         <span className="text-muted-foreground">Читаю сейчас</span>
                         <span className="font-semibold text-lg">{yearStats?.statusBreakdown.reading || 0}</span>
                       </div>
-                      <div className="flex justify-between items-center p-3 rounded-lg bg-muted/50">
+                      <div className="flex items-center justify-between gap-3 rounded-lg bg-muted/50 p-3">
                         <span className="text-muted-foreground">В планах</span>
                         <span className="font-semibold text-lg">{yearStats?.statusBreakdown.planned || 0}</span>
                       </div>
                       
                       {/* Цель чтения */}
                       <div className="p-4 rounded-lg bg-primary/10 border-2 border-primary/20">
-                        <div className="flex items-center justify-between mb-3">
+                        <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                           <div className="flex items-center gap-2">
                             <Target className="h-5 w-5 text-primary" />
                             <span className="font-medium">Цель на год</span>
@@ -595,7 +595,7 @@ export default function ProfilePage() {
                                   Изменить
                                 </Button>
                               </DialogTrigger>
-                              <DialogContent>
+                              <DialogContent className="max-w-[calc(100vw-2rem)] sm:max-w-md">
                                 <DialogHeader>
                                   <DialogTitle>Установить цель чтения на {currentYear}</DialogTitle>
                                   <DialogDescription>
@@ -614,16 +614,18 @@ export default function ProfilePage() {
                                     className="mt-2"
                                   />
                                 </div>
-                                <DialogFooter>
+                                <DialogFooter className="flex-col gap-2 sm:flex-row">
                                   <Button 
                                     variant="outline" 
                                     onClick={() => setGoalDialogOpen(false)}
+                                    className="w-full sm:w-auto"
                                   >
                                     Отмена
                                   </Button>
                                   <Button 
                                     onClick={() => updateGoalMutation.mutate(newGoal)}
                                     disabled={updateGoalMutation.isPending}
+                                    className="w-full sm:w-auto"
                                   >
                                     {updateGoalMutation.isPending ? 'Сохранение...' : 'Сохранить'}
                                   </Button>
@@ -632,7 +634,7 @@ export default function ProfilePage() {
                             </Dialog>
                           )}
                         </div>
-                        <div className="flex items-end gap-3">
+                        <div className="flex flex-wrap items-end gap-2 sm:gap-3">
                           <div className="text-3xl font-bold text-primary">
                             {readingGoal?.progress || 0}
                           </div>
@@ -768,7 +770,7 @@ export default function ProfilePage() {
                       />
                     </div>
 
-                    <Button type="submit" disabled={changePasswordMutation.isPending}>
+                    <Button type="submit" disabled={changePasswordMutation.isPending} className="w-full sm:w-auto">
                       {changePasswordMutation.isPending ? 'Сохранение...' : 'Сменить пароль'}
                     </Button>
                   </form>

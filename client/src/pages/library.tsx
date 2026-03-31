@@ -82,7 +82,7 @@ export default function Library() {
   if (!isAuthenticated) {
     return (
       <MainLayout>
-        <div className="container py-12 px-6 md:px-12 flex justify-center">
+        <div className="container flex justify-center px-4 py-8 sm:px-6 sm:py-12 md:px-12">
           <Card className="max-w-md w-full">
             <CardHeader className="text-center">
               <div className="mx-auto mb-4 h-12 w-12 rounded-full bg-blue-100 flex items-center justify-center">
@@ -212,8 +212,8 @@ export default function Library() {
 
   return (
     <MainLayout>
-      <div className="container py-12 px-6 md:px-12 space-y-8">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="container space-y-6 px-4 py-8 sm:px-6 sm:py-10 md:px-12 md:py-12">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
           <div>
             <h1 className="text-3xl font-serif font-bold text-primary">Моя Библиотека</h1>
             <p className="text-muted-foreground mt-1">
@@ -230,11 +230,11 @@ export default function Library() {
         {/* Баннер активации аккаунта */}
         <AccountActivationBanner />
 
-        <Tabs defaultValue="current" className="space-y-8">
-          <TabsList>
-            <TabsTrigger value="current">Читаю сейчас</TabsTrigger>
-            <TabsTrigger value="history">История</TabsTrigger>
-            <TabsTrigger value="bookmarks">Закладки</TabsTrigger>
+        <Tabs defaultValue="current" className="space-y-6 sm:space-y-8">
+          <TabsList className="grid h-auto w-full grid-cols-3 rounded-xl bg-muted/80 p-1 sm:inline-flex sm:h-9 sm:w-auto">
+            <TabsTrigger value="current" className="min-h-10 px-2 text-xs sm:text-sm">Читаю сейчас</TabsTrigger>
+            <TabsTrigger value="history" className="min-h-10 px-2 text-xs sm:text-sm">История</TabsTrigger>
+            <TabsTrigger value="bookmarks" className="min-h-10 px-2 text-xs sm:text-sm">Закладки</TabsTrigger>
           </TabsList>
 
           <TabsContent value="current" className="space-y-6">
@@ -245,7 +245,7 @@ export default function Library() {
                     {[1, 2].map((i) => (
                       <div
                         key={i}
-                        className="flex flex-col sm:flex-row gap-6 bg-card p-6 rounded-xl border"
+                        className="flex flex-col gap-4 rounded-xl border bg-card p-4 sm:flex-row sm:gap-6 sm:p-6"
                       >
                         <Skeleton className="w-full sm:w-48 aspect-[2/3] shrink-0 rounded-lg" />
                         <div className="flex-1 space-y-4">
@@ -269,7 +269,7 @@ export default function Library() {
                 return books.map((book) => (
                 <div
                   key={book.id}
-                  className="group flex flex-col sm:flex-row gap-6 bg-card p-6 rounded-xl border hover:border-primary/20 transition-all"
+                  className="group flex flex-col gap-4 rounded-xl border bg-card p-4 transition-all hover:border-primary/20 sm:flex-row sm:gap-6 sm:p-6"
                 >
                   <div className="w-full sm:w-48 aspect-[2/3] shrink-0 rounded-lg overflow-hidden shadow-md">
                     <img
@@ -284,9 +284,9 @@ export default function Library() {
 
                   <div className="flex-1 flex flex-col justify-between space-y-4">
                     <div>
-                      <div className="flex justify-between items-start">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                         <div>
-                          <h3 className="text-xl font-serif font-bold">{book.title}</h3>
+                          <h3 className="text-lg font-serif font-bold sm:text-xl">{book.title}</h3>
                           <p className="text-muted-foreground">{book.author}</p>
                         </div>
                         <DropdownMenu>
@@ -360,9 +360,9 @@ export default function Library() {
                       </p>
                     </div>
 
-                    <div className="pt-2 flex gap-3">
+                    <div className="flex flex-col gap-2 pt-1 sm:flex-row sm:gap-3">
                       <Button
-                        className="flex-1 sm:flex-none gap-2"
+                        className="flex-1 gap-2 sm:flex-none"
                         onClick={() => handleReadBook(book)}
                       >
                         <Book className="w-4 h-4" /> Читать
@@ -398,7 +398,7 @@ export default function Library() {
                 </div>
               ) : (
                 <>
-                  <div className="flex items-center justify-between mb-4">
+                  <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <h2 className="text-xl font-semibold">
                       История чтения ({(historyData || []).length})
                     </h2>
@@ -407,6 +407,7 @@ export default function Library() {
                       size="sm"
                       onClick={() => clearHistory.mutate()}
                       disabled={clearHistory.isPending}
+                      className="w-full sm:w-auto"
                     >
                       {clearHistory.isPending ? (
                         <Loader2 className="w-4 h-4 animate-spin mr-2" />
@@ -437,7 +438,7 @@ export default function Library() {
             {bookmarksLoading ? (
               <div className="space-y-4">
                 {[1, 2, 3].map((i) => (
-                  <div key={i} className="flex gap-4 bg-card p-4 rounded-xl border">
+                  <div key={i} className="flex gap-3 rounded-xl border bg-card p-3 sm:gap-4 sm:p-4">
                     <Skeleton className="w-20 h-28 rounded-lg shrink-0" />
                     <div className="flex-1 space-y-3">
                       <Skeleton className="h-5 w-2/3" />
@@ -461,7 +462,7 @@ export default function Library() {
                 {bookmarks.map((bookmark) => (
                   <div
                     key={bookmark.id}
-                    className="group flex flex-col sm:flex-row gap-4 bg-card p-4 rounded-xl border hover:border-primary/20 transition-all"
+                    className="group flex flex-col gap-4 rounded-xl border bg-card p-4 transition-all hover:border-primary/20 sm:flex-row"
                   >
                     <div className="w-20 h-28 rounded-lg overflow-hidden shadow-sm shrink-0 bg-muted">
                       {bookmark.bookCoverUrl ? (
@@ -498,8 +499,8 @@ export default function Library() {
                         </p>
                       </div>
 
-                      <div className="flex flex-wrap gap-2">
-                        <Button onClick={() => handleOpenBookmark(bookmark)}>
+                      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                        <Button onClick={() => handleOpenBookmark(bookmark)} className="w-full sm:w-auto">
                           <BookOpen className="w-4 h-4 mr-2" />
                           Открыть закладку
                         </Button>
@@ -512,6 +513,7 @@ export default function Library() {
                             });
                           }}
                           disabled={deleteBookmarkMutation.isPending}
+                          className="w-full sm:w-auto"
                         >
                           <Trash2 className="w-4 h-4 mr-2" />
                           Удалить
@@ -528,7 +530,7 @@ export default function Library() {
 
       {/* Edit Book Dialog */}
       <Dialog open={!!editingBook} onOpenChange={() => setEditingBook(null)}>
-        <DialogContent className="sm:max-w-[425px]">
+        <DialogContent className="max-w-[calc(100vw-2rem)] sm:max-w-[425px]">
           <DialogHeader>
             <DialogTitle>Редактировать книгу</DialogTitle>
             <DialogDescription>
@@ -536,37 +538,37 @@ export default function Library() {
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="title" className="text-right">
+            <div className="grid gap-2 sm:grid-cols-4 sm:items-center sm:gap-4">
+              <Label htmlFor="title" className="sm:text-right">
                 Название
               </Label>
               <Input
                 id="title"
                 value={editForm.title}
                 onChange={(e) => setEditForm((prev) => ({ ...prev, title: e.target.value }))}
-                className="col-span-3"
+                className="sm:col-span-3"
               />
             </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="author" className="text-right">
+            <div className="grid gap-2 sm:grid-cols-4 sm:items-center sm:gap-4">
+              <Label htmlFor="author" className="sm:text-right">
                 Автор
               </Label>
               <Input
                 id="author"
                 value={editForm.author}
                 onChange={(e) => setEditForm((prev) => ({ ...prev, author: e.target.value }))}
-                className="col-span-3"
+                className="sm:col-span-3"
               />
             </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="description" className="text-right">
+            <div className="grid gap-2 sm:grid-cols-4 sm:items-start sm:gap-4">
+              <Label htmlFor="description" className="sm:pt-2 sm:text-right">
                 Описание
               </Label>
               <Textarea
                 id="description"
                 value={editForm.description}
                 onChange={(e) => setEditForm((prev) => ({ ...prev, description: e.target.value }))}
-                className="col-span-3"
+                className="sm:col-span-3"
                 rows={3}
               />
             </div>
@@ -584,7 +586,7 @@ export default function Library() {
 
       {/* Delete Book Dialog */}
       <Dialog open={!!deletingBook} onOpenChange={() => setDeletingBook(null)}>
-        <DialogContent className="sm:max-w-[425px]">
+        <DialogContent className="max-w-[calc(100vw-2rem)] sm:max-w-[425px]">
           <DialogHeader>
             <DialogTitle>Удалить книгу</DialogTitle>
             <DialogDescription>

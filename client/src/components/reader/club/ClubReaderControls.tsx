@@ -6,6 +6,7 @@ import {
   DEFAULT_READER_SETTINGS,
   type ReaderSettings as ClubReaderSettings,
 } from "@/lib/reader-settings";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { SyncStatusIndicator } from "../SyncStatusIndicator";
 
 export { DEFAULT_READER_SETTINGS as DEFAULT_CLUB_SETTINGS };
@@ -33,6 +34,8 @@ export function ClubReaderControls({
   onResetSettings,
   isSaving: _isSaving = false,
 }: ClubReaderControlsProps) {
+  const isMobile = useIsMobile();
+
   const updateSetting = useMemo(
     () => (key: keyof ClubReaderSettings, value: ClubReaderSettings[typeof key]) => {
       onSettingsChange({ ...settings, [key]: value });
@@ -47,6 +50,11 @@ export function ClubReaderControls({
           <h3 className="font-semibold text-sm sm:text-lg">Настройки чтения</h3>
           <SyncStatusIndicator showText size="sm" />
         </div>
+        {isMobile && (
+          <p className="text-xs text-muted-foreground">
+            На телефоне применяется минимальный шрифт, минимальный интервал и максимальная ширина текста. Сохраненные значения остаются вашими.
+          </p>
+        )}
       </div>
 
       <div className="space-y-2">

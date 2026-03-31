@@ -108,7 +108,7 @@ const parseSchedule = (schedule: string | null): ScheduleItem[] => {
 
 const ClubNotFound = () => (
   <MainLayout>
-    <div className="container py-12 px-6 md:px-12 text-center">
+    <div className="container px-4 py-8 text-center sm:px-6 md:px-12 md:py-12">
       <p className="text-muted-foreground">Клуб не найден</p>
     </div>
   </MainLayout>
@@ -116,7 +116,7 @@ const ClubNotFound = () => (
 
 const ClubLoading = () => (
   <MainLayout>
-    <div className="container py-12 px-6 md:px-12">
+    <div className="container px-4 py-8 sm:px-6 md:px-12 md:py-12">
       <div className="flex items-center justify-center py-12">
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
         <span className="ml-2 text-muted-foreground">Загружаем клуб...</span>
@@ -127,7 +127,7 @@ const ClubLoading = () => (
 
 const ClubAuthRequired = () => (
   <MainLayout>
-    <div className="container py-12 px-6 md:px-12 flex justify-center">
+    <div className="container flex justify-center px-4 py-8 sm:px-6 md:px-12 md:py-12">
       <Card className="max-w-md w-full">
         <CardHeader className="text-center">
           <div className="mx-auto mb-4 h-12 w-12 rounded-full bg-blue-100 flex items-center justify-center">
@@ -181,10 +181,10 @@ function useClubErrorHandling(error: unknown, setLocation: (path: string) => voi
     errorMessage.includes("приглашение");
   
   if (isPrivateClubError) {
-    return (
-      <MainLayout>
-        <div className="container py-12 px-6 md:px-12 flex justify-center">
-          <Card className="max-w-md w-full">
+      return (
+        <MainLayout>
+          <div className="container flex justify-center px-4 py-8 sm:px-6 md:px-12 md:py-12">
+            <Card className="max-w-md w-full">
             <CardHeader className="text-center">
               <div className="mx-auto mb-4 h-12 w-12 rounded-full bg-amber-100 flex items-center justify-center">
                 <Lock className="h-6 w-6 text-amber-600" />
@@ -211,7 +211,7 @@ function useClubErrorHandling(error: unknown, setLocation: (path: string) => voi
   
   return (
     <MainLayout>
-      <div className="container py-12 px-6 md:px-12 text-center">
+      <div className="container px-4 py-8 text-center sm:px-6 md:px-12 md:py-12">
         <p className="text-red-600 mb-2">Ошибка загрузки клуба</p>
         <p className="text-sm text-muted-foreground">{errorMessage}</p>
       </div>
@@ -384,7 +384,7 @@ interface ClubHeaderProps {
 
 function ClubHeader({ club, members, isOwner, isMember, removeMemberMutation, handleLeaveClub, setLocation, user, onOwnershipTransferred }: ClubHeaderProps) {
   return (
-    <div className="relative h-48 md:h-64 lg:h-80 w-full overflow-hidden">
+    <div className="relative min-h-[18rem] w-full overflow-hidden md:min-h-[22rem] lg:min-h-[26rem]">
       {club.coverImage ? (
         <img
           src={club.coverImage}
@@ -396,22 +396,22 @@ function ClubHeader({ club, members, isOwner, isMember, removeMemberMutation, ha
       )}
       <div className="absolute inset-0 bg-gradient-to-br from-primary/10 to-accent/10 opacity-50" />
 
-      <div className="container relative h-full flex flex-col justify-between py-8 px-6 md:px-12">
+      <div className="container relative flex h-full flex-col justify-between px-4 py-6 sm:px-6 md:px-12 md:py-8">
         <div>
           <Button
             variant="ghost"
             size="sm"
             onClick={() => setLocation("/clubs")}
-            className="text-white hover:bg-white/20"
+            className="h-9 w-full justify-center text-white hover:bg-white/20 sm:w-auto"
           >
             <ArrowLeft className="mr-2 h-4 w-4" />
             Назад к моим клубам
           </Button>
         </div>
 
-        <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
-          <div className="space-y-4 max-w-2xl">
-            <div className="flex gap-2 items-center">
+        <div className="flex flex-col gap-5 md:flex-row md:items-end md:justify-between md:gap-6">
+          <div className="max-w-2xl space-y-4">
+            <div className="flex flex-wrap items-center gap-2">
               {club.isPrivate && (
                 <Badge
                   variant="secondary"
@@ -430,10 +430,10 @@ function ClubHeader({ club, members, isOwner, isMember, removeMemberMutation, ha
                 </Badge>
               ))}
             </div>
-            <h1 className="text-3xl md:text-5xl font-serif font-bold text-white shadow-sm">
+            <h1 className="text-3xl font-serif font-bold text-white shadow-sm sm:text-4xl md:text-5xl">
               {club.title}
             </h1>
-            <div className="flex items-center gap-4 text-white/80 text-sm">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-white/80">
               <span className="flex items-center gap-1">
                 <Users className="w-4 h-4" /> {club.memberCount || members.length}/
                 {club.maxMembers} Участников
@@ -445,7 +445,7 @@ function ClubHeader({ club, members, isOwner, isMember, removeMemberMutation, ha
             </div>
           </div>
 
-          <div className="flex gap-3">
+          <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:flex-wrap md:justify-end">
             {isMember && (
               <>
                 {isOwner && (
@@ -466,7 +466,7 @@ function ClubHeader({ club, members, isOwner, isMember, removeMemberMutation, ha
                   <Button
                     size="lg"
                     variant="outline"
-                    className="bg-white/10 text-white border-white/20 hover:bg-white/20"
+                    className="w-full bg-white/10 text-white border-white/20 hover:bg-white/20 sm:w-auto"
                     onClick={handleLeaveClub}
                     disabled={removeMemberMutation.isPending}
                   >
@@ -507,25 +507,25 @@ function CurrentBookCard({ club, clubId, isOwner, isMember, handleDeleteBook, de
   const [showDescriptionDialog, setShowDescriptionDialog] = useState(false);
 
   return (
-    <div className="bg-card rounded-xl border p-6 shadow-sm">
-      <h3 className="font-serif font-bold text-xl mb-4">Текущая книга</h3>
+    <div className="rounded-xl border bg-card p-4 shadow-sm sm:p-6">
+      <h3 className="mb-4 font-serif text-lg font-bold sm:text-xl">Текущая книга</h3>
       {club.book ? (
         <div className="space-y-4">
-          <div className="flex gap-4">
-            <div className="w-20 md:w-24 shrink-0 rounded-md overflow-hidden shadow-md">
+          <div className="flex flex-col gap-4 sm:flex-row">
+            <div className="w-full max-w-[7rem] shrink-0 overflow-hidden rounded-md shadow-md sm:w-20 md:w-24">
               {club.book.coverUrl ? (
                 <img
                   src={club.book.coverUrl}
                   alt={club.book.title}
-                  className="w-full h-full object-cover"
+                  className="h-full w-full object-cover"
                 />
               ) : (
-                <div className="w-full h-32 bg-muted flex items-center justify-center">
+                <div className="flex h-32 w-full items-center justify-center bg-muted">
                   <BookOpen className="w-8 h-8 text-muted-foreground" />
                 </div>
               )}
             </div>
-            <div className="space-y-2 flex-1">
+            <div className="flex-1 space-y-2">
               <h4 className="font-semibold leading-tight">{club.book.title}</h4>
               <p className="text-sm text-muted-foreground">{club.book.author}</p>
               {club.book.description && (
@@ -560,7 +560,7 @@ function CurrentBookCard({ club, clubId, isOwner, isMember, handleDeleteBook, de
               </Button>
             )}
             {isOwner && (
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                 <EditClubBookDialog
                   book={{
                     id: club.book.id,
@@ -582,7 +582,7 @@ function CurrentBookCard({ club, clubId, isOwner, isMember, handleDeleteBook, de
                   clubId={clubId}
                   onSave={() => globalThis.location.reload()}
                 >
-                  <Button variant="outline" className="flex-1">
+                  <Button variant="outline" className="w-full sm:flex-1">
                     <Edit2 className="w-4 h-4 mr-2" />
                     Редактировать
                   </Button>
@@ -596,7 +596,7 @@ function CurrentBookCard({ club, clubId, isOwner, isMember, handleDeleteBook, de
                 />
                 <Button
                   variant="outline"
-                  className="flex-1"
+                  className="w-full sm:flex-1"
                   onClick={handleDeleteBook}
                   disabled={deleteBookMutation.isPending}
                 >
@@ -657,10 +657,10 @@ interface MembersListCardProps {
 
 function MembersListCard({ clubId, clubTitle, members, memberCount, membersLoading, canViewMembers, isOwner, isModerator, canRemove, handleRemoveMember }: MembersListCardProps) {
   return (
-    <div className="bg-card rounded-xl border p-6 shadow-sm">
-      <h3 className="font-serif font-bold text-xl mb-4 flex items-center justify-between">
+    <div className="rounded-xl border bg-card p-4 shadow-sm sm:p-6">
+      <h3 className="mb-4 flex flex-col gap-3 font-serif text-lg font-bold sm:flex-row sm:items-center sm:justify-between sm:text-xl">
         <span>Участники</span>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 self-start sm:self-auto">
           <Badge variant="outline" className="font-sans font-normal text-xs">
             {membersLoading ? "Загрузка..." : `${memberCount} участников`}
           </Badge>
@@ -680,7 +680,7 @@ function MembersListCard({ clubId, clubTitle, members, memberCount, membersLoadi
             </div>
           ) : (
             members.map((member) => (
-              <div key={member.id} className="flex items-center justify-between">
+              <div key={member.id} className="flex flex-col gap-3 rounded-xl border border-border/60 p-3 sm:flex-row sm:items-center sm:justify-between sm:border-0 sm:p-0">
                 <div className="flex items-center gap-3">
                   <Avatar>
                     <AvatarFallback className="bg-primary/10 text-primary font-bold">
@@ -696,7 +696,7 @@ function MembersListCard({ clubId, clubTitle, members, memberCount, membersLoadi
                     </div>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 self-start sm:self-auto">
                   <Badge variant={getMemberRoleBadgeVariant(member.role)}>
                     {member.role === "owner" && "Владелец"}
                     {member.role === "moderator" && "Модератор"}
@@ -746,7 +746,7 @@ interface ClubContentTabsProps {
 function ClubContentTabs({ clubId, isMember, isOwner, currentUserId, settings, scheduleItems }: ClubContentTabsProps) {
   return (
     <Tabs defaultValue="about" className="w-full">
-      <TabsList className="w-full justify-start border-b rounded-none h-auto p-0 bg-transparent gap-2 sm:gap-6 overflow-x-auto whitespace-nowrap">
+      <TabsList className="-mx-4 flex h-auto w-[calc(100%+2rem)] justify-start gap-2 overflow-x-auto whitespace-nowrap border-b rounded-none bg-transparent px-4 py-0 sm:mx-0 sm:w-full sm:gap-6 sm:px-0">
         <TabsTrigger
           value="about"
           className="rounded-none border-b-2 border-transparent data-[state=active]:border-accent data-[state=active]:bg-transparent data-[state=active]:shadow-none py-3 px-1 font-medium"
@@ -858,7 +858,7 @@ function ClubContentTabs({ clubId, isMember, isOwner, currentUserId, settings, s
               return (
                 <div
                   key={item.id}
-                  className={`flex items-center gap-4 p-4 border rounded-lg bg-card ${isPast ? "opacity-60" : ""}`}
+                  className={`flex flex-col gap-4 rounded-lg border bg-card p-4 sm:flex-row sm:items-center ${isPast ? "opacity-60" : ""}`}
                 >
                   <div
                     className={`w-12 h-12 rounded-lg flex flex-col items-center justify-center font-bold leading-none ${isPast ? "bg-muted text-muted-foreground" : "bg-primary/10 text-primary"}`}
@@ -880,7 +880,7 @@ function ClubContentTabs({ clubId, isMember, isOwner, currentUserId, settings, s
                     </div>
                   </div>
                   {!isPast && (
-                    <Button size="sm" variant="secondary">
+                    <Button size="sm" variant="secondary" className="w-full sm:w-auto">
                       Напомнить
                     </Button>
                   )}
@@ -942,7 +942,7 @@ export default function ClubDetails() {
   if (!clubData) {
     return (
       <MainLayout>
-        <div className="container py-12 px-6 md:px-12 text-center">
+        <div className="container px-4 py-8 text-center sm:px-6 md:px-12 md:py-12">
           <p className="text-muted-foreground">Клуб не найден</p>
         </div>
       </MainLayout>
@@ -982,8 +982,8 @@ export default function ClubDetails() {
         }}
       />
 
-      <div className="container py-8 px-4 md:px-12 grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6 md:gap-8 lg:gap-12">
-        <div className="lg:col-span-1 space-y-8">
+      <div className="container grid grid-cols-1 gap-4 px-4 py-6 sm:gap-6 sm:px-6 md:px-12 md:py-8 lg:grid-cols-3 lg:gap-8 xl:gap-12">
+        <div className="order-1 space-y-6 lg:col-span-1 lg:space-y-8">
           <CurrentBookCard
             club={club}
             clubId={clubId}
@@ -993,7 +993,20 @@ export default function ClubDetails() {
             deleteBookMutation={deleteBookMutation}
             setLocation={setLocation}
           />
+        </div>
 
+        <div className="order-2 lg:col-span-2">
+          <ClubContentTabs
+            clubId={clubId}
+            isMember={isMember}
+            isOwner={isOwner}
+            currentUserId={user?.id || ''}
+            settings={settings}
+            scheduleItems={scheduleItems}
+          />
+        </div>
+
+        <div className="order-3 space-y-6 lg:col-span-1 lg:space-y-8">
           <MembersListCard
             clubId={clubId}
             clubTitle={club.title}
@@ -1008,21 +1021,10 @@ export default function ClubDetails() {
           />
 
           {(isOwner || isModerator) && (
-            <div className="mt-6 space-y-3">
+            <div className="space-y-3">
               <InvitationsList clubId={clubId} isOwner={isOwner} />
             </div>
           )}
-        </div>
-
-        <div className="lg:col-span-2">
-          <ClubContentTabs
-            clubId={clubId}
-            isMember={isMember}
-            isOwner={isOwner}
-            currentUserId={user?.id || ''}
-            settings={settings}
-            scheduleItems={scheduleItems}
-          />
         </div>
       </div>
 

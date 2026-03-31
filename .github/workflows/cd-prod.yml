@@ -26,8 +26,8 @@ env:
   TARGET_APP: ${{ inputs.target_app || 'voxlibris-web' }}
 
 jobs:
-  lint:
-    name: Линтинг и проверка типов
+  quality:
+    name: Quality gate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -45,8 +45,8 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: TypeScript проверка
         run: pnpm run check
-      - name: Линтинг кода
-        run: pnpm run lint
+      - name: ESLint
+        run: pnpm run lint:eslint
 
   security:
     name: Security Audit
@@ -70,7 +70,7 @@ jobs:
 
   build:
     name: 🏗️ Сборка и Docker
-    needs: [lint, security]
+    needs: [quality, security]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

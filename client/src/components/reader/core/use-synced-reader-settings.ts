@@ -63,7 +63,21 @@ export function useSyncedReaderSettings(
   useEffect(() => {
     applyReaderSettings(syncState.settings, scope);
   }, [syncState.settings, scope]);
-  
+
+  useEffect(() => {
+    const reapplySettings = () => {
+      applyReaderSettings(syncState.settings, scope);
+    };
+
+    window.addEventListener("resize", reapplySettings);
+    window.addEventListener("orientationchange", reapplySettings);
+
+    return () => {
+      window.removeEventListener("resize", reapplySettings);
+      window.removeEventListener("orientationchange", reapplySettings);
+    };
+  }, [syncState.settings, scope]);
+
   // Load initial settings from server (only once on mount)
   useEffect(() => {
     if (!enableServerSync) {

@@ -47,8 +47,8 @@ export function HistoryBookCard({
 
   return (
     <Card className="group hover:shadow-md transition-shadow duration-200">
-      <CardContent className="p-4">
-        <div className="flex gap-4">
+      <CardContent className="p-3 sm:p-4">
+        <div className="flex gap-3 sm:gap-4">
           {/* Обложка книги */}
           <div className="flex-shrink-0">
             {bookCoverUrl ? (
@@ -70,14 +70,14 @@ export function HistoryBookCard({
 
           {/* Информация о книге */}
           <div className="flex-1 min-w-0">
-            <h3 className="font-semibold text-foreground truncate mb-1">
+            <h3 className="mb-1 line-clamp-2 font-semibold text-foreground">
               {bookTitle}
             </h3>
             <p className="text-sm text-muted-foreground mb-2">
               {bookAuthor}
             </p>
             
-            <div className="flex items-center justify-between text-xs text-muted-foreground">
+            <div className="flex flex-col gap-1 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
               <span>Прочитано: {formatDate(completedAt)}</span>
               {readingTimeMinutes && (
                 <span>{formatReadingTime(readingTimeMinutes)}</span>

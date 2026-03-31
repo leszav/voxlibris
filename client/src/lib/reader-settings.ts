@@ -9,6 +9,8 @@ export interface ReaderSettings {
 
 export type ReaderSettingsScope = "personal" | "club";
 
+export const MOBILE_READER_BREAKPOINT = 768;
+
 export const DEFAULT_READER_SETTINGS: ReaderSettings = {
   fontSize: 18,
   fontFamily: "Georgia",
@@ -19,6 +21,10 @@ export const DEFAULT_READER_SETTINGS: ReaderSettings = {
 };
 
 export const READER_SETTINGS_STORAGE_KEY = "readerSettings";
+
+const MOBILE_EFFECTIVE_FONT_SIZE = 12;
+const MOBILE_EFFECTIVE_LINE_HEIGHT = 1.2;
+const MOBILE_EFFECTIVE_CONTENT_WIDTH = 95;
 
 const ALLOWED_FONT_FAMILIES = new Set([
   "Georgia",
@@ -84,29 +90,58 @@ export function saveReaderSettingsToStorage(settings: ReaderSettings): void {
   }
 }
 
+function getViewportWidth(viewportWidth?: number): number {
+  if (typeof viewportWidth === "number" && Number.isFinite(viewportWidth)) {
+    return viewportWidth;
+  }
+
+  if (typeof window !== "undefined") {
+    return window.innerWidth;
+  }
+
+  return MOBILE_READER_BREAKPOINT;
+}
+
+export function getEffectiveReaderSettings(settings: ReaderSettings, viewportWidth?: number): ReaderSettings {
+  const normalizedSettings = normalizeReaderSettings(settings);
+  const resolvedViewportWidth = getViewportWidth(viewportWidth);
+
+  if (resolvedViewportWidth >= MOBILE_READER_BREAKPOINT) {
+    return normalizedSettings;
+  }
+
+  return {
+    ...normalizedSettings,
+    fontSize: MOBILE_EFFECTIVE_FONT_SIZE,
+    lineHeight: MOBILE_EFFECTIVE_LINE_HEIGHT,
+    contentWidth: MOBILE_EFFECTIVE_CONTENT_WIDTH,
+  };
+}
+
 export function applyReaderSettings(settings: ReaderSettings, scope: ReaderSettingsScope): void {
   const root = document.documentElement;
+  const effectiveSettings = getEffectiveReaderSettings(settings);
 
   if (scope === "club") {
-    root.style.setProperty("--club-reader-font-size", `${settings.fontSize}px`);
-    root.style.setProperty("--club-reader-font-family", settings.fontFamily);
-    root.style.setProperty("--club-reader-line-height", settings.lineHeight.toString());
-    root.style.setProperty("--club-reader-text-align", settings.textAlign);
-    root.style.setProperty("--club-reader-content-width", `${settings.contentWidth}%`);
-    root.dataset.clubReaderTheme = settings.theme;
+    root.style.setProperty("--club-reader-font-size", `${effectiveSettings.fontSize}px`);
+    root.style.setProperty("--club-reader-font-family", effectiveSettings.fontFamily);
+    root.style.setProperty("--club-reader-line-height", effectiveSettings.lineHeight.toString());
+    root.style.setProperty("--club-reader-text-align", effectiveSettings.textAlign);
+    root.style.setProperty("--club-reader-content-width", `${effectiveSettings.contentWidth}%`);
+    root.dataset.clubReaderTheme = effectiveSettings.theme;
     document.body.classList.remove("club-reader-light", "club-reader-dark", "club-reader-sepia");
-    document.body.classList.add(`club-reader-${settings.theme}`);
+    document.body.classList.add(`club-reader-${effectiveSettings.theme}`);
     return;
   }
 
-  root.style.setProperty("--reader-font-size", `${settings.fontSize}px`);
-  root.style.setProperty("--reader-font-family", settings.fontFamily);
-  root.style.setProperty("--reader-line-height", settings.lineHeight.toString());
-  root.style.setProperty("--reader-text-align", settings.textAlign);
-  root.style.setProperty("--reader-content-width", `${settings.contentWidth}%`);
-  root.dataset.readerTheme = settings.theme;
+  root.style.setProperty("--reader-font-size", `${effectiveSettings.fontSize}px`);
+  root.style.setProperty("--reader-font-family", effectiveSettings.fontFamily);
+  root.style.setProperty("--reader-line-height", effectiveSettings.lineHeight.toString());
+  root.style.setProperty("--reader-text-align", effectiveSettings.textAlign);
+  root.style.setProperty("--reader-content-width", `${effectiveSettings.contentWidth}%`);
+  root.dataset.readerTheme = effectiveSettings.theme;
   document.body.classList.remove("reader-light", "reader-dark", "reader-sepia");
-  document.body.classList.add(`reader-${settings.theme}`);
+  document.body.classList.add(`reader-${effectiveSettings.theme}`);
 }
 
 export function cleanupReaderSettings(scope: ReaderSettingsScope): void {

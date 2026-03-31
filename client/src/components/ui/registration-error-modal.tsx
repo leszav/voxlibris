@@ -13,7 +13,7 @@ export function RegistrationErrorModal({ isOpen, onClose, error }: RegistrationE
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-      <Card className="w-full max-w-md mx-4 shadow-2xl">
+      <Card className="mx-4 max-h-[calc(100vh-2rem)] w-full max-w-md overflow-y-auto shadow-2xl">
         <CardHeader className="text-center space-y-4">
           <div className="flex justify-center">
             <AlertCircle className="h-16 w-16 text-red-500" />

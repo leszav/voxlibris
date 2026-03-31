@@ -1,5 +1,5 @@
 import { Link, useLocation } from "wouter";
-import { Search, User, Menu, Settings, Construction, LogOut } from "lucide-react";
+import { Search, User, Menu, Settings, Construction, LogOut, House, Compass, BookOpen } from "lucide-react";
 import { Logo } from "@/components/logo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,17 +23,30 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { isImpersonating, getImpersonatedUsername, exitImpersonation } from "@/lib/token-store";
 import { GuestStatusBanner } from "@/components/guest/GuestStatusBanner";
+import { PwaInstallPrompt } from "@/components/layout/PwaInstallPrompt";
 
 export function MainLayout({ children }: { readonly children: React.ReactNode }) {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [showComingSoon, setShowComingSoon] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [showFeedback, setShowFeedback] = useState(false);
-  const [, setLocation] = useLocation();
+  const [location, setLocation] = useLocation();
   const { user, isAuthenticated, logout, refetchUser } = useAuth();
   const queryClient = useQueryClient();
   const [impersonating, setImpersonating] = useState(isImpersonating());
   const [impersonatedUser, setImpersonatedUser] = useState(getImpersonatedUsername());
+
+  const profileHref = isAuthenticated ? "/profile" : "/auth/login";
+  const profileLabel = isAuthenticated ? "Профиль" : "Войти";
+
+  const isHomeSection = location === "/";
+  const isClubsSection = location === "/catalog" || location.startsWith("/clubs") || location.startsWith("/club/");
+  const isLibrarySection = location.startsWith("/library") || location.startsWith("/books/") || location.startsWith("/guest/");
+  const isProfileSection = location.startsWith("/profile") || location.startsWith("/auth/") || location.startsWith("/confirm-email/");
+  const hideInstallPrompt = location.startsWith("/auth/")
+    || location.startsWith("/confirm-email/")
+    || location.startsWith("/admin")
+    || location.startsWith("/guest/reader/");
 
   useEffect(() => {
     if (!isAuthenticated && isLoggingOut) {
@@ -267,8 +280,9 @@ export function MainLayout({ children }: { readonly children: React.ReactNode })
           </div>
         </div>
       </header>
-      <main className="flex-1">
+      <main className="flex-1 pb-20 md:pb-0">
         <GuestStatusBanner />
+        <PwaInstallPrompt hidden={hideInstallPrompt} />
         {children}
       </main>
       <footer className="border-t bg-card py-12 text-muted-foreground">
@@ -307,6 +321,49 @@ export function MainLayout({ children }: { readonly children: React.ReactNode })
           </div>
         </div>
       </footer>
+
+      <nav
+        className="fixed inset-x-0 bottom-0 z-50 border-t bg-background/95 backdrop-blur md:hidden"
+        style={{ paddingBottom: "max(env(safe-area-inset-bottom), 0.5rem)" }}
+      >
+        <div className="grid grid-cols-4 gap-1 px-2 pt-2">
+          <button
+            type="button"
+            onClick={() => setLocation("/")}
+            className={`flex min-h-14 flex-col items-center justify-center gap-1 rounded-xl text-[11px] transition-colors ${isHomeSection ? "bg-secondary text-primary" : "text-muted-foreground"}`}
+          >
+            <House className="h-4 w-4" />
+            <span>Главная</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setLocation("/catalog")}
+            className={`flex min-h-14 flex-col items-center justify-center gap-1 rounded-xl text-[11px] transition-colors ${isClubsSection ? "bg-secondary text-primary" : "text-muted-foreground"}`}
+          >
+            <Compass className="h-4 w-4" />
+            <span>Клубы</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setLocation("/library")}
+            className={`flex min-h-14 flex-col items-center justify-center gap-1 rounded-xl text-[11px] transition-colors ${isLibrarySection ? "bg-secondary text-primary" : "text-muted-foreground"}`}
+          >
+            <BookOpen className="h-4 w-4" />
+            <span>Чтение</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setLocation(profileHref)}
+            className={`flex min-h-14 flex-col items-center justify-center gap-1 rounded-xl text-[11px] transition-colors ${isProfileSection ? "bg-secondary text-primary" : "text-muted-foreground"}`}
+          >
+            <User className="h-4 w-4" />
+            <span>{profileLabel}</span>
+          </button>
+        </div>
+      </nav>
 
       <Dialog open={showComingSoon} onOpenChange={setShowComingSoon}>
         <DialogContent className="sm:max-w-md">

@@ -13,7 +13,7 @@ export function RegistrationSuccessModal({ isOpen, onClose, email }: Registratio
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-      <Card className="w-full max-w-md mx-4 shadow-2xl">
+      <Card className="mx-4 max-h-[calc(100vh-2rem)] w-full max-w-md overflow-y-auto shadow-2xl">
         <CardHeader className="text-center space-y-4">
           <div className="flex justify-center">
             <CheckCircle className="h-16 w-16 text-green-500" />
@@ -34,7 +34,7 @@ export function RegistrationSuccessModal({ isOpen, onClose, email }: Registratio
             <p className="text-sm text-blue-600">
               Мы отправили письмо с подтверждением на адрес:
             </p>
-            <p className="font-mono text-sm bg-white px-3 py-2 rounded border">
+            <p className="break-all rounded border bg-white px-3 py-2 font-mono text-sm">
               {email}
             </p>
             <p className="text-sm text-blue-600">

@@ -8,6 +8,7 @@ import {
   normalizeReaderSettings,
   type ReaderSettings,
 } from "@/lib/reader-settings";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { SyncStatusIndicator } from "./SyncStatusIndicator";
 
 const FONT_FAMILIES = [
@@ -21,6 +22,7 @@ const FONT_FAMILIES = [
 interface ReaderControlsProps {
   readonly settings: ReaderSettings;
   readonly onSettingsChange: (settings: ReaderSettings) => void;
+  readonly onPreviewSettings?: (settings: ReaderSettings) => void;
   readonly onResetSettings?: () => void;
   /** @deprecated Use SyncStatusIndicator component instead */
   readonly isSaving?: boolean;
@@ -29,11 +31,13 @@ interface ReaderControlsProps {
 export function ReaderControls({
   settings,
   onSettingsChange,
+  onPreviewSettings,
   onResetSettings,
   isSaving: _isSaving = false,
 }: ReaderControlsProps) {
   const [localSettings, setLocalSettings] = useState<ReaderSettings>(() => normalizeReaderSettings(settings));
   const commitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isMobile = useIsMobile();
 
   const commitSettings = useCallback((nextSettings: ReaderSettings, delayMs = 180) => {
     if (commitTimeoutRef.current) {
@@ -64,26 +68,35 @@ export function ReaderControls({
     () => (key: keyof ReaderSettings, value: ReaderSettings[typeof key]) => {
       setLocalSettings((prev) => {
         const nextSettings = normalizeReaderSettings({ ...prev, [key]: value });
-        applyReaderSettings(nextSettings, "personal");
+        if (onPreviewSettings) {
+          onPreviewSettings(nextSettings);
+        } else {
+          applyReaderSettings(nextSettings, "personal");
+        }
         commitSettings(nextSettings);
         return nextSettings;
       });
     },
-    [commitSettings]
+    [commitSettings, onPreviewSettings]
   );
 
   const handleReset = useCallback(() => {
     const nextSettings = normalizeReaderSettings(DEFAULT_READER_SETTINGS);
     setLocalSettings(nextSettings);
-    applyReaderSettings(nextSettings, "personal");
 
     if (onResetSettings) {
       onResetSettings();
       return;
     }
 
+    if (onPreviewSettings) {
+      onPreviewSettings(nextSettings);
+    } else {
+      applyReaderSettings(nextSettings, "personal");
+    }
+
     onSettingsChange(nextSettings);
-  }, [onResetSettings, onSettingsChange]);
+  }, [onPreviewSettings, onResetSettings, onSettingsChange]);
 
   return (
     <div className="space-y-6">
@@ -92,6 +105,11 @@ export function ReaderControls({
           <h3 className="font-semibold text-lg">Настройки чтения</h3>
           <SyncStatusIndicator showText size="sm" />
         </div>
+        {isMobile && (
+          <p className="text-xs text-muted-foreground">
+            На телефоне применяется минимальный шрифт, минимальный интервал и максимальная ширина текста. Ваши сохраненные значения не меняются.
+          </p>
+        )}
       </div>
 
       <div className="space-y-2">

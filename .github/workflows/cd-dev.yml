@@ -8,8 +8,8 @@ on:
   workflow_dispatch:
 
 jobs:
-  lint:
-    name: 🔍 Линтинг и проверка типов
+  quality:
+    name: 🔍 Quality gate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -27,8 +27,8 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: TypeScript проверка
         run: pnpm run check
-      - name: Линтинг кода
-        run: pnpm run lint
+      - name: ESLint
+        run: pnpm run lint:eslint
 
   security:
     name: 🔒 Security Audit
@@ -74,7 +74,7 @@ jobs:
 
   build:
     name: 🏗️ Сборка
-    needs: [lint, security, test]
+    needs: [quality, security, test]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

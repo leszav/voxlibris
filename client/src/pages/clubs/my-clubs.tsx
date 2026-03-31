@@ -19,7 +19,7 @@ export default function MyClubs() {
   if (isLoading) {
     return (
       <MainLayout>
-        <div className="container py-12 px-6 md:px-12">
+        <div className="container px-4 py-8 sm:px-6 md:px-12 md:py-12">
           <div className="flex items-center justify-center py-12">
             <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
             <span className="ml-2 text-muted-foreground">Загружаем клубы...</span>
@@ -32,7 +32,7 @@ export default function MyClubs() {
   if (error) {
     return (
       <MainLayout>
-        <div className="container py-12 px-6 md:px-12">
+        <div className="container px-4 py-8 sm:px-6 md:px-12 md:py-12">
           <div className="text-center">
             <p className="text-destructive">Ошибка загрузки клубов</p>
           </div>
@@ -56,29 +56,29 @@ export default function MyClubs() {
 
   return (
     <MainLayout>
-      <div className="container py-8 px-4 md:px-8">
-        <div className="flex items-center justify-between mb-8">
+      <div className="container px-4 py-6 sm:px-6 md:px-8 md:py-8">
+        <div className="mb-6 flex flex-col gap-4 sm:mb-8 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-3xl font-bold tracking-tight">Мои клубы</h1>
             <p className="text-muted-foreground mt-2">
               Управляйте своими книжными клубами
             </p>
           </div>
-          <Button onClick={handleCreateClub}>
+          <Button onClick={handleCreateClub} className="w-full sm:w-auto">
             <Plus className="mr-2 h-4 w-4" />
             Создать клуб
           </Button>
         </div>
 
         <Tabs defaultValue="all" className="w-full">
-          <TabsList className="w-full max-w-md grid grid-cols-2 md:grid-cols-3 overflow-x-auto whitespace-nowrap">
-            <TabsTrigger value="all">
+          <TabsList className="grid h-auto w-full grid-cols-3 rounded-xl p-1 sm:max-w-md">
+            <TabsTrigger value="all" className="min-h-10 px-2 text-xs sm:text-sm">
               Все ({clubs?.length || 0})
             </TabsTrigger>
-            <TabsTrigger value="owned">
+            <TabsTrigger value="owned" className="min-h-10 px-2 text-xs sm:text-sm">
               Мои клубы
             </TabsTrigger>
-            <TabsTrigger value="member">
+            <TabsTrigger value="member" className="min-h-10 px-2 text-xs sm:text-sm">
               Участник
             </TabsTrigger>
           </TabsList>
@@ -92,7 +92,7 @@ export default function MyClubs() {
                   <p className="text-muted-foreground text-center mb-6">
                     Создайте свой первый книжный клуб или присоединитесь к существующему
                   </p>
-                  <Button onClick={handleCreateClub}>
+                  <Button onClick={handleCreateClub} className="w-full sm:w-auto">
                     <Plus className="mr-2 h-4 w-4" />
                     Создать клуб
                   </Button>
@@ -107,7 +107,7 @@ export default function MyClubs() {
                     onClick={() => setLocation(`/clubs/${club.id}`)}
                   >
                     <CardHeader>
-                      <div className="flex items-start justify-between">
+                      <div className="flex items-start justify-between gap-3">
                         <div className="flex-1">
                           <CardTitle className="line-clamp-1">{club.title}</CardTitle>
                           <CardDescription className="line-clamp-2 mt-1">
@@ -125,7 +125,7 @@ export default function MyClubs() {
                           <BookOpen className="h-4 w-4" />
                           <span className="line-clamp-1">{club.book?.title || "Книга"}</span>
                         </div>
-                        <div className="flex items-center justify-between">
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                           <div className="flex items-center gap-2 text-sm text-muted-foreground">
                             <Users className="h-4 w-4" />
                             <span>{club.memberCount || 0} / {club.maxMembers}</span>
@@ -154,7 +154,7 @@ export default function MyClubs() {
                   <p className="text-muted-foreground text-center mb-6">
                     Станьте организатором книжного клуба
                   </p>
-                  <Button onClick={handleCreateClub}>
+                  <Button onClick={handleCreateClub} className="w-full sm:w-auto">
                     <Plus className="mr-2 h-4 w-4" />
                     Создать клуб
                   </Button>
@@ -175,7 +175,7 @@ export default function MyClubs() {
                       </CardDescription>
                     </CardHeader>
                     <CardContent>
-                      <div className="flex items-center justify-between text-sm text-muted-foreground">
+                      <div className="flex flex-col gap-2 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
                         <div className="flex items-center gap-2">
                           <Users className="h-4 w-4" />
                           <span>{club.memberCount || 0} участников</span>
@@ -215,7 +215,7 @@ export default function MyClubs() {
                       </CardDescription>
                     </CardHeader>
                     <CardContent>
-                      <div className="flex items-center justify-between text-sm text-muted-foreground">
+                      <div className="flex flex-col gap-2 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
                         <div className="flex items-center gap-2">
                           <BookOpen className="h-4 w-4" />
                           <span className="line-clamp-1">{club.book?.title}</span>

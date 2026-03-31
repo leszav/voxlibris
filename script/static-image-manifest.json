@@ -79,8 +79,12 @@
         }
       }
     },
+    "client/public/apple-touch-icon.png": {
+      "sourceSha256": "b9e5e19157501f07d00f16ac45044806d70d445e96d2fd392d4df3d716c74c63",
+      "variants": {}
+    },
     "client/public/favicon.png": {
-      "sourceSha256": "b6acb73abb0b7e8e808d72c016e81d97860bc7e7e0eb4f06ff76ba1d16a5b04f",
+      "sourceSha256": "50a498d598d7a55a814608e669f49820367d6bf805156c8cd7c30bcbbd031f65",
       "variants": {}
     },
     "client/public/images/ymetrika_logo.png": {
@@ -108,6 +112,14 @@
           "sha256": "57cb4869201685454c6dcd9c5387c3744e1e83cd1563c6266e28d1dcdd74edf1"
         }
       }
+    },
+    "client/public/pwa-192x192.png": {
+      "sourceSha256": "b8bc64f14e0b0c987eec3dc545fa9ca006d3ac13a849fce552912cd57a292af3",
+      "variants": {}
+    },
+    "client/public/pwa-512x512.png": {
+      "sourceSha256": "2ead4738984170e69f065728dc6c3052d9a3c372dc5c69a5e1a2b1cb9fcf5628",
+      "variants": {}
     }
   }
 }

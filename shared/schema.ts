@@ -1273,6 +1273,8 @@ export const analyticsEventTypes = [
   "club_join",           // Вступление в клуб
   "club_leave",          // Выход из клуба
   "book_upload",         // Загрузка книги
+  "pwa_install",         // Установка PWA на устройство
+  "pwa_homescreen_open", // Открытие PWA с домашнего экрана
 ] as const;
 export type AnalyticsEventType = typeof analyticsEventTypes[number];
 

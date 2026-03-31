@@ -101,6 +101,13 @@ function ensureYandexMetrikaInitialized() {
   });
 }
 
+export function reachYandexGoal(goal: string, params?: Record<string, unknown>) {
+  ensureYandexMetrikaInitialized();
+
+  const win = globalThis.window ?? undefined;
+  win?.ym?.(YM_COUNTER_ID, "reachGoal", goal, params);
+}
+
 /**
  * Компонент для отправки hit в Яндекс.Метрику при смене маршрута SPA.
  * Отслеживает переходы по маршрутам wouter и вызывает ym('hit', ...).

@@ -79,8 +79,8 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background px-4">
-      <div className="w-full max-w-md space-y-6">
+    <div className="flex min-h-[100dvh] items-start justify-center bg-background px-4 py-8 sm:items-center sm:py-10">
+      <div className="w-full max-w-md space-y-5 sm:space-y-6">
         {/* Logo */}
         <div className="text-center space-y-2">
           <div className="flex items-center justify-center gap-2 font-serif text-2xl font-bold text-primary">
@@ -159,7 +159,7 @@ export default function Login() {
                 </div>
               </div>
 
-              <div className="flex items-center space-x-2">
+              <div className="flex items-start space-x-2">
                 <input
                   id="remember-me"
                   type="checkbox"
@@ -169,7 +169,7 @@ export default function Login() {
                 />
                 <Label 
                   htmlFor="remember-me" 
-                  className="text-sm font-normal cursor-pointer select-none"
+                  className="cursor-pointer select-none text-sm font-normal leading-5"
                 >
                   Запомнить меня на 30 дней
                 </Label>
@@ -197,7 +197,7 @@ export default function Login() {
 
       {/* Диалог ожидания активации */}
       <Dialog open={showPendingDialog} onOpenChange={setShowPendingDialog}>
-        <DialogContent>
+        <DialogContent className="max-w-[calc(100vw-2rem)] sm:max-w-lg">
           <DialogHeader>
             <div className="flex items-center gap-3 mb-2">
               <div className="p-3 bg-yellow-100 rounded-full">

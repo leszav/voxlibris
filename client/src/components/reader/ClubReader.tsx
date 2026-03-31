@@ -1,7 +1,8 @@
-import { useState, useEffect, useRef, useMemo, type CSSProperties, type RefObject } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback, type CSSProperties, type RefObject } from "react";
 import { useParams } from "wouter";
 import { useClubBookmarks } from "../../hooks/use-club-reader";
 import { useAnalytics } from "../../hooks/use-analytics";
+import { getMobileAnalyticsContext } from "@/lib/mobile-analytics";
 import { ClubContentRenderer } from "./club/ClubContentRenderer";
 import { ClubReaderControls } from "./club/ClubReaderControls";
 import { ClubChapterList } from "./club/ClubNavigation";
@@ -25,11 +26,14 @@ import {
   useRestoreReaderScroll,
 } from "./core/use-reader-progress-sync";
 import { useReaderLatestProgress } from "./core/use-reader-latest-progress";
+import { useReaderPanelsAutoclose } from "./core/use-reader-panels-autoclose";
+import { usePreserveReaderVisualAnchor } from "./core/use-preserve-reader-visual-anchor";
 import { useSmoothReaderSpaceScroll } from "./core/use-smooth-reader-space-scroll";
 import { useClubReaderAdapter } from "./core/use-reader-data-adapters";
 import { useSyncedReaderSettings } from "./core/use-synced-reader-settings";
 import { useReaderSyncState } from "./core/use-reader-sync-state";
 import { ChatWidget } from "@/components/chat/ChatWidget";
+import type { ReaderSettings } from "@/lib/reader-settings";
 
 interface ClubReaderProps {
   clubId?: string;
@@ -77,6 +81,7 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
   const manualRestoreCleanupRef = useRef<(() => void) | null>(null);
   
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const contentAreaRef = useRef<HTMLDivElement>(null);
   const {
     settings,
     updateSettings,
@@ -123,7 +128,10 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
   const hasTrackedBookOpen = useRef(false);
   useEffect(() => {
     if (outlineContent && bookId && !hasTrackedBookOpen.current) {
-      analytics.trackBookOpen(bookId, { clubId });
+      analytics.trackBookOpen(
+        bookId,
+        getMobileAnalyticsContext({ source: "club_reader", clubId }) ?? { clubId },
+      );
       hasTrackedBookOpen.current = true;
     }
   }, [outlineContent, bookId, clubId, analytics]);
@@ -226,14 +234,14 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
 
   // Функции для горячих клавиш
   const increaseFontSize = () => {
-    updateSettings({
+    updateSettingsWithAnchor({
       ...settings,
       fontSize: Math.min(32, settings.fontSize + 2),
     });
   };
 
   const decreaseFontSize = () => {
-    updateSettings({
+    updateSettingsWithAnchor({
       ...settings,
       fontSize: Math.max(12, settings.fontSize - 2),
     });
@@ -311,6 +319,35 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
   }, []);
 
   const scrollElementRef = scrollContainerRef as RefObject<HTMLElement | null>;
+  const preserveReaderVisualAnchor = usePreserveReaderVisualAnchor({
+    scrollContainerRef: scrollElementRef,
+    contentAreaRef: contentAreaRef as RefObject<HTMLElement | null>,
+  });
+  const closeAllPanels = useCallback(() => {
+    setTocOpen(false);
+    setSettingsOpen(false);
+    setBookmarksOpen(false);
+    setHelpOpen(false);
+  }, []);
+
+  const updateSettingsWithAnchor = useCallback((nextSettings: ReaderSettings) => {
+    preserveReaderVisualAnchor(() => {
+      updateSettings(nextSettings);
+    });
+  }, [preserveReaderVisualAnchor, updateSettings]);
+
+  const resetSettingsWithAnchor = useCallback(() => {
+    preserveReaderVisualAnchor(() => {
+      resetSettings();
+    });
+  }, [preserveReaderVisualAnchor, resetSettings]);
+
+  useReaderPanelsAutoclose({
+    isOpen: tocOpen || settingsOpen || bookmarksOpen || helpOpen,
+    onClose: closeAllPanels,
+    contentRef: scrollElementRef,
+  });
+
   const { suggestedProgress, dismissSuggestion } = useReaderLatestProgress({
     currentChapter,
     totalChapters,
@@ -481,7 +518,11 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setTocOpen(!tocOpen)}
+              onClick={() => {
+                const nextOpen = !tocOpen;
+                closeAllPanels();
+                setTocOpen(nextOpen);
+              }}
               className="w-8 h-8 sm:w-10 sm:h-10 p-0 shrink-0"
             >
               <List className="w-4 h-4" />
@@ -490,7 +531,11 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setSettingsOpen(!settingsOpen)}
+              onClick={() => {
+                const nextOpen = !settingsOpen;
+                closeAllPanels();
+                setSettingsOpen(nextOpen);
+              }}
               title="Настройки чтения"
               className="w-8 h-8 sm:w-10 sm:h-10 p-0 shrink-0"
             >
@@ -543,8 +588,8 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
             <div className="p-3 sm:p-4">
               <ClubReaderControls
                 settings={settings}
-                onSettingsChange={updateSettings}
-                onResetSettings={resetSettings}
+                onSettingsChange={updateSettingsWithAnchor}
+                onResetSettings={resetSettingsWithAnchor}
               />
             </div>
           </div>
@@ -631,12 +676,14 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
             onScroll={handleScroll}
           >
             <div 
+              ref={contentAreaRef}
               className="p-4 sm:p-6 md:p-8"
               style={{
                 fontFamily: 'var(--club-reader-font-family, inherit)',
                 fontSize: 'var(--club-reader-font-size, 18px)',
                 lineHeight: 'var(--club-reader-line-height, 1.6)',
-                maxWidth: 'var(--club-reader-content-width, 800px)',
+                textAlign: 'var(--club-reader-text-align, justify)' as CSSProperties['textAlign'],
+                width: 'var(--club-reader-content-width, 90%)',
                 margin: '0 auto'
               } as CSSProperties}
             >

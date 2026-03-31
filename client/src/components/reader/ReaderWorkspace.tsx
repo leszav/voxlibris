@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo, type RefObject } from "react";
 import { useParams } from "wouter";
 import { useAnalytics } from "../../hooks/use-analytics";
+import { getMobileAnalyticsContext } from "@/lib/mobile-analytics";
 import { useAddBookmark, useBookmarks, useDeleteBookmark } from "../../hooks/use-reader";
 import { ContentRenderer } from "./ContentRenderer";
 import { BookmarksPanel } from "./BookmarksPanel";
@@ -20,14 +21,17 @@ import {
   useRestoreReaderScroll,
 } from "./core/use-reader-progress-sync";
 import { useReaderLatestProgress } from "./core/use-reader-latest-progress";
+import { useReaderPanelsAutoclose } from "./core/use-reader-panels-autoclose";
 import { useReaderSelectionBookmark } from "./core/use-reader-selection-bookmark";
 import { useSmoothReaderSpaceScroll } from "./core/use-smooth-reader-space-scroll";
+import { usePreserveReaderVisualAnchor } from "./core/use-preserve-reader-visual-anchor";
 import { usePersonalReaderAdapter } from "./core/use-reader-data-adapters";
 import { useSyncedReaderSettings } from "./core/use-synced-reader-settings";
 import { useReaderSyncState } from "./core/use-reader-sync-state";
 import { ReaderProgressIndicators } from "./ReaderProgressIndicators";
 import { consumePendingReaderBookmarkNavigation } from "@/lib/reader-bookmark-navigation";
 import { toast } from "@/hooks/use-toast";
+import { applyReaderSettings, type ReaderSettings } from "@/lib/reader-settings";
 
 interface Chapter {
   chapterNumber: number;
@@ -172,7 +176,7 @@ function useTrackReaderAnalytics({
     trackedChapterRef.current = currentChapter;
 
     if (currentChapter === 1 || currentChapter === progress?.currentChapter) {
-      analytics.trackBookOpen(bookId);
+      analytics.trackBookOpen(bookId, getMobileAnalyticsContext({ source: "personal_reader" }) ?? undefined);
     }
 
     analytics.trackChapterStart(bookId, currentChapter);
@@ -310,6 +314,41 @@ export function ReaderWorkspace({ bookId: propBookId, clubId, params }: Readonly
   });
 
   const scrollElementRef = scrollContainerRef as RefObject<HTMLElement | null>;
+  const contentAreaRef = useRef<HTMLDivElement>(null);
+  const closeAllPanels = useCallback(() => {
+    setTocOpen(false);
+    setBookmarksOpen(false);
+    setSettingsOpen(false);
+  }, []);
+  const preserveReaderVisualAnchor = usePreserveReaderVisualAnchor({
+    scrollContainerRef: scrollElementRef,
+    contentAreaRef: contentAreaRef as RefObject<HTMLElement | null>,
+  });
+
+  const previewSettings = useCallback((nextSettings: ReaderSettings) => {
+    preserveReaderVisualAnchor(() => {
+      applyReaderSettings(nextSettings, "personal");
+    });
+  }, [preserveReaderVisualAnchor]);
+
+  const updateSettingsWithAnchor = useCallback((nextSettings: ReaderSettings) => {
+    preserveReaderVisualAnchor(() => {
+      updateSettings(nextSettings);
+    });
+  }, [preserveReaderVisualAnchor, updateSettings]);
+
+  const resetSettingsWithAnchor = useCallback(() => {
+    preserveReaderVisualAnchor(() => {
+      resetSettings();
+    });
+  }, [preserveReaderVisualAnchor, resetSettings]);
+
+  useReaderPanelsAutoclose({
+    isOpen: tocOpen || bookmarksOpen || settingsOpen,
+    onClose: closeAllPanels,
+    contentRef: scrollElementRef,
+  });
+
   const { suggestedProgress, dismissSuggestion } = useReaderLatestProgress({
     currentChapter,
     totalChapters: bookData.totalChapters,
@@ -594,9 +633,9 @@ export function ReaderWorkspace({ bookId: propBookId, clubId, params }: Readonly
                 variant={tocOpen ? "secondary" : "ghost"}
                 size="sm"
                 onClick={() => {
-                  setTocOpen(!tocOpen);
-                  setBookmarksOpen(false);
-                  setSettingsOpen(false);
+                  const nextOpen = !tocOpen;
+                  closeAllPanels();
+                  setTocOpen(nextOpen);
                 }}
                 className="text-xs sm:text-sm"
               >
@@ -643,9 +682,9 @@ export function ReaderWorkspace({ bookId: propBookId, clubId, params }: Readonly
                 variant={bookmarksOpen ? "secondary" : "ghost"}
                 size="sm"
                 onClick={() => {
-                  setBookmarksOpen(!bookmarksOpen);
-                  setTocOpen(false);
-                  setSettingsOpen(false);
+                  const nextOpen = !bookmarksOpen;
+                  closeAllPanels();
+                  setBookmarksOpen(nextOpen);
                 }}
                 className="text-xs sm:text-sm"
               >
@@ -699,9 +738,9 @@ export function ReaderWorkspace({ bookId: propBookId, clubId, params }: Readonly
                 variant={settingsOpen ? "secondary" : "ghost"}
                 size="icon"
                 onClick={() => {
-                  setSettingsOpen(!settingsOpen);
-                  setTocOpen(false);
-                  setBookmarksOpen(false);
+                  const nextOpen = !settingsOpen;
+                  closeAllPanels();
+                  setSettingsOpen(nextOpen);
                 }}
                 title="Настройки чтения"
                 className="w-8 h-8 sm:w-10 sm:h-10"
@@ -712,8 +751,9 @@ export function ReaderWorkspace({ bookId: propBookId, clubId, params }: Readonly
                 <div className="absolute right-0 top-full mt-2 w-[85vw] max-w-[320px] sm:w-80 bg-background text-foreground border rounded-md shadow-lg p-3 sm:p-4 z-50">
                   <ReaderControls
                     settings={settings}
-                    onSettingsChange={updateSettings}
-                    onResetSettings={resetSettings}
+                    onSettingsChange={updateSettingsWithAnchor}
+                    onPreviewSettings={previewSettings}
+                    onResetSettings={resetSettingsWithAnchor}
                   />
                 </div>
               )}
@@ -743,6 +783,7 @@ export function ReaderWorkspace({ bookId: propBookId, clubId, params }: Readonly
         className="flex-1 overflow-y-auto bg-background text-foreground"
       >
         <div
+          ref={contentAreaRef}
           className="mx-auto px-3 sm:px-4 md:px-8 py-8 sm:py-12 reader-text-align"
           style={{
             width: "var(--reader-content-width, 90%)"

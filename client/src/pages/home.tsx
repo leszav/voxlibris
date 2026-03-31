@@ -22,7 +22,7 @@ export default function Home() {
   return (
     <MainLayout>
       {/* Hero Section */}
-      <section className="relative w-full h-[600px] flex items-center justify-center overflow-hidden">
+      <section className="relative flex min-h-[31rem] w-full items-center justify-center overflow-hidden py-16 sm:min-h-[36rem] md:h-[600px] md:py-0">
         <div className="absolute inset-0 z-0">
           <picture>
             <source srcSet={heroImageAvif} type="image/avif" />
@@ -43,29 +43,29 @@ export default function Home() {
           <div className="absolute inset-0 bg-gradient-to-t from-background via-transparent to-transparent" />
         </div>
 
-        <div className="relative z-10 container px-6 md:px-12 text-center max-w-4xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-8 duration-1000">
-          <Badge variant="secondary" className="px-4 py-1.5 text-sm backdrop-blur-sm bg-white/10 text-white border-white/20">
+        <div className="relative z-10 container mx-auto max-w-4xl space-y-6 px-4 text-center animate-in fade-in slide-in-from-bottom-8 duration-1000 sm:px-6 md:space-y-8 md:px-12">
+          <Badge variant="secondary" className="mx-auto w-fit px-4 py-1.5 text-xs backdrop-blur-sm bg-white/10 text-white border-white/20 sm:text-sm">
             <Sparkles className="w-3.5 h-3.5 mr-2 text-accent" />
             Социальное чтение по-новому
           </Badge>
 
-          <h1 className="font-serif text-5xl md:text-7xl font-bold text-white leading-tight tracking-tight drop-shadow-lg">
+          <h1 className="font-serif text-4xl font-bold leading-tight tracking-tight text-white drop-shadow-lg sm:text-5xl md:text-7xl">
             Читаем Вместе,<br />
             <span className="text-accent italic">Вслух и Живьем.</span>
           </h1>
           
-          <p className="text-lg md:text-xl text-white/90 max-w-2xl mx-auto font-light leading-relaxed drop-shadow-md">
+          <p className="mx-auto max-w-2xl text-base font-light leading-relaxed text-white/90 drop-shadow-md sm:text-lg md:text-xl">
             Вступайте в эксклюзивные книжные клубы, слушайте талантливых чтецов в прямом эфире и делитесь впечатлениями с сообществом.
           </p>
           
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-4">
+          <div className="flex flex-col items-stretch justify-center gap-3 pt-2 sm:flex-row sm:items-center sm:gap-4 sm:pt-4">
             <Link href="/catalog">
-              <Button size="lg" className="rounded-full px-8 h-12 text-base font-medium shadow-xl hover:scale-105 transition-transform">
+              <Button size="lg" className="h-12 w-full rounded-full px-8 text-base font-medium shadow-xl transition-transform hover:scale-105 sm:w-auto">
                 Найти клуб
               </Button>
             </Link>
             <Link href="/library">
-              <Button size="lg" variant="outline" className="rounded-full px-8 h-12 text-base font-medium bg-white/5 hover:bg-white/10 backdrop-blur-sm hover:scale-105 transition-transform border-2">
+              <Button size="lg" variant="outline" className="h-12 w-full rounded-full border-2 bg-white/5 px-8 text-base font-medium backdrop-blur-sm transition-transform hover:scale-105 hover:bg-white/10 sm:w-auto">
                 В библиотеку
               </Button>
             </Link>
@@ -74,14 +74,14 @@ export default function Home() {
       </section>
 
       {/* Featured Clubs */}
-      <section className="py-20 container px-6 md:px-12">
-        <div className="flex items-end justify-between mb-10">
+      <section className="container px-4 py-12 sm:px-6 md:px-12 md:py-20">
+        <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between md:mb-10">
           <div>
             <h2 className="text-3xl font-serif font-bold text-primary mb-2">Популярные Клубы</h2>
             <p className="text-muted-foreground">Самые активные сообщества прямо сейчас.</p>
           </div>
           <Link href="/catalog">
-            <Button variant="ghost" className="group">
+            <Button variant="ghost" className="group w-full justify-between sm:w-auto sm:justify-center">
               Все клубы <ArrowRight className="ml-2 h-4 w-4 group-hover:translate-x-1 transition-transform" />
             </Button>
           </Link>
@@ -105,8 +105,8 @@ export default function Home() {
 
         {/* Список клубов */}
         {!isLoading && !error && (
-          <div className="border border-border/50 rounded-2xl p-6 bg-card/50 backdrop-blur-sm">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="rounded-2xl border border-border/50 bg-card/50 p-4 backdrop-blur-sm sm:p-6">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 sm:gap-6">
             {featuredClubs.map((club) => (
               <ClubCard
                 key={club.id}
@@ -145,12 +145,12 @@ export default function Home() {
       </section>
 
       {/* For Beginners Section */}
-      <section className="py-20 bg-secondary/30">
-        <div className="container px-6 md:px-12">
-          <div className="grid md:grid-cols-2 gap-12 items-center">
+      <section className="bg-secondary/30 py-12 md:py-20">
+        <div className="container px-4 sm:px-6 md:px-12">
+          <div className="grid items-center gap-8 md:grid-cols-2 md:gap-12">
             <div className="space-y-6">
               <h2 className="text-3xl md:text-4xl font-serif font-bold text-primary">Как работает VoxLibris</h2>
-              <p className="text-lg text-muted-foreground leading-relaxed">
+              <p className="text-base leading-relaxed text-muted-foreground sm:text-lg">
                 Откройте книги с новой стороны. Хотите ли вы читать вслух для аудитории или просто слушать — здесь найдется место для каждого.
               </p>
               
@@ -160,8 +160,8 @@ export default function Home() {
                   { id: "listen-live", title: "Слушайте в эфире", desc: "Подключайтесь к живым чтениям от лучших чтецов." },
                   { id: "discuss", title: "Обсуждайте", desc: "Общайтесь в чате и делитесь мыслями по ходу сюжета." }
                 ].map((item, i) => (
-                  <div key={item.id} className="flex gap-4">
-                    <div className="h-10 w-10 rounded-full bg-background border flex items-center justify-center shrink-0 font-serif font-bold text-accent shadow-sm">
+                  <div key={item.id} className="flex gap-3 sm:gap-4">
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border bg-background font-serif font-bold text-accent shadow-sm sm:h-10 sm:w-10">
                       {i + 1}
                     </div>
                     <div>
@@ -174,10 +174,10 @@ export default function Home() {
             </div>
             
             <div className="relative">
-              <div className="aspect-square rounded-2xl bg-card border shadow-2xl p-8 rotate-3 hover:rotate-0 transition-transform duration-500">
+              <div className="aspect-square rounded-2xl border bg-card p-5 shadow-2xl transition-transform duration-500 md:rotate-3 md:p-8 md:hover:rotate-0">
                 <div className="h-full w-full rounded-xl bg-gradient-to-br from-primary/5 via-accent/5 to-secondary/10 flex items-center justify-center border border-dashed border-primary/20">
-                   <div className="text-center space-y-6 p-6">
-                      <ReadingDreamIllustration className="w-32 h-32 mx-auto text-primary/60" />
+                   <div className="space-y-4 p-4 text-center sm:space-y-6 sm:p-6">
+                      <ReadingDreamIllustration className="mx-auto h-24 w-24 text-primary/60 sm:h-32 sm:w-32" />
                       <blockquote className="font-serif text-xl italic text-primary/80 leading-relaxed">
                         "Чтение — это окно в тысячи миров, дверь к свободе и крылья для души."
                         <footer className="block text-sm mt-2 text-primary/50">
