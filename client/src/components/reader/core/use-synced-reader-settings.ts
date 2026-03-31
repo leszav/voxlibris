@@ -3,8 +3,11 @@ import {
   applyReaderSettings,
   cleanupReaderSettings,
   DEFAULT_READER_SETTINGS,
+  MOBILE_DEFAULT_READER_SETTINGS,
+  isMobileReaderViewport,
   loadReaderSettingsFromStorage,
   normalizeReaderSettings,
+  saveReaderSettingsToStorage,
   type ReaderSettings,
   type ReaderSettingsScope,
 } from "@/lib/reader-settings";
@@ -33,31 +36,69 @@ interface UseSyncedReaderSettingsReturn {
   refetchReaderSettings: () => void;
 }
 
+function createLocalReaderSettingsState(settings: ReaderSettings): ReaderSettingsState {
+  return {
+    settings,
+    syncStatus: "synced",
+    lastSyncAt: Date.now(),
+  };
+}
+
 export function useSyncedReaderSettings(
   scope: ReaderSettingsScope,
   options: UseSyncedReaderSettingsOptions = {}
 ): UseSyncedReaderSettingsReturn {
   const { cleanupOnUnmount = false, enableServerSync = true } = options;
-  
-  // Initialize sync manager
-  const syncManagerRef = useRef(createReaderSettingsSyncManager(loadReaderSettingsFromStorage()));
-  const syncManager = syncManagerRef.current;
-  
-  // Local state for sync manager state
-  const [syncState, setSyncState] = useState<ReaderSettingsState>(syncManager.getState());
-  
-  // React Query for initial server load (only used once on mount)
-  const { refetch: _refetchFromServer, isFetching } = useReaderSettings();
-  const [isInitialLoading, setIsInitialLoading] = useState(enableServerSync);
-  
+  const [isMobileMode, setIsMobileMode] = useState(() => isMobileReaderViewport());
+  const syncManagerRef = useRef<ReturnType<typeof createReaderSettingsSyncManager> | null>(null);
+
+  const getSyncManager = useCallback(() => {
+    if (!syncManagerRef.current) {
+      syncManagerRef.current = createReaderSettingsSyncManager(loadReaderSettingsFromStorage("desktop"));
+    }
+
+    return syncManagerRef.current;
+  }, []);
+
+  const [syncState, setSyncState] = useState<ReaderSettingsState>(() => {
+    const initialSettings = loadReaderSettingsFromStorage(isMobileReaderViewport() ? "mobile" : "desktop");
+    return createLocalReaderSettingsState(initialSettings);
+  });
+
+  const serverSyncEnabled = enableServerSync && !isMobileMode;
+  const { refetch: _refetchFromServer, isFetching } = useReaderSettings(serverSyncEnabled);
+  const [isInitialLoading, setIsInitialLoading] = useState(serverSyncEnabled);
+
+  useEffect(() => {
+    const updateViewportMode = () => {
+      setIsMobileMode(isMobileReaderViewport());
+    };
+
+    window.addEventListener("resize", updateViewportMode);
+    window.addEventListener("orientationchange", updateViewportMode);
+
+    return () => {
+      window.removeEventListener("resize", updateViewportMode);
+      window.removeEventListener("orientationchange", updateViewportMode);
+    };
+  }, []);
+
   // Subscribe to sync manager state changes
   useEffect(() => {
+    if (isMobileMode) {
+      setSyncState(createLocalReaderSettingsState(loadReaderSettingsFromStorage("mobile")));
+      return;
+    }
+
+    const syncManager = getSyncManager();
+    setSyncState(syncManager.getState());
+
     const unsubscribe = syncManager.subscribe((newState) => {
       setSyncState(newState);
     });
-    
+
     return unsubscribe;
-  }, [syncManager]);
+  }, [getSyncManager, isMobileMode]);
   
   // Apply settings to DOM when they change
   useEffect(() => {
@@ -80,30 +121,43 @@ export function useSyncedReaderSettings(
 
   // Load initial settings from server (only once on mount)
   useEffect(() => {
-    if (!enableServerSync) {
+    if (!serverSyncEnabled) {
       setIsInitialLoading(false);
       return;
     }
-    
+
+    const syncManager = getSyncManager();
+    let cancelled = false;
+
     const loadInitialSettings = async () => {
       try {
         const serverSettings = await syncManager.loadFromServer();
-        applyReaderSettings(serverSettings, scope);
+        if (!cancelled) {
+          applyReaderSettings(serverSettings, scope);
+        }
       } catch (error) {
         console.warn('Failed to load initial settings from server:', error);
         // Continue with local settings
       } finally {
-        setIsInitialLoading(false);
+        if (!cancelled) {
+          setIsInitialLoading(false);
+        }
       }
     };
-    
+
     loadInitialSettings();
-  }, [syncManager, scope, enableServerSync]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [getSyncManager, scope, serverSyncEnabled]);
   
   // Handle visibility change to sync settings when user returns
   useEffect(() => {
-    if (!enableServerSync) return;
-    
+    if (!serverSyncEnabled) return;
+
+    const syncManager = getSyncManager();
+
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
         // Load fresh settings from server when user returns
@@ -124,7 +178,7 @@ export function useSyncedReaderSettings(
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('focus', handleFocus);
     };
-  }, [syncManager, scope, enableServerSync]);
+  }, [getSyncManager, scope, serverSyncEnabled]);
   
   // Cleanup on unmount
   useEffect(() => {
@@ -139,42 +193,50 @@ export function useSyncedReaderSettings(
   
   // Optimistic update function
   const updateSettings = useCallback((nextSettings: ReaderSettings) => {
-    if (!enableServerSync) {
-      // Local-only mode - just apply and persist locally
+    if (isMobileMode || !enableServerSync) {
       const normalizedSettings = normalizeReaderSettings(nextSettings);
+      saveReaderSettingsToStorage(normalizedSettings, isMobileMode ? "mobile" : "desktop");
       applyReaderSettings(normalizedSettings, scope);
       setSyncState(prev => ({
         ...prev,
         settings: normalizedSettings,
+        syncStatus: 'synced',
+        lastSyncAt: Date.now(),
+        errorMessage: undefined,
       }));
       return;
     }
-    
+
+    const syncManager = getSyncManager();
+
     // Offline-first update with server sync
     syncManager.updateSettings(nextSettings, (settings) => {
       applyReaderSettings(settings, scope);
     });
-  }, [syncManager, scope, enableServerSync]);
+  }, [enableServerSync, getSyncManager, isMobileMode, scope]);
   
   const resetSettings = useCallback(() => {
-    updateSettings(DEFAULT_READER_SETTINGS);
-  }, [updateSettings]);
+    updateSettings(isMobileMode ? MOBILE_DEFAULT_READER_SETTINGS : DEFAULT_READER_SETTINGS);
+  }, [isMobileMode, updateSettings]);
   
   const forcSync = useCallback(async () => {
-    if (!enableServerSync) return;
+    if (!serverSyncEnabled) return;
+    const syncManager = getSyncManager();
     await syncManager.forcSync();
-  }, [syncManager, enableServerSync]);
+  }, [getSyncManager, serverSyncEnabled]);
   
   const refetchReaderSettings = useCallback(() => {
-    if (!enableServerSync) return;
-    
+    if (!serverSyncEnabled) return;
+
+    const syncManager = getSyncManager();
+
     // Force reload from server
     syncManager.loadFromServer().then(settings => {
       applyReaderSettings(settings, scope);
     }).catch(error => {
       console.error('Failed to refetch settings:', error);
     });
-  }, [syncManager, scope, enableServerSync]);
+  }, [getSyncManager, scope, serverSyncEnabled]);
   
   return {
     settings: syncState.settings,

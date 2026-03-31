@@ -1,6 +1,6 @@
 /* global self, caches, fetch, Response, URL */
 
-const SHELL_CACHE = "voxlibris-shell-v1";
+const SHELL_CACHE = "voxlibris-shell-v2";
 const ASSET_CACHE = "voxlibris-assets-v1";
 const SHELL_URLS = [
   "/",

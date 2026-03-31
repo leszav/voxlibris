@@ -167,13 +167,14 @@ export function useUpdateProgress(bookId: string) {
   });
 }
 
-export function useReaderSettings() {
+export function useReaderSettings(enabled: boolean = true) {
   return useQuery({
     queryKey: ["reader-settings"],
     queryFn: async () => {
       const response = await apiRequest<ReaderSettingsResponse>("/api/v1/books/reader-settings");
       return normalizeReaderSettings(response.settings);
     },
+    enabled,
     staleTime: 5 * 60 * 1000, // 5 minutes - settings don't change often
     gcTime: 10 * 60 * 1000, // 10 minutes garbage collection
     retry: 3,

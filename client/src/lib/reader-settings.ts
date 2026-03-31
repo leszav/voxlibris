@@ -8,6 +8,7 @@ export interface ReaderSettings {
 }
 
 export type ReaderSettingsScope = "personal" | "club";
+export type ReaderSettingsDeviceMode = "desktop" | "mobile";
 
 export const MOBILE_READER_BREAKPOINT = 768;
 
@@ -21,10 +22,14 @@ export const DEFAULT_READER_SETTINGS: ReaderSettings = {
 };
 
 export const READER_SETTINGS_STORAGE_KEY = "readerSettings";
+export const MOBILE_READER_SETTINGS_STORAGE_KEY = "readerSettingsMobile";
 
-const MOBILE_EFFECTIVE_FONT_SIZE = 12;
-const MOBILE_EFFECTIVE_LINE_HEIGHT = 1.2;
-const MOBILE_EFFECTIVE_CONTENT_WIDTH = 95;
+export const MOBILE_DEFAULT_READER_SETTINGS: ReaderSettings = {
+  ...DEFAULT_READER_SETTINGS,
+  fontSize: 12,
+  lineHeight: 1.2,
+  contentWidth: 95,
+};
 
 const ALLOWED_FONT_FAMILIES = new Set([
   "Georgia",
@@ -69,22 +74,43 @@ export function normalizeReaderSettings(input: unknown): ReaderSettings {
   };
 }
 
-export function loadReaderSettingsFromStorage(): ReaderSettings {
+function getStorageKey(deviceMode: ReaderSettingsDeviceMode): string {
+  return deviceMode === "mobile" ? MOBILE_READER_SETTINGS_STORAGE_KEY : READER_SETTINGS_STORAGE_KEY;
+}
+
+function getDefaultSettings(deviceMode: ReaderSettingsDeviceMode): ReaderSettings {
+  return deviceMode === "mobile" ? MOBILE_DEFAULT_READER_SETTINGS : DEFAULT_READER_SETTINGS;
+}
+
+export function loadReaderSettingsFromStorage(deviceMode: ReaderSettingsDeviceMode = "desktop"): ReaderSettings {
   try {
-    const saved = globalThis.localStorage?.getItem(READER_SETTINGS_STORAGE_KEY);
+    const saved = globalThis.localStorage?.getItem(getStorageKey(deviceMode));
     if (!saved) {
-      return DEFAULT_READER_SETTINGS;
+      return getDefaultSettings(deviceMode);
     }
 
-    return normalizeReaderSettings(JSON.parse(saved));
+    const fallbackSettings = getDefaultSettings(deviceMode);
+    const parsed = JSON.parse(saved);
+
+    if (!parsed || typeof parsed !== "object") {
+      return fallbackSettings;
+    }
+
+    return normalizeReaderSettings({
+      ...fallbackSettings,
+      ...parsed,
+    });
   } catch {
-    return DEFAULT_READER_SETTINGS;
+    return getDefaultSettings(deviceMode);
   }
 }
 
-export function saveReaderSettingsToStorage(settings: ReaderSettings): void {
+export function saveReaderSettingsToStorage(
+  settings: ReaderSettings,
+  deviceMode: ReaderSettingsDeviceMode = "desktop",
+): void {
   try {
-    globalThis.localStorage?.setItem(READER_SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+    globalThis.localStorage?.setItem(getStorageKey(deviceMode), JSON.stringify(normalizeReaderSettings(settings)));
   } catch {
     // ignore localStorage errors and keep in-memory state
   }
@@ -104,18 +130,12 @@ function getViewportWidth(viewportWidth?: number): number {
 
 export function getEffectiveReaderSettings(settings: ReaderSettings, viewportWidth?: number): ReaderSettings {
   const normalizedSettings = normalizeReaderSettings(settings);
-  const resolvedViewportWidth = getViewportWidth(viewportWidth);
+  getViewportWidth(viewportWidth);
+  return normalizedSettings;
+}
 
-  if (resolvedViewportWidth >= MOBILE_READER_BREAKPOINT) {
-    return normalizedSettings;
-  }
-
-  return {
-    ...normalizedSettings,
-    fontSize: MOBILE_EFFECTIVE_FONT_SIZE,
-    lineHeight: MOBILE_EFFECTIVE_LINE_HEIGHT,
-    contentWidth: MOBILE_EFFECTIVE_CONTENT_WIDTH,
-  };
+export function isMobileReaderViewport(viewportWidth?: number): boolean {
+  return getViewportWidth(viewportWidth) < MOBILE_READER_BREAKPOINT;
 }
 
 export function applyReaderSettings(settings: ReaderSettings, scope: ReaderSettingsScope): void {
