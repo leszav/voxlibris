@@ -157,7 +157,6 @@ scripts/ollama-*.sh
 # Code quality configs (project-specific)
 .sonarignore
 biome.json
-eslint.config.js
 sonar-project.properties
 
 # Git hooks (local development only)
