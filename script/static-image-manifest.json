@@ -80,12 +80,21 @@
       }
     },
     "client/public/apple-touch-icon.png": {
-      "sourceSha256": "b9e5e19157501f07d00f16ac45044806d70d445e96d2fd392d4df3d716c74c63",
+      "sourceSha256": "872b902adf2f4b8a0b7e560375a38eea4715372d36ebb552319d2a533168d2ee",
+      "variants": {}
+    },
+    "client/public/favicon-96x96.png": {
+      "sourceSha256": "5e460fcd297c2813b40d67b39d2d877c91ef3c41987197f03b3c346500a5cb84",
       "variants": {}
     },
     "client/public/favicon.png": {
       "sourceSha256": "50a498d598d7a55a814608e669f49820367d6bf805156c8cd7c30bcbbd031f65",
-      "variants": {}
+      "variants": {
+        "webp": {
+          "path": "client/public/favicon.webp",
+          "sha256": "c7c9a591b9f9aba1f0c627b82aa95030488922bd49c7b2cfc92e793ebc09e858"
+        }
+      }
     },
     "client/public/images/ymetrika_logo.png": {
       "sourceSha256": "9f52dfc421493675aaa8ede4b1e90ea0dcb566cbc43e24a804c16ca93652bad6",
@@ -115,11 +124,34 @@
     },
     "client/public/pwa-192x192.png": {
       "sourceSha256": "b8bc64f14e0b0c987eec3dc545fa9ca006d3ac13a849fce552912cd57a292af3",
-      "variants": {}
+      "variants": {
+        "webp": {
+          "path": "client/public/pwa-192x192.webp",
+          "sha256": "555c33f0663a7e2a2afca9c23b0ed5acaa33e78ac2b75f629c0d09871ee65f85"
+        }
+      }
     },
     "client/public/pwa-512x512.png": {
       "sourceSha256": "2ead4738984170e69f065728dc6c3052d9a3c372dc5c69a5e1a2b1cb9fcf5628",
+      "variants": {
+        "webp": {
+          "path": "client/public/pwa-512x512.webp",
+          "sha256": "c7c9a591b9f9aba1f0c627b82aa95030488922bd49c7b2cfc92e793ebc09e858"
+        }
+      }
+    },
+    "client/public/web-app-manifest-192x192.png": {
+      "sourceSha256": "e03cc4a5cfa45307e069f399c6a44592da7a7f3533b784daad25237b87018df2",
       "variants": {}
+    },
+    "client/public/web-app-manifest-512x512.png": {
+      "sourceSha256": "29b7b0fb631cb7cf483afb3611f130d2a3375b71b80afb0a0a8562d313d982fc",
+      "variants": {
+        "webp": {
+          "path": "client/public/web-app-manifest-512x512.webp",
+          "sha256": "c7c9a591b9f9aba1f0c627b82aa95030488922bd49c7b2cfc92e793ebc09e858"
+        }
+      }
     }
   }
 }
