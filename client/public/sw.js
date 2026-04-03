@@ -1,19 +1,19 @@
-/* global self, caches, fetch, Response, URL */
+/* global globalThis, caches, fetch, Response, URL */
 
 const SHELL_CACHE = "voxlibris-shell-v2";
 const ASSET_CACHE = "voxlibris-assets-v1";
 const SHELL_URLS = [
   "/",
   "/manifest.webmanifest",
-  "/favicon.svg",
-  "/favicon.png",
+  "/favicon.ico",
+  "/favicon-96x96.png",
   "/apple-touch-icon.png",
-  "/pwa-192x192.png",
-  "/pwa-512x512.png",
+  "/web-app-manifest-192x192.png",
+  "/web-app-manifest-512x512.png",
 ];
 
 function isSameOrigin(url) {
-  return url.origin === self.location.origin;
+  return url.origin === globalThis.location.origin;
 }
 
 function isStaticAssetRequest(request, url) {
@@ -25,13 +25,12 @@ function isStaticAssetRequest(request, url) {
 }
 
 async function updateCache(cacheName, request, response) {
-  if (!response || !response.ok) {
-    return response;
+  if (!response?.ok) {
+    return;
   }
 
   const cache = await caches.open(cacheName);
   await cache.put(request, response.clone());
-  return response;
 }
 
 async function handleNavigation(request) {
@@ -51,7 +50,10 @@ async function handleStaticAsset(request) {
   const cachedResponse = await cache.match(request);
 
   const networkResponsePromise = fetch(request)
-    .then((response) => updateCache(ASSET_CACHE, request, response))
+    .then(async (response) => {
+      await updateCache(ASSET_CACHE, request, response);
+      return response;
+    })
     .catch(() => null);
 
   if (cachedResponse) {
@@ -62,14 +64,14 @@ async function handleStaticAsset(request) {
   return networkResponse || Response.error();
 }
 
-self.addEventListener("install", (event) => {
+globalThis.addEventListener("install", (event) => {
   event.waitUntil(
     caches.open(SHELL_CACHE).then((cache) => cache.addAll(SHELL_URLS)),
   );
-  self.skipWaiting();
+  globalThis.skipWaiting();
 });
 
-self.addEventListener("activate", (event) => {
+globalThis.addEventListener("activate", (event) => {
   event.waitUntil((async () => {
     const cacheNames = await caches.keys();
     await Promise.all(
@@ -77,11 +79,11 @@ self.addEventListener("activate", (event) => {
         .filter((cacheName) => ![SHELL_CACHE, ASSET_CACHE].includes(cacheName))
         .map((cacheName) => caches.delete(cacheName)),
     );
-    await self.clients.claim();
+    await globalThis.clients.claim();
   })());
 });
 
-self.addEventListener("fetch", (event) => {
+globalThis.addEventListener("fetch", (event) => {
   const { request } = event;
   if (request.method !== "GET") {
     return;
