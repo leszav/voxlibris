@@ -1,6 +1,11 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { apiRequest } from "@/lib/queryClient";
+import {
+  getFreshestReaderProgress,
+  loadReaderProgressFromStorage,
+  saveReaderProgressToStorage,
+} from "@/lib/reader-local-progress";
 import type { ClubBookmark } from "@shared/schema";
 
 interface ClubBookContentResponse {
@@ -61,6 +66,11 @@ export function useClubReadingProgress(clubId: string, clubBookId: string) {
   return useQuery({
     queryKey: ["club", clubId, "reading-progress", clubBookId],
     queryFn: async () => {
+      const localProgress = loadReaderProgressFromStorage({
+        type: "club",
+        clubId,
+        bookId: clubBookId,
+      });
       const response = await apiRequest<ClubReadingProgressResponse>(`/api/clubs/${clubId}/progress`);
 
       if (response.success === false) {
@@ -68,7 +78,7 @@ export function useClubReadingProgress(clubId: string, clubBookId: string) {
       }
 
       return {
-        userProgress: response.userProgress,
+        userProgress: getFreshestReaderProgress(response.userProgress, localProgress),
         clubProgress: response.clubProgress,
       };
     },
@@ -102,6 +112,22 @@ export function useUpdateClubProgress(clubId: string) {
         queryKey: progressQueryPrefix,
       });
 
+      previousQueries.forEach(([queryKey]) => {
+        const clubBookId = typeof queryKey[3] === "string" ? queryKey[3] : "";
+        if (!clubBookId) {
+          return;
+        }
+
+        saveReaderProgressToStorage(
+          {
+            type: "club",
+            clubId,
+            bookId: clubBookId,
+          },
+          data,
+        );
+      });
+
       queryClient.setQueriesData<ClubReadingProgressResponse>(
         { queryKey: progressQueryPrefix },
         (current) => ({
@@ -122,6 +148,26 @@ export function useUpdateClubProgress(clubId: string) {
       });
     },
     onSuccess: (_response, data) => {
+      const updatedQueries = queryClient.getQueriesData<ClubReadingProgressResponse>({
+        queryKey: progressQueryPrefix,
+      });
+
+      updatedQueries.forEach(([queryKey]) => {
+        const clubBookId = typeof queryKey[3] === "string" ? queryKey[3] : "";
+        if (!clubBookId) {
+          return;
+        }
+
+        saveReaderProgressToStorage(
+          {
+            type: "club",
+            clubId,
+            bookId: clubBookId,
+          },
+          data,
+        );
+      });
+
       queryClient.setQueriesData<ClubReadingProgressResponse>(
         { queryKey: progressQueryPrefix },
         (current) => ({

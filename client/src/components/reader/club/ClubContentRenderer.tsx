@@ -30,21 +30,6 @@ export function ClubContentRenderer({ content }: Readonly<ClubContentRendererPro
         .club-reader-content {
           text-align: var(--club-reader-text-align, justify);
         }
-        .club-reader-content > p,
-        .club-reader-content > h1,
-        .club-reader-content > h2,
-        .club-reader-content > h3,
-        .club-reader-content > h4,
-        .club-reader-content > h5,
-        .club-reader-content > h6,
-        .club-reader-content > blockquote,
-        .club-reader-content > pre,
-        .club-reader-content > ul,
-        .club-reader-content > ol,
-        .club-reader-content > hr {
-          content-visibility: auto;
-          contain-intrinsic-size: 0 100px;
-        }
       `}</style>
       <div
         className="prose prose-lg max-w-none dark:prose-invert club-reader-content"

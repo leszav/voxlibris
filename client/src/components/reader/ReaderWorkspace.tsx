@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo, type RefObject } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo, type ComponentProps, type RefObject } from "react";
 import { useParams } from "wouter";
 import { useAnalytics } from "../../hooks/use-analytics";
 import { getMobileAnalyticsContext } from "@/lib/mobile-analytics";
@@ -31,6 +31,7 @@ import { useSyncedReaderSettings } from "./core/use-synced-reader-settings";
 import { useReaderSyncState } from "./core/use-reader-sync-state";
 import { ReaderProgressIndicators } from "./ReaderProgressIndicators";
 import { consumePendingReaderBookmarkNavigation } from "@/lib/reader-bookmark-navigation";
+import { saveReaderProgressToStorage } from "@/lib/reader-local-progress";
 import { toast } from "@/hooks/use-toast";
 import { applyReaderSettings, type ReaderSettings } from "@/lib/reader-settings";
 
@@ -70,7 +71,7 @@ function getInitialChapter(
 }
 
 function createBookmarkTitleFromSelection(selectedText: string): string {
-  const normalized = selectedText.trim().replace(/\s+/g, " ");
+  const normalized = selectedText.trim().replaceAll(/\s+/g, " ");
   if (!normalized) {
     return "Без названия";
   }
@@ -226,6 +227,14 @@ function usePersistProgressOnUnmount({
         return;
       }
 
+      saveReaderProgressToStorage(
+        {
+          type: "personal",
+          bookId,
+        },
+        payload,
+      );
+
       const token = getAccessToken();
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
@@ -246,6 +255,544 @@ function usePersistProgressOnUnmount({
       });
     };
   }, [scrollContainerRef, bookData, currentChapter, clubId, bookId]);
+}
+
+function usePendingBookmarkNavigation({
+  bookId,
+  currentChapter,
+  setPendingScrollRestore,
+  setCurrentChapter,
+}: {
+  bookId?: string;
+  currentChapter: number | null;
+  setPendingScrollRestore: (restore: PendingScrollRestore | null) => void;
+  setCurrentChapter: (chapter: number) => void;
+}) {
+  useEffect(() => {
+    if (!bookId || currentChapter === null) {
+      return;
+    }
+
+    const pendingBookmark = consumePendingReaderBookmarkNavigation(bookId);
+    if (!pendingBookmark) {
+      return;
+    }
+
+    const position = parseReaderPosition(pendingBookmark.position);
+    if (!position?.chapter) {
+      return;
+    }
+
+    setPendingScrollRestore({
+      chapter: position.chapter,
+      positionRaw: pendingBookmark.position,
+    });
+    setCurrentChapter(position.chapter);
+  }, [bookId, currentChapter, setCurrentChapter, setPendingScrollRestore]);
+}
+
+function usePendingScrollRestore({
+  pendingScrollRestore,
+  contentLoading,
+  currentChapter,
+  scrollElementRef,
+  manualRestoreCleanupRef,
+  setPendingScrollRestore,
+}: {
+  pendingScrollRestore: PendingScrollRestore | null;
+  contentLoading: boolean;
+  currentChapter: number | null;
+  scrollElementRef: RefObject<HTMLElement | null>;
+  manualRestoreCleanupRef: RefObject<(() => void) | null>;
+  setPendingScrollRestore: (restore: PendingScrollRestore | null) => void;
+}) {
+  useEffect(() => {
+    return () => {
+      manualRestoreCleanupRef.current?.();
+    };
+  }, [manualRestoreCleanupRef]);
+
+  useEffect(() => {
+    if (!pendingScrollRestore || contentLoading || currentChapter !== pendingScrollRestore.chapter) {
+      return;
+    }
+
+    manualRestoreCleanupRef.current?.();
+    manualRestoreCleanupRef.current = restoreReaderScrollPosition({
+      scrollContainerRef: scrollElementRef,
+      currentChapter,
+      currentPositionRaw: pendingScrollRestore.positionRaw,
+      delayMs: 120,
+      retryAttempts: 5,
+      retryDelayMs: 120,
+    });
+    setPendingScrollRestore(null);
+  }, [
+    contentLoading,
+    currentChapter,
+    manualRestoreCleanupRef,
+    pendingScrollRestore,
+    scrollElementRef,
+    setPendingScrollRestore,
+  ]);
+}
+
+function useReaderChapterNavigation({
+  currentChapter,
+  chaptersLength,
+  scrollContainerRef,
+  saveProgressNow,
+  setCurrentChapter,
+}: {
+  currentChapter: number | null;
+  chaptersLength?: number;
+  scrollContainerRef: RefObject<HTMLDivElement | null>;
+  saveProgressNow: (options?: { chapter?: number; progressOverride?: number }) => void;
+  setCurrentChapter: (chapter: number) => void;
+}) {
+  const persistCurrentChapterProgress = useCallback((chapterToSave: number) => {
+    saveProgressNow({ chapter: chapterToSave });
+  }, [saveProgressNow]);
+
+  const changeChapter = useCallback((chapter: number) => {
+    if (currentChapter === null) {
+      setCurrentChapter(chapter);
+      return;
+    }
+
+    if (chapter === currentChapter) {
+      return;
+    }
+
+    persistCurrentChapterProgress(currentChapter);
+    setCurrentChapter(chapter);
+
+    setTimeout(() => {
+      if (scrollContainerRef.current) {
+        scrollContainerRef.current.scrollTop = 0;
+      }
+    }, 100);
+  }, [currentChapter, persistCurrentChapterProgress, scrollContainerRef, setCurrentChapter]);
+
+  useKeyboardShortcuts([
+    {
+      key: readerShortcuts.prevChapter.key,
+      action: () => {
+        if (currentChapter !== null && currentChapter > 1) {
+          changeChapter(currentChapter - 1);
+        }
+      },
+      description: readerShortcuts.prevChapter.description,
+      requireAtTop: true,
+      scrollContainerRef,
+    },
+    {
+      key: readerShortcuts.nextChapter.key,
+      action: () => {
+        if (currentChapter !== null && chaptersLength && currentChapter < chaptersLength) {
+          changeChapter(currentChapter + 1);
+        }
+      },
+      description: readerShortcuts.nextChapter.description,
+      requireAtBottom: true,
+      scrollContainerRef,
+    },
+  ]);
+
+  return {
+    changeChapter,
+  };
+}
+
+function useReaderSavedPositionActions({
+  scrollContainerRef,
+  currentChapter,
+  totalChapters,
+  selectionState,
+  clearSelection,
+  addBookmark,
+  suggestedProgress,
+  dismissSuggestion,
+  setPendingScrollRestore,
+  setCurrentChapter,
+}: {
+  scrollContainerRef: RefObject<HTMLDivElement | null>;
+  currentChapter: number | null;
+  totalChapters: number;
+  selectionState: { text: string } | null;
+  clearSelection: () => void;
+  addBookmark: (data: { chapterNumber?: number; position: string; title?: string }, options?: { onSuccess?: () => void }) => void;
+  suggestedProgress: { currentChapter: number; currentPosition: string } | null;
+  dismissSuggestion: () => void;
+  setPendingScrollRestore: (restore: PendingScrollRestore | null) => void;
+  setCurrentChapter: (chapter: number) => void;
+}) {
+  const createCurrentBookmarkDraft = useCallback(() => {
+    const container = scrollContainerRef.current;
+    if (!container || currentChapter === null) {
+      return null;
+    }
+
+    const payload = createReaderProgressPayload({
+      currentChapter,
+      totalChapters,
+      scrollTop: container.scrollTop,
+      scrollHeight: container.scrollHeight,
+      clientHeight: container.clientHeight,
+    });
+
+    return {
+      chapterNumber: currentChapter,
+      position: payload.currentPosition,
+    };
+  }, [currentChapter, scrollContainerRef, totalChapters]);
+
+  const navigateToSavedPosition = useCallback((chapter: number, positionRaw: string) => {
+    setPendingScrollRestore({
+      chapter,
+      positionRaw,
+    });
+    setCurrentChapter(chapter);
+  }, [setCurrentChapter, setPendingScrollRestore]);
+
+  const navigateToBookmark = useCallback((positionRaw: string) => {
+    const position = parseReaderPosition(positionRaw);
+    if (!position?.chapter) {
+      return;
+    }
+
+    navigateToSavedPosition(position.chapter, positionRaw);
+  }, [navigateToSavedPosition]);
+
+  const addBookmarkFromSelection = useCallback(() => {
+    if (!selectionState) {
+      return;
+    }
+
+    const currentBookmarkDraft = createCurrentBookmarkDraft();
+    if (!currentBookmarkDraft) {
+      clearSelection();
+      return;
+    }
+
+    const bookmarkTitle = createBookmarkTitleFromSelection(selectionState.text);
+
+    addBookmark(
+      {
+        chapterNumber: currentBookmarkDraft.chapterNumber,
+        position: currentBookmarkDraft.position,
+        title: bookmarkTitle,
+      },
+      {
+        onSuccess: () => {
+          toast({
+            title: "Закладка сохранена",
+            description: "Выделенный фрагмент добавлен в закладки.",
+          });
+          clearSelection();
+        },
+      }
+    );
+  }, [addBookmark, clearSelection, createCurrentBookmarkDraft, selectionState]);
+
+  const openLatestPosition = useCallback(() => {
+    if (!suggestedProgress) {
+      return;
+    }
+
+    dismissSuggestion();
+    navigateToSavedPosition(suggestedProgress.currentChapter, suggestedProgress.currentPosition);
+  }, [dismissSuggestion, navigateToSavedPosition, suggestedProgress]);
+
+  return {
+    createCurrentBookmarkDraft,
+    navigateToBookmark,
+    addBookmarkFromSelection,
+    openLatestPosition,
+  };
+}
+
+function ReaderWorkspaceView({
+  selectionState,
+  addBookmarkFromSelection,
+  clearSelection,
+  suggestedProgress,
+  currentChapter,
+  openLatestPosition,
+  dismissSuggestion,
+  tocOpen,
+  closeAllPanels,
+  setTocOpen,
+  changeChapter,
+  bookData,
+  bookmarksOpen,
+  setBookmarksOpen,
+  bookmarksLoading,
+  bookId,
+  bookmarks,
+  isAddingBookmark,
+  createCurrentBookmarkDraft,
+  addBookmark,
+  deleteBookmark,
+  navigateToBookmark,
+  settingsOpen,
+  setSettingsOpen,
+  settings,
+  updateSettingsWithAnchor,
+  previewSettings,
+  resetSettingsWithAnchor,
+  isFullscreen,
+  toggleFullscreen,
+  scrollContainerRef,
+  scheduleProgressSave,
+  contentAreaRef,
+  mainContent,
+  isSyncing,
+  lastSyncTime,
+  syncError,
+  progress,
+}: Readonly<{
+  selectionState: { text: string; top: number; left: number } | null;
+  addBookmarkFromSelection: () => void;
+  clearSelection: () => void;
+  suggestedProgress: { currentChapter: number; currentPosition: string } | null;
+  currentChapter: number;
+  openLatestPosition: () => void;
+  dismissSuggestion: () => void;
+  tocOpen: boolean;
+  closeAllPanels: () => void;
+  setTocOpen: (open: boolean) => void;
+  changeChapter: (chapter: number) => void;
+  bookData: ProcessedBookData;
+  bookmarksOpen: boolean;
+  setBookmarksOpen: (open: boolean) => void;
+  bookmarksLoading: boolean;
+  bookId: string;
+  bookmarks: ComponentProps<typeof BookmarksPanel>["bookmarks"];
+  isAddingBookmark: boolean;
+  createCurrentBookmarkDraft: () => { chapterNumber: number; position: string } | null;
+  addBookmark: (data: { chapterNumber?: number; position: string; title?: string }) => void;
+  deleteBookmark: (bookmarkId: string) => void;
+  navigateToBookmark: (positionRaw: string) => void;
+  settingsOpen: boolean;
+  setSettingsOpen: (open: boolean) => void;
+  settings: ReaderSettings;
+  updateSettingsWithAnchor: (nextSettings: ReaderSettings) => void;
+  previewSettings: (nextSettings: ReaderSettings) => void;
+  resetSettingsWithAnchor: () => void;
+  isFullscreen: boolean;
+  toggleFullscreen: () => void;
+  scrollContainerRef: RefObject<HTMLDivElement | null>;
+  scheduleProgressSave: () => void;
+  contentAreaRef: RefObject<HTMLDivElement | null>;
+  mainContent: React.ReactNode;
+  isSyncing: boolean;
+  lastSyncTime: number | null;
+  syncError: string | null;
+  progress: { currentChapter: number; currentPosition: string; progress: number } | null;
+}>) {
+  return (
+    <div className="flex flex-col h-screen bg-background text-foreground overflow-hidden">
+      {selectionState && (
+        <SelectionBookmarkPrompt
+          text={selectionState.text}
+          top={selectionState.top}
+          left={selectionState.left}
+          onConfirm={addBookmarkFromSelection}
+          onDismiss={clearSelection}
+        />
+      )}
+      {suggestedProgress && (
+        <LatestPositionPrompt
+          currentChapter={currentChapter}
+          remoteChapter={suggestedProgress.currentChapter}
+          onOpenLatest={openLatestPosition}
+          onDismiss={dismissSuggestion}
+        />
+      )}
+
+      <header className="border-b bg-background relative z-50">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-4 p-2 sm:p-4">
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => (globalThis.location.href = '/library')}
+              className="text-xs sm:text-sm"
+            >
+              <ArrowLeft className="w-4 h-4 mr-1 sm:mr-2" />
+              <span className="hidden xs:inline">Библиотека</span>
+            </Button>
+
+            <div className="relative">
+              <Button
+                variant={tocOpen ? "secondary" : "ghost"}
+                size="sm"
+                onClick={() => {
+                  const nextOpen = !tocOpen;
+                  closeAllPanels();
+                  setTocOpen(nextOpen);
+                }}
+                className="text-xs sm:text-sm"
+              >
+                <List className="w-4 h-4 mr-1 sm:mr-2" />
+                <span className="hidden xs:inline">Оглавление</span>
+              </Button>
+              {tocOpen && (
+                <div className="absolute left-0 top-full mt-2 w-[85vw] max-w-[320px] sm:w-80 max-h-96 overflow-y-auto bg-background text-foreground border rounded-md shadow-lg p-3 sm:p-4 z-50">
+                  <h3 className="font-semibold text-lg mb-4">Оглавление</h3>
+                  <div className="space-y-2">
+                    {bookData.isPersonalBook && bookData.chapters ? (
+                      bookData.chapters.map((chapter: Chapter) => (
+                        <Button
+                          key={chapter.chapterNumber}
+                          variant={currentChapter === chapter.chapterNumber ? "secondary" : "ghost"}
+                          className="w-full justify-start"
+                          onClick={() => {
+                            changeChapter(chapter.chapterNumber);
+                            setTocOpen(false);
+                          }}
+                        >
+                          {chapter.title || `Глава ${chapter.chapterNumber}`}
+                        </Button>
+                      ))
+                    ) : (
+                      <Button
+                        variant={currentChapter === 1 ? "secondary" : "ghost"}
+                        className="w-full justify-start"
+                        onClick={() => {
+                          changeChapter(1);
+                          setTocOpen(false);
+                        }}
+                      >
+                        Глава 1
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="relative">
+              <Button
+                variant={bookmarksOpen ? "secondary" : "ghost"}
+                size="sm"
+                onClick={() => {
+                  const nextOpen = !bookmarksOpen;
+                  closeAllPanels();
+                  setBookmarksOpen(nextOpen);
+                }}
+                className="text-xs sm:text-sm"
+              >
+                <Bookmark className="w-4 h-4 mr-1 sm:mr-2" />
+                <span className="hidden xs:inline">Закладки</span>
+              </Button>
+              {bookmarksOpen && (
+                <div className="absolute left-0 top-full mt-2 w-[85vw] max-w-[360px] sm:w-96 max-h-96 overflow-y-auto bg-background text-foreground border rounded-md shadow-lg p-3 sm:p-4 z-50">
+                  {bookmarksLoading ? (
+                    <p className="text-sm text-muted-foreground">Загрузка закладок...</p>
+                  ) : (
+                    <BookmarksPanel
+                      bookId={bookId}
+                      bookmarks={bookmarks}
+                      isCreatingBookmark={isAddingBookmark}
+                      getCurrentBookmarkDraft={createCurrentBookmarkDraft}
+                      onCreateBookmark={(bookmarkData) => addBookmark(bookmarkData)}
+                      onDeleteBookmark={(bookmarkId) => deleteBookmark(bookmarkId)}
+                      onNavigateToBookmark={(bookmark) => {
+                        navigateToBookmark(bookmark.position);
+                        setBookmarksOpen(false);
+                      }}
+                    />
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 sm:gap-4 ml-auto">
+            <div className="text-right hidden sm:block">
+              <h1 className="text-sm sm:text-lg font-semibold truncate max-w-[120px] sm:max-w-none">
+                {bookData.title}
+              </h1>
+              <p className="text-xs text-muted-foreground truncate max-w-[120px] sm:max-w-none">
+                {bookData.isPersonalBook && bookData.chapters
+                  ? bookData.chapters.find((ch: Chapter) => ch.chapterNumber === currentChapter)?.title || `Глава ${currentChapter}`
+                  : `Глава ${currentChapter}`}
+              </p>
+            </div>
+            <div className="text-left sm:hidden">
+              <p className="text-xs text-muted-foreground">
+                Глава {currentChapter}
+              </p>
+            </div>
+
+            <div className="relative">
+              <Button
+                variant={settingsOpen ? "secondary" : "ghost"}
+                size="icon"
+                onClick={() => {
+                  const nextOpen = !settingsOpen;
+                  closeAllPanels();
+                  setSettingsOpen(nextOpen);
+                }}
+                title="Настройки чтения"
+                className="w-8 h-8 sm:w-10 sm:h-10"
+              >
+                <Settings className="w-4 h-4 sm:w-5 sm:h-5" />
+              </Button>
+              {settingsOpen && (
+                <div className="absolute right-0 top-full mt-2 w-[85vw] max-w-[320px] sm:w-80 bg-background text-foreground border rounded-md shadow-lg p-3 sm:p-4 z-50">
+                  <ReaderControls
+                    settings={settings}
+                    onSettingsChange={updateSettingsWithAnchor}
+                    onPreviewSettings={previewSettings}
+                    onResetSettings={resetSettingsWithAnchor}
+                  />
+                </div>
+              )}
+            </div>
+
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={toggleFullscreen}
+              title={isFullscreen ? "Выйти из полноэкранного режима" : "Полноэкранный режим"}
+            >
+              {isFullscreen ? (
+                <Minimize2 className="w-5 h-5" />
+              ) : (
+                <Maximize2 className="w-5 h-5" />
+              )}
+            </Button>
+          </div>
+        </div>
+      </header>
+
+      <main
+        ref={scrollContainerRef}
+        onScroll={scheduleProgressSave}
+        className="flex-1 overflow-y-auto bg-background text-foreground"
+      >
+        <div
+          ref={contentAreaRef}
+          className="mx-auto px-3 sm:px-4 md:px-8 py-8 sm:py-12 reader-text-align"
+          style={{
+            width: "var(--reader-content-width, 90%)"
+          }}
+        >
+          {mainContent}
+        </div>
+      </main>
+
+      <ReaderProgressIndicators
+        isSyncing={isSyncing}
+        lastSyncTime={lastSyncTime}
+        error={syncError}
+        userProgress={progress}
+      />
+    </div>
+  );
 }
 
 export function ReaderWorkspace({ bookId: propBookId, clubId, params }: Readonly<ReaderWorkspaceProps>) {
@@ -392,50 +939,21 @@ export function ReaderWorkspace({ bookId: propBookId, clubId, params }: Readonly
     bookId
   });
 
-  useEffect(() => {
-    return () => {
-      manualRestoreCleanupRef.current?.();
-    };
-  }, []);
+  usePendingBookmarkNavigation({
+    bookId,
+    currentChapter,
+    setPendingScrollRestore,
+    setCurrentChapter,
+  });
 
-  useEffect(() => {
-    if (!bookId || currentChapter === null) {
-      return;
-    }
-
-    const pendingBookmark = consumePendingReaderBookmarkNavigation(bookId);
-    if (!pendingBookmark) {
-      return;
-    }
-
-    const position = parseReaderPosition(pendingBookmark.position);
-    if (!position?.chapter) {
-      return;
-    }
-
-    setPendingScrollRestore({
-      chapter: position.chapter,
-      positionRaw: pendingBookmark.position,
-    });
-    setCurrentChapter(position.chapter);
-  }, [bookId, currentChapter]);
-
-  useEffect(() => {
-    if (!pendingScrollRestore || contentLoading || currentChapter !== pendingScrollRestore.chapter) {
-      return;
-    }
-
-    manualRestoreCleanupRef.current?.();
-    manualRestoreCleanupRef.current = restoreReaderScrollPosition({
-      scrollContainerRef: scrollElementRef,
-      currentChapter,
-      currentPositionRaw: pendingScrollRestore.positionRaw,
-      delayMs: 120,
-      retryAttempts: 5,
-      retryDelayMs: 120,
-    });
-    setPendingScrollRestore(null);
-  }, [contentLoading, currentChapter, pendingScrollRestore, scrollElementRef]);
+  usePendingScrollRestore({
+    pendingScrollRestore,
+    contentLoading,
+    currentChapter,
+    scrollElementRef,
+    manualRestoreCleanupRef,
+    setPendingScrollRestore,
+  });
 
   // Fullscreen API
   const toggleFullscreen = () => {
@@ -449,133 +967,31 @@ export function ReaderWorkspace({ bookId: propBookId, clubId, params }: Readonly
     }
   };
 
-  const persistCurrentChapterProgress = useCallback((chapterToSave: number) => {
-    saveProgressNow({ chapter: chapterToSave });
-  }, [saveProgressNow]);
+  const { changeChapter } = useReaderChapterNavigation({
+    currentChapter,
+    chaptersLength: bookData.chapters?.length,
+    scrollContainerRef,
+    saveProgressNow,
+    setCurrentChapter,
+  });
 
-  const changeChapter = (chapter: number) => {
-    if (currentChapter === null) {
-      setCurrentChapter(chapter);
-      return;
-    }
-
-    if (chapter === currentChapter) {
-      return;
-    }
-
-    persistCurrentChapterProgress(currentChapter);
-    setCurrentChapter(chapter);
-
-    // После смены главы начинаем с начала страницы
-    setTimeout(() => {
-      if (scrollContainerRef.current) {
-        scrollContainerRef.current.scrollTop = 0;
-      }
-    }, 100);
-  };
-
-  // Горячие клавиши
-  useKeyboardShortcuts([
-    {
-      key: readerShortcuts.prevChapter.key,
-      action: () => {
-        if (currentChapter !== null && currentChapter > 1) {
-          changeChapter(currentChapter - 1);
-        }
-      },
-      description: readerShortcuts.prevChapter.description,
-      requireAtTop: true,
-      scrollContainerRef: scrollContainerRef,
-    },
-    {
-      key: readerShortcuts.nextChapter.key,
-      action: () => {
-        if (currentChapter !== null && bookData.chapters && currentChapter < bookData.chapters.length) {
-          changeChapter(currentChapter + 1);
-        }
-      },
-      description: readerShortcuts.nextChapter.description,
-      requireAtBottom: true,
-      scrollContainerRef: scrollContainerRef,
-    },
-  ]);
-
-  const createCurrentBookmarkDraft = useCallback(() => {
-    const container = scrollContainerRef.current;
-    if (!container || currentChapter === null) {
-      return null;
-    }
-
-    const payload = createReaderProgressPayload({
-      currentChapter,
-      totalChapters: bookData.totalChapters,
-      scrollTop: container.scrollTop,
-      scrollHeight: container.scrollHeight,
-      clientHeight: container.clientHeight,
-    });
-
-    return {
-      chapterNumber: currentChapter,
-      position: payload.currentPosition,
-    };
-  }, [bookData.totalChapters, currentChapter]);
-
-  const navigateToSavedPosition = useCallback((chapter: number, positionRaw: string) => {
-    setPendingScrollRestore({
-      chapter,
-      positionRaw,
-    });
-    setCurrentChapter(chapter);
-  }, []);
-
-  const navigateToBookmark = useCallback((positionRaw: string) => {
-    const position = parseReaderPosition(positionRaw);
-    if (!position?.chapter) {
-      return;
-    }
-
-    navigateToSavedPosition(position.chapter, positionRaw);
-  }, [navigateToSavedPosition]);
-
-  const addBookmarkFromSelection = useCallback(() => {
-    if (!selectionState) {
-      return;
-    }
-
-    const currentBookmarkDraft = createCurrentBookmarkDraft();
-    if (!currentBookmarkDraft) {
-      clearSelection();
-      return;
-    }
-
-    const bookmarkTitle = createBookmarkTitleFromSelection(selectionState.text);
-
-    addBookmark(
-      {
-        chapterNumber: currentBookmarkDraft.chapterNumber,
-        position: currentBookmarkDraft.position,
-        title: bookmarkTitle,
-      },
-      {
-        onSuccess: () => {
-          toast({
-            title: "Закладка сохранена",
-            description: "Выделенный фрагмент добавлен в закладки.",
-          });
-          clearSelection();
-        },
-      }
-    );
-  }, [addBookmark, clearSelection, createCurrentBookmarkDraft, selectionState]);
-
-  const openLatestPosition = useCallback(() => {
-    if (!suggestedProgress) {
-      return;
-    }
-
-    dismissSuggestion();
-    navigateToSavedPosition(suggestedProgress.currentChapter, suggestedProgress.currentPosition);
-  }, [dismissSuggestion, navigateToSavedPosition, suggestedProgress]);
+  const {
+    createCurrentBookmarkDraft,
+    navigateToBookmark,
+    addBookmarkFromSelection,
+    openLatestPosition,
+  } = useReaderSavedPositionActions({
+    scrollContainerRef,
+    currentChapter,
+    totalChapters: bookData.totalChapters,
+    selectionState,
+    clearSelection,
+    addBookmark,
+    suggestedProgress,
+    dismissSuggestion,
+    setPendingScrollRestore,
+    setCurrentChapter,
+  });
 
   const handleMarkAsRead = useCallback(() => {
     saveProgressNow({
@@ -620,212 +1036,45 @@ export function ReaderWorkspace({ bookId: propBookId, clubId, params }: Readonly
   }
 
   return (
-    <div className="flex flex-col h-screen bg-background text-foreground overflow-hidden">
-      {selectionState && (
-        <SelectionBookmarkPrompt
-          text={selectionState.text}
-          top={selectionState.top}
-          left={selectionState.left}
-          onConfirm={addBookmarkFromSelection}
-          onDismiss={clearSelection}
-        />
-      )}
-      {suggestedProgress && (
-        <LatestPositionPrompt
-          currentChapter={currentChapter}
-          remoteChapter={suggestedProgress.currentChapter}
-          onOpenLatest={openLatestPosition}
-          onDismiss={dismissSuggestion}
-        />
-      )}
-
-      {/* Top Navigation Bar */}
-      <header className="border-b bg-background relative z-50">
-        <div className="flex flex-wrap items-center gap-2 sm:gap-4 p-2 sm:p-4">
-          <div className="flex items-center gap-2">
-            {/* Возврат в библиотеку */}
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => (globalThis.location.href = '/library')}
-              className="text-xs sm:text-sm"
-            >
-              <ArrowLeft className="w-4 h-4 mr-1 sm:mr-2" />
-              <span className="hidden xs:inline">Библиотека</span>
-            </Button>
-
-            {/* Оглавление */}
-            <div className="relative">
-              <Button
-                variant={tocOpen ? "secondary" : "ghost"}
-                size="sm"
-                onClick={() => {
-                  const nextOpen = !tocOpen;
-                  closeAllPanels();
-                  setTocOpen(nextOpen);
-                }}
-                className="text-xs sm:text-sm"
-              >
-                <List className="w-4 h-4 mr-1 sm:mr-2" />
-                <span className="hidden xs:inline">Оглавление</span>
-              </Button>
-              {tocOpen && (
-                <div className="absolute left-0 top-full mt-2 w-[85vw] max-w-[320px] sm:w-80 max-h-96 overflow-y-auto bg-background text-foreground border rounded-md shadow-lg p-3 sm:p-4 z-50">
-                  <h3 className="font-semibold text-lg mb-4">Оглавление</h3>
-                  <div className="space-y-2">
-                    {bookData.isPersonalBook && bookData.chapters ? (
-                      bookData.chapters.map((chapter: Chapter) => (
-                        <Button
-                          key={chapter.chapterNumber}
-                          variant={currentChapter === chapter.chapterNumber ? "secondary" : "ghost"}
-                          className="w-full justify-start"
-                          onClick={() => {
-                            changeChapter(chapter.chapterNumber);
-                            setTocOpen(false);
-                          }}
-                        >
-                          {chapter.title || `Глава ${chapter.chapterNumber}`}
-                        </Button>
-                      ))
-                    ) : (
-                      <Button
-                        variant={currentChapter === 1 ? "secondary" : "ghost"}
-                        className="w-full justify-start"
-                        onClick={() => {
-                          changeChapter(1);
-                          setTocOpen(false);
-                        }}
-                      >
-                        Глава 1
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="relative">
-              <Button
-                variant={bookmarksOpen ? "secondary" : "ghost"}
-                size="sm"
-                onClick={() => {
-                  const nextOpen = !bookmarksOpen;
-                  closeAllPanels();
-                  setBookmarksOpen(nextOpen);
-                }}
-                className="text-xs sm:text-sm"
-              >
-                <Bookmark className="w-4 h-4 mr-1 sm:mr-2" />
-                <span className="hidden xs:inline">Закладки</span>
-              </Button>
-              {bookmarksOpen && (
-                <div className="absolute left-0 top-full mt-2 w-[85vw] max-w-[360px] sm:w-96 max-h-96 overflow-y-auto bg-background text-foreground border rounded-md shadow-lg p-3 sm:p-4 z-50">
-                  {bookmarksLoading ? (
-                    <p className="text-sm text-muted-foreground">Загрузка закладок...</p>
-                  ) : (
-                    <BookmarksPanel
-                      bookId={bookId}
-                      bookmarks={bookmarks}
-                      isCreatingBookmark={isAddingBookmark}
-                      getCurrentBookmarkDraft={createCurrentBookmarkDraft}
-                      onCreateBookmark={(bookmarkData) => addBookmark(bookmarkData)}
-                      onDeleteBookmark={(bookmarkId) => deleteBookmark(bookmarkId)}
-                      onNavigateToBookmark={(bookmark) => {
-                        navigateToBookmark(bookmark.position);
-                        setBookmarksOpen(false);
-                      }}
-                    />
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Правая часть - информация о книге и действия */}
-          <div className="flex items-center gap-2 sm:gap-4 ml-auto">
-            <div className="text-right hidden sm:block">
-              <h1 className="text-sm sm:text-lg font-semibold truncate max-w-[120px] sm:max-w-none">
-                {bookData.title}
-              </h1>
-              <p className="text-xs text-muted-foreground truncate max-w-[120px] sm:max-w-none">
-                {bookData.isPersonalBook && bookData.chapters 
-                  ? bookData.chapters.find((ch: Chapter) => ch.chapterNumber === currentChapter)?.title || `Глава ${currentChapter}`
-                  : `Глава ${currentChapter}`}
-              </p>
-            </div>
-            <div className="text-left sm:hidden">
-              <p className="text-xs text-muted-foreground">
-                Глава {currentChapter}
-              </p>
-            </div>
-
-            {/* Настройки */}
-            <div className="relative">
-              <Button
-                variant={settingsOpen ? "secondary" : "ghost"}
-                size="icon"
-                onClick={() => {
-                  const nextOpen = !settingsOpen;
-                  closeAllPanels();
-                  setSettingsOpen(nextOpen);
-                }}
-                title="Настройки чтения"
-                className="w-8 h-8 sm:w-10 sm:h-10"
-              >
-                <Settings className="w-4 h-4 sm:w-5 sm:h-5" />
-              </Button>
-              {settingsOpen && (
-                <div className="absolute right-0 top-full mt-2 w-[85vw] max-w-[320px] sm:w-80 bg-background text-foreground border rounded-md shadow-lg p-3 sm:p-4 z-50">
-                  <ReaderControls
-                    settings={settings}
-                    onSettingsChange={updateSettingsWithAnchor}
-                    onPreviewSettings={previewSettings}
-                    onResetSettings={resetSettingsWithAnchor}
-                  />
-                </div>
-              )}
-            </div>
-
-            {/* Полноэкранный режим */}
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={toggleFullscreen}
-              title={isFullscreen ? "Выйти из полноэкранного режима" : "Полноэкранный режим"}
-            >
-              {isFullscreen ? (
-                <Minimize2 className="w-5 h-5" />
-              ) : (
-                <Maximize2 className="w-5 h-5" />
-              )}
-            </Button>
-          </div>
-        </div>
-      </header>
-
-      {/* Main Content Area */}
-      <main
-        ref={scrollContainerRef}
-        onScroll={scheduleProgressSave}
-        className="flex-1 overflow-y-auto bg-background text-foreground"
-      >
-        <div
-          ref={contentAreaRef}
-          className="mx-auto px-3 sm:px-4 md:px-8 py-8 sm:py-12 reader-text-align"
-          style={{
-            width: "var(--reader-content-width, 90%)"
-          }}
-        >
-          {mainContent}
-        </div>
-      </main>
-
-      <ReaderProgressIndicators
-        isSyncing={isSyncing}
-        lastSyncTime={lastSyncTime}
-        error={syncError}
-        userProgress={progress}
-      />
-    </div>
+    <ReaderWorkspaceView
+      selectionState={selectionState}
+      addBookmarkFromSelection={addBookmarkFromSelection}
+      clearSelection={clearSelection}
+      suggestedProgress={suggestedProgress}
+      currentChapter={currentChapter}
+      openLatestPosition={openLatestPosition}
+      dismissSuggestion={dismissSuggestion}
+      tocOpen={tocOpen}
+      closeAllPanels={closeAllPanels}
+      setTocOpen={setTocOpen}
+      changeChapter={changeChapter}
+      bookData={bookData}
+      bookmarksOpen={bookmarksOpen}
+      setBookmarksOpen={setBookmarksOpen}
+      bookmarksLoading={bookmarksLoading}
+      bookId={bookId}
+      bookmarks={bookmarks}
+      isAddingBookmark={isAddingBookmark}
+      createCurrentBookmarkDraft={createCurrentBookmarkDraft}
+      addBookmark={addBookmark}
+      deleteBookmark={deleteBookmark}
+      navigateToBookmark={navigateToBookmark}
+      settingsOpen={settingsOpen}
+      setSettingsOpen={setSettingsOpen}
+      settings={settings}
+      updateSettingsWithAnchor={updateSettingsWithAnchor}
+      previewSettings={previewSettings}
+      resetSettingsWithAnchor={resetSettingsWithAnchor}
+      isFullscreen={isFullscreen}
+      toggleFullscreen={toggleFullscreen}
+      scrollContainerRef={scrollContainerRef}
+      scheduleProgressSave={scheduleProgressSave}
+      contentAreaRef={contentAreaRef}
+      mainContent={mainContent}
+      isSyncing={isSyncing}
+      lastSyncTime={lastSyncTime}
+      syncError={syncError}
+      progress={progress}
+    />
   );
 }

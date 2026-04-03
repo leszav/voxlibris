@@ -20,6 +20,8 @@ import {
   parseReaderPosition,
   serializeReaderPosition,
 } from "./core/reader-progress-core";
+import { saveReaderProgressToStorage } from "@/lib/reader-local-progress";
+import { getAccessToken } from "@/lib/token-store";
 import {
   useDebouncedReaderProgressSave,
   restoreReaderScrollPosition,
@@ -77,7 +79,6 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
   const [helpOpen, setHelpOpen] = useState(false);
   const [pendingScrollRestore, setPendingScrollRestore] = useState<PendingScrollRestore | null>(null);
   const chapterScrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const bookmarkScrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const manualRestoreCleanupRef = useRef<(() => void) | null>(null);
   
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -220,10 +221,6 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
           positionRaw: bookmark.position,
         });
         setCurrentChapter(position.chapter);
-        if (bookmarkScrollTimeoutRef.current) {
-          clearTimeout(bookmarkScrollTimeoutRef.current);
-        }
-        bookmarkScrollTimeoutRef.current = null;
       }
     } catch (error) {
       if (import.meta.env.DEV) {
@@ -261,11 +258,40 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
       if (chapterScrollTimeoutRef.current) {
         clearTimeout(chapterScrollTimeoutRef.current);
       }
-      if (bookmarkScrollTimeoutRef.current) {
-        clearTimeout(bookmarkScrollTimeoutRef.current);
-      }
     };
   }, []);
+
+  // Сохранение позиции локально и на сервере при размонтировании (keepalive)
+  useEffect(() => {
+    return () => {
+      const container = scrollContainerRef.current;
+      if (!container || currentChapter === null || totalChapters === 0) return;
+
+      const payload = createReaderProgressPayload({
+        currentChapter,
+        totalChapters,
+        scrollTop: container.scrollTop,
+        scrollHeight: container.scrollHeight,
+        clientHeight: container.clientHeight,
+      });
+
+      saveReaderProgressToStorage({ type: "club", clubId, bookId }, payload);
+
+      const token = getAccessToken();
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (token && token !== "null") {
+        headers.Authorization = `Bearer ${token}`;
+      }
+
+      fetch(`/api/clubs/${clubId}/progress`, {
+        method: "PUT",
+        headers,
+        body: JSON.stringify(payload),
+        credentials: "include",
+        keepalive: true,
+      });
+    };
+  }, [scrollContainerRef, currentChapter, totalChapters, clubId, bookId]);
 
   const scrollElementRef = scrollContainerRef as RefObject<HTMLElement | null>;
 
@@ -383,7 +409,7 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
     scrollContainerRef: scrollElementRef,
     currentChapter,
     currentPositionRaw: userProgress?.currentPosition,
-    contentReady: !contentLoading && !!chapterContent,
+    contentReady: !contentLoading && !!currentChapterContent,
   });
   useSmoothReaderSpaceScroll({
     scrollContainerRef: scrollElementRef,
@@ -412,11 +438,6 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
     });
     setPendingScrollRestore(null);
   }, [contentLoading, currentChapter, pendingScrollRestore, scrollElementRef]);
-
-  // Обработка скролла с дебаунсингом
-  const handleScroll = () => {
-    scheduleProgressSave();
-  };
 
   const openLatestPosition = () => {
     if (!suggestedProgress) {
@@ -678,7 +699,7 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
           <div
             ref={scrollContainerRef}
             className="flex-1 overflow-y-auto"
-            onScroll={handleScroll}
+            onScroll={scheduleProgressSave}
           >
             <div 
               ref={contentAreaRef}

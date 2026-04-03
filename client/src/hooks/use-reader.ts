@@ -6,6 +6,11 @@ import {
   normalizeReaderSettings,
   type ReaderSettings,
 } from "@/lib/reader-settings";
+import {
+  getFreshestReaderProgress,
+  loadReaderProgressFromStorage,
+  saveReaderProgressToStorage,
+} from "@/lib/reader-local-progress";
 
 interface BookContentResponse {
   title?: string;
@@ -102,18 +107,25 @@ export function useReadingProgress(bookId: string) {
   return useQuery({
     queryKey: ["/api/v1/books", bookId, "progress"],
     queryFn: async () => {
+      const localProgress = loadReaderProgressFromStorage({
+        type: "personal",
+        bookId,
+      });
+
       try {
         const response = await apiRequest<ReadingProgress>(`/api/v1/books/${bookId}/progress`);
-        return response;
+        return getFreshestReaderProgress(response, localProgress) ?? response;
       } catch (error: unknown) {
         // Если прогресс не найден, возвращаем начальные значения
         const err = error as { status?: number };
         if (err?.status === 404) {
-          return {
+          const defaultProgress = {
             currentChapter: 1,
             currentPosition: "",
             progress: 0
           };
+
+          return getFreshestReaderProgress(defaultProgress, localProgress) ?? defaultProgress;
         }
         throw error;
       }
@@ -139,6 +151,14 @@ export function useUpdateProgress(bookId: string) {
       await queryClient.cancelQueries({ queryKey: progressQueryKey });
       const previousProgress = queryClient.getQueryData<ReadingProgress>(progressQueryKey);
 
+      saveReaderProgressToStorage(
+        {
+          type: "personal",
+          bookId,
+        },
+        data,
+      );
+
       queryClient.setQueryData<ReadingProgress>(progressQueryKey, (current) => ({
         ...current,
         currentChapter: data.currentChapter,
@@ -154,6 +174,14 @@ export function useUpdateProgress(bookId: string) {
       }
     },
     onSuccess: (_response, data) => {
+      saveReaderProgressToStorage(
+        {
+          type: "personal",
+          bookId,
+        },
+        data,
+      );
+
       queryClient.setQueryData<ReadingProgress>(progressQueryKey, (current) => ({
         ...current,
         currentChapter: data.currentChapter,
