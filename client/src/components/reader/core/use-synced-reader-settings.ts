@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   applyReaderSettings,
   cleanupReaderSettings,
@@ -50,15 +50,11 @@ export function useSyncedReaderSettings(
 ): UseSyncedReaderSettingsReturn {
   const { cleanupOnUnmount = false, enableServerSync = true } = options;
   const [isMobileMode, setIsMobileMode] = useState(() => isMobileReaderViewport());
-  const syncManagerRef = useRef<ReturnType<typeof createReaderSettingsSyncManager> | null>(null);
 
   const getSyncManager = useCallback(() => {
-    if (!syncManagerRef.current) {
-      syncManagerRef.current = createReaderSettingsSyncManager(loadReaderSettingsFromStorage("desktop"));
-    }
-
-    return syncManagerRef.current;
-  }, []);
+    const currentDeviceMode = isMobileMode ? "mobile" : "desktop";
+    return createReaderSettingsSyncManager(loadReaderSettingsFromStorage(currentDeviceMode), currentDeviceMode);
+  }, [isMobileMode]);
 
   const [syncState, setSyncState] = useState<ReaderSettingsState>(() => {
     const initialSettings = loadReaderSettingsFromStorage(isMobileReaderViewport() ? "mobile" : "desktop");
@@ -66,7 +62,8 @@ export function useSyncedReaderSettings(
   });
 
   const serverSyncEnabled = enableServerSync && !isMobileMode;
-  const { refetch: _refetchFromServer, isFetching } = useReaderSettings(serverSyncEnabled);
+  const deviceMode = isMobileMode ? "mobile" : "desktop";
+  const { refetch: _refetchFromServer, isFetching } = useReaderSettings(serverSyncEnabled, deviceMode);
   const [isInitialLoading, setIsInitialLoading] = useState(serverSyncEnabled);
 
   useEffect(() => {
@@ -261,10 +258,12 @@ export function useReaderSettingsSyncStatus(): {
   pendingCount: number;
   forcSync: () => Promise<void>;
 } {
-  const syncManager = getReaderSettingsSyncManager();
+  const isMobileMode = isMobileReaderViewport();
+  const deviceMode = isMobileMode ? "mobile" : "desktop";
+  const syncManager = getReaderSettingsSyncManager(deviceMode);
   const [syncState, setSyncState] = useState<ReaderSettingsState>(
     syncManager?.getState() ?? {
-      settings: DEFAULT_READER_SETTINGS,
+      settings: isMobileMode ? MOBILE_DEFAULT_READER_SETTINGS : DEFAULT_READER_SETTINGS,
       syncStatus: 'synced',
       lastSyncAt: Date.now(),
     }

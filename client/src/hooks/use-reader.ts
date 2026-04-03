@@ -167,11 +167,11 @@ export function useUpdateProgress(bookId: string) {
   });
 }
 
-export function useReaderSettings(enabled: boolean = true) {
+export function useReaderSettings(enabled: boolean = true, deviceMode: "desktop" | "mobile" = "desktop") {
   return useQuery({
-    queryKey: ["reader-settings"],
+    queryKey: ["reader-settings", deviceMode],
     queryFn: async () => {
-      const response = await apiRequest<ReaderSettingsResponse>("/api/v1/books/reader-settings");
+      const response = await apiRequest<ReaderSettingsResponse>(`/api/v1/books/reader-settings?deviceMode=${deviceMode}`);
       return normalizeReaderSettings(response.settings);
     },
     enabled,

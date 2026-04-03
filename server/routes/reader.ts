@@ -92,16 +92,53 @@ function normalizeReaderSettings(input: unknown): StoredReaderSettings {
   };
 }
 
-function parseStoredReaderSettings(raw: string | null | undefined): StoredReaderSettings {
+type DeviceMode = "desktop" | "mobile";
+
+function parseStoredReaderSettings(raw: string | null | undefined, deviceMode: DeviceMode = "desktop"): StoredReaderSettings {
   if (!raw) {
     return DEFAULT_READER_SETTINGS;
   }
 
   try {
-    return normalizeReaderSettings(JSON.parse(raw));
+    const parsed = JSON.parse(raw);
+
+    // Новый формат: { desktop?: Settings, mobile?: Settings }
+    if (parsed && typeof parsed === "object" && parsed[deviceMode]) {
+      return normalizeReaderSettings(parsed[deviceMode]);
+    }
+
+    // Старый формат: просто объект настроек (обратная совместимость)
+    if (parsed && typeof parsed === "object" && "fontSize" in parsed) {
+      return normalizeReaderSettings(parsed);
+    }
   } catch {
-    return DEFAULT_READER_SETTINGS;
+    // ignore
   }
+
+  return DEFAULT_READER_SETTINGS;
+}
+
+function mergeDeviceSettings(raw: string | null | undefined, deviceMode: DeviceMode, settings: StoredReaderSettings): string {
+  const existing: Record<string, unknown> = {};
+
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") {
+        // Старый формат: конвертируем в новый
+        if ("fontSize" in parsed) {
+          existing.desktop = parsed;
+        } else {
+          Object.assign(existing, parsed);
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  existing[deviceMode] = settings;
+  return JSON.stringify(existing);
 }
 
 function extractPositionTimestamp(raw: string | null | undefined): number | null {
@@ -236,6 +273,9 @@ router.get("/reader-settings", async (req: Request, res: Response) => {
       return res.status(401).json({ error: "Unauthorized" });
     }
 
+    const deviceMode = (req.query.deviceMode as DeviceMode) || "desktop";
+    const validDeviceMode: DeviceMode = deviceMode === "mobile" ? "mobile" : "desktop";
+
     const [profile] = await db
       .select({
         readerSettings: userProfiles.readerSettings,
@@ -245,7 +285,7 @@ router.get("/reader-settings", async (req: Request, res: Response) => {
       .limit(1);
 
     res.json({
-      settings: parseStoredReaderSettings(profile?.readerSettings),
+      settings: parseStoredReaderSettings(profile?.readerSettings, validDeviceMode),
     });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
@@ -263,8 +303,21 @@ router.put("/reader-settings", async (req: Request, res: Response) => {
       return res.status(401).json({ error: "Unauthorized" });
     }
 
+    const deviceMode = (req.query.deviceMode as DeviceMode) || "desktop";
+    const validDeviceMode: DeviceMode = deviceMode === "mobile" ? "mobile" : "desktop";
+
     const settings = normalizeReaderSettings(req.body?.settings ?? req.body);
-    const serializedSettings = JSON.stringify(settings);
+
+    // Сначала загруем текущие настройки, чтобы сохранить настройки для других устройств
+    const [profile] = await db
+      .select({
+        readerSettings: userProfiles.readerSettings,
+      })
+      .from(userProfiles)
+      .where(eq(userProfiles.userId, userId))
+      .limit(1);
+
+    const serializedSettings = mergeDeviceSettings(profile?.readerSettings, validDeviceMode, settings);
 
     await db
       .insert(userProfiles)

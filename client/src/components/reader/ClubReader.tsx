@@ -256,6 +256,19 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
     }
   };
 
+  useEffect(() => {
+    return () => {
+      if (chapterScrollTimeoutRef.current) {
+        clearTimeout(chapterScrollTimeoutRef.current);
+      }
+      if (bookmarkScrollTimeoutRef.current) {
+        clearTimeout(bookmarkScrollTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const scrollElementRef = scrollContainerRef as RefObject<HTMLElement | null>;
+
   // Горячие клавиши
   useKeyboardShortcuts([
     {
@@ -277,11 +290,15 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
       key: readerShortcuts.prevChapter.key,
       action: () => changeChapter(Math.max(1, (currentChapter || 1) - 1)),
       description: readerShortcuts.prevChapter.description,
+      requireAtTop: true,
+      scrollContainerRef: scrollElementRef,
     },
     {
       key: readerShortcuts.nextChapter.key,
       action: () => changeChapter(Math.min(bookData.totalChapters, (currentChapter || 1) + 1)),
       description: readerShortcuts.nextChapter.description,
+      requireAtBottom: true,
+      scrollContainerRef: scrollElementRef,
     },
     {
       key: readerShortcuts.fontSizeIncrease.key,
@@ -307,18 +324,6 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
     },
   ]);
 
-  useEffect(() => {
-    return () => {
-      if (chapterScrollTimeoutRef.current) {
-        clearTimeout(chapterScrollTimeoutRef.current);
-      }
-      if (bookmarkScrollTimeoutRef.current) {
-        clearTimeout(bookmarkScrollTimeoutRef.current);
-      }
-    };
-  }, []);
-
-  const scrollElementRef = scrollContainerRef as RefObject<HTMLElement | null>;
   const preserveReaderVisualAnchor = usePreserveReaderVisualAnchor({
     scrollContainerRef: scrollElementRef,
     contentAreaRef: contentAreaRef as RefObject<HTMLElement | null>,

@@ -1,4 +1,4 @@
-import { ReaderSettings, normalizeReaderSettings, saveReaderSettingsToStorage } from './reader-settings';
+import { ReaderSettings, normalizeReaderSettings, saveReaderSettingsToStorage, type ReaderSettingsDeviceMode } from './reader-settings';
 import { apiRequest } from './queryClient';
 
 export type SyncStatus = 'synced' | 'pending' | 'error' | 'offline';
@@ -27,13 +27,15 @@ class ReaderSettingsSyncManager {
   private retryDelay = 1000; // 1 second base delay
   private listeners = new Set<(state: ReaderSettingsState) => void>();
   private state: ReaderSettingsState;
+  private deviceMode: ReaderSettingsDeviceMode;
   
-  constructor(initialSettings: ReaderSettings) {
+  constructor(initialSettings: ReaderSettings, deviceMode: ReaderSettingsDeviceMode = "desktop") {
     this.state = {
       settings: initialSettings,
       syncStatus: 'synced',
       lastSyncAt: Date.now(),
     };
+    this.deviceMode = deviceMode;
     
     // Listen for online/offline events
     window.addEventListener('online', this.handleOnline.bind(this));
@@ -147,7 +149,7 @@ class ReaderSettingsSyncManager {
   }
   
   private async syncToServer(settings: ReaderSettings): Promise<void> {
-    const response = await apiRequest<ReaderSettingsResponse>('/api/v1/books/reader-settings', {
+    const response = await apiRequest<ReaderSettingsResponse>(`/api/v1/books/reader-settings?deviceMode=${this.deviceMode}`, {
       method: 'PUT',
       body: JSON.stringify({ settings }),
     });
@@ -169,7 +171,7 @@ class ReaderSettingsSyncManager {
    */
   async loadFromServer(): Promise<ReaderSettings> {
     try {
-      const response = await apiRequest<ReaderSettingsResponse>('/api/v1/books/reader-settings');
+      const response = await apiRequest<ReaderSettingsResponse>(`/api/v1/books/reader-settings?deviceMode=${this.deviceMode}`);
       const serverSettings = normalizeReaderSettings(response.settings);
       
       // Simple conflict resolution: server wins if it's newer
@@ -253,18 +255,21 @@ class ReaderSettingsSyncManager {
   }
 }
 
-// Singleton instance
-let syncManager: ReaderSettingsSyncManager | null = null;
+// Singleton instances keyed by deviceMode
+const syncManagers = new Map<string, ReaderSettingsSyncManager>();
 
-export function createReaderSettingsSyncManager(initialSettings: ReaderSettings): ReaderSettingsSyncManager {
-  if (syncManager) {
-    return syncManager;
+export function createReaderSettingsSyncManager(initialSettings: ReaderSettings, deviceMode: ReaderSettingsDeviceMode = "desktop"): ReaderSettingsSyncManager {
+  const key = deviceMode;
+  const existing = syncManagers.get(key);
+  if (existing) {
+    return existing;
   }
   
-  syncManager = new ReaderSettingsSyncManager(initialSettings);
-  return syncManager;
+  const manager = new ReaderSettingsSyncManager(initialSettings, deviceMode);
+  syncManagers.set(key, manager);
+  return manager;
 }
 
-export function getReaderSettingsSyncManager(): ReaderSettingsSyncManager | null {
-  return syncManager;
+export function getReaderSettingsSyncManager(deviceMode: ReaderSettingsDeviceMode = "desktop"): ReaderSettingsSyncManager | null {
+  return syncManagers.get(deviceMode) ?? null;
 }

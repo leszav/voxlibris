@@ -27,7 +27,7 @@ export function useSmoothReaderSpaceScroll({
     }
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if ((event.key !== " " && event.code !== "Space") || event.ctrlKey || event.altKey || event.metaKey) {
+      if (event.key !== " " && event.code !== "Space") {
         return;
       }
 
@@ -36,6 +36,12 @@ export function useSmoothReaderSpaceScroll({
         return;
       }
 
+      // Ctrl/Alt/Meta без обработки — игнорируем
+      if (event.ctrlKey || event.altKey || event.metaKey) {
+        return;
+      }
+
+      // Space / Shift+Space — прокрутка страницы
       const container = scrollContainerRef.current;
       if (!container) {
         return;
@@ -51,7 +57,7 @@ export function useSmoothReaderSpaceScroll({
       event.preventDefault();
       event.stopPropagation();
 
-      const scrollDistance = Math.max(160, Math.round(container.clientHeight * 0.82));
+      const scrollDistance = Math.max(160, Math.round(container.clientHeight * 0.95));
       const direction = event.shiftKey ? -1 : 1;
 
       container.scrollBy({

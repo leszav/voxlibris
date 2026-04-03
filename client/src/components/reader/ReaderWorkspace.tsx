@@ -5,6 +5,7 @@ import { getMobileAnalyticsContext } from "@/lib/mobile-analytics";
 import { useAddBookmark, useBookmarks, useDeleteBookmark } from "../../hooks/use-reader";
 import { ContentRenderer } from "./ContentRenderer";
 import { BookmarksPanel } from "./BookmarksPanel";
+import { useKeyboardShortcuts, readerShortcuts } from "./useKeyboardShortcuts";
 import { LatestPositionPrompt } from "./LatestPositionPrompt";
 import { ReaderControls } from "./ReaderControls";
 import { SelectionBookmarkPrompt } from "./SelectionBookmarkPrompt";
@@ -472,6 +473,32 @@ export function ReaderWorkspace({ bookId: propBookId, clubId, params }: Readonly
       }
     }, 100);
   };
+
+  // Горячие клавиши
+  useKeyboardShortcuts([
+    {
+      key: readerShortcuts.prevChapter.key,
+      action: () => {
+        if (currentChapter !== null && currentChapter > 1) {
+          changeChapter(currentChapter - 1);
+        }
+      },
+      description: readerShortcuts.prevChapter.description,
+      requireAtTop: true,
+      scrollContainerRef: scrollContainerRef,
+    },
+    {
+      key: readerShortcuts.nextChapter.key,
+      action: () => {
+        if (currentChapter !== null && bookData.chapters && currentChapter < bookData.chapters.length) {
+          changeChapter(currentChapter + 1);
+        }
+      },
+      description: readerShortcuts.nextChapter.description,
+      requireAtBottom: true,
+      scrollContainerRef: scrollContainerRef,
+    },
+  ]);
 
   const createCurrentBookmarkDraft = useCallback(() => {
     const container = scrollContainerRef.current;
