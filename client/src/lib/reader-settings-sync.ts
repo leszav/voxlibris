@@ -23,11 +23,11 @@ interface ReaderSettingsResponse {
 class ReaderSettingsSyncManager {
   private queue: SyncQueueItem[] = [];
   private isProcessing = false;
-  private maxRetries = 3;
-  private retryDelay = 1000; // 1 second base delay
-  private listeners = new Set<(state: ReaderSettingsState) => void>();
+  private readonly maxRetries = 3;
+  private readonly retryDelay = 1000; // 1 second base delay
+  private readonly listeners = new Set<(state: ReaderSettingsState) => void>();
   private state: ReaderSettingsState;
-  private deviceMode: ReaderSettingsDeviceMode;
+  private readonly deviceMode: ReaderSettingsDeviceMode;
   
   constructor(initialSettings: ReaderSettings, deviceMode: ReaderSettingsDeviceMode = "desktop") {
     this.state = {
@@ -38,8 +38,8 @@ class ReaderSettingsSyncManager {
     this.deviceMode = deviceMode;
     
     // Listen for online/offline events
-    window.addEventListener('online', this.handleOnline.bind(this));
-    window.addEventListener('offline', this.handleOffline.bind(this));
+    globalThis.addEventListener('online', this.handleOnline.bind(this));
+    globalThis.addEventListener('offline', this.handleOffline.bind(this));
   }
   
   getState(): ReaderSettingsState {
@@ -79,7 +79,7 @@ class ReaderSettingsSyncManager {
     
     // Immediate UI application
     applyFunction(normalizedSettings);
-    saveReaderSettingsToStorage(normalizedSettings);
+    saveReaderSettingsToStorage(normalizedSettings, this.deviceMode);
     
     // Update state optimistically
     this.updateState({
@@ -184,7 +184,7 @@ class ReaderSettingsSyncManager {
           syncStatus: 'synced',
           lastSyncAt: Date.now(),
         });
-        saveReaderSettingsToStorage(serverSettings);
+        saveReaderSettingsToStorage(serverSettings, this.deviceMode);
         return serverSettings;
       }
       

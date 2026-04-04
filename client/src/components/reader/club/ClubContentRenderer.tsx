@@ -25,21 +25,14 @@ export function ClubContentRenderer({ content }: Readonly<ClubContentRendererPro
   }, [content]);
 
   return (
-    <>
-      <style>{`
-        .club-reader-content {
-          text-align: var(--club-reader-text-align, justify);
-        }
-      `}</style>
-      <div
-        className="prose prose-lg max-w-none dark:prose-invert club-reader-content"
-        style={{
-          fontSize: "var(--club-reader-font-size, 18px)",
-          fontFamily: "var(--club-reader-font-family, Georgia)",
-          lineHeight: "var(--club-reader-line-height, 1.8)",
-        }}
-        dangerouslySetInnerHTML={{ __html: sanitizedContent }}
-      />
-    </>
+    <div
+      className="prose prose-lg max-w-none dark:prose-invert club-reader-content"
+      style={{
+        fontSize: "var(--club-reader-font-size, 18px)",
+        fontFamily: "var(--club-reader-font-family, Georgia)",
+        lineHeight: "var(--club-reader-line-height, 1.8)",
+      }}
+      dangerouslySetInnerHTML={{ __html: sanitizedContent }}
+    />
   );
 }

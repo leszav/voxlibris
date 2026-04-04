@@ -296,6 +296,7 @@ function usePendingScrollRestore({
   contentLoading,
   currentChapter,
   scrollElementRef,
+  contentAreaRef,
   manualRestoreCleanupRef,
   setPendingScrollRestore,
 }: {
@@ -303,6 +304,7 @@ function usePendingScrollRestore({
   contentLoading: boolean;
   currentChapter: number | null;
   scrollElementRef: RefObject<HTMLElement | null>;
+  contentAreaRef: RefObject<HTMLElement | null>;
   manualRestoreCleanupRef: RefObject<(() => void) | null>;
   setPendingScrollRestore: (restore: PendingScrollRestore | null) => void;
 }) {
@@ -320,6 +322,7 @@ function usePendingScrollRestore({
     manualRestoreCleanupRef.current?.();
     manualRestoreCleanupRef.current = restoreReaderScrollPosition({
       scrollContainerRef: scrollElementRef,
+      contentAreaRef,
       currentChapter,
       currentPositionRaw: pendingScrollRestore.positionRaw,
       delayMs: 120,
@@ -910,6 +913,7 @@ export function ReaderWorkspace({ bookId: propBookId, clubId, params }: Readonly
   const { scheduleSave: scheduleProgressSave, saveNow: saveProgressNow } = useDebouncedReaderProgressSave({
     currentChapter,
     scrollContainerRef: scrollElementRef,
+    contentAreaRef: contentAreaRef as RefObject<HTMLElement | null>,
     totalChapters: bookData.totalChapters,
     onSave: saveWithSync,
     debounceMs: 1500,
@@ -918,6 +922,7 @@ export function ReaderWorkspace({ bookId: propBookId, clubId, params }: Readonly
 
   useRestoreReaderScroll({
     scrollContainerRef: scrollElementRef,
+    contentAreaRef: contentAreaRef as RefObject<HTMLElement | null>,
     currentChapter,
     currentPositionRaw: progress?.currentPosition,
     contentReady: !contentLoading,
@@ -951,6 +956,7 @@ export function ReaderWorkspace({ bookId: propBookId, clubId, params }: Readonly
     contentLoading,
     currentChapter,
     scrollElementRef,
+    contentAreaRef: contentAreaRef as RefObject<HTMLElement | null>,
     manualRestoreCleanupRef,
     setPendingScrollRestore,
   });

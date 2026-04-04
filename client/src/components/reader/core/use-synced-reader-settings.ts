@@ -61,7 +61,7 @@ export function useSyncedReaderSettings(
     return createLocalReaderSettingsState(initialSettings);
   });
 
-  const serverSyncEnabled = enableServerSync && !isMobileMode;
+  const serverSyncEnabled = enableServerSync;
   const deviceMode = isMobileMode ? "mobile" : "desktop";
   const { refetch: _refetchFromServer, isFetching } = useReaderSettings(serverSyncEnabled, deviceMode);
   const [isInitialLoading, setIsInitialLoading] = useState(serverSyncEnabled);
@@ -71,22 +71,17 @@ export function useSyncedReaderSettings(
       setIsMobileMode(isMobileReaderViewport());
     };
 
-    window.addEventListener("resize", updateViewportMode);
-    window.addEventListener("orientationchange", updateViewportMode);
+    globalThis.addEventListener("resize", updateViewportMode);
+    globalThis.addEventListener("orientationchange", updateViewportMode);
 
     return () => {
-      window.removeEventListener("resize", updateViewportMode);
-      window.removeEventListener("orientationchange", updateViewportMode);
+      globalThis.removeEventListener("resize", updateViewportMode);
+      globalThis.removeEventListener("orientationchange", updateViewportMode);
     };
   }, []);
 
   // Subscribe to sync manager state changes
   useEffect(() => {
-    if (isMobileMode) {
-      setSyncState(createLocalReaderSettingsState(loadReaderSettingsFromStorage("mobile")));
-      return;
-    }
-
     const syncManager = getSyncManager();
     setSyncState(syncManager.getState());
 
@@ -95,7 +90,7 @@ export function useSyncedReaderSettings(
     });
 
     return unsubscribe;
-  }, [getSyncManager, isMobileMode]);
+  }, [getSyncManager]);
   
   // Apply settings to DOM when they change
   useEffect(() => {
@@ -107,12 +102,12 @@ export function useSyncedReaderSettings(
       applyReaderSettings(syncState.settings, scope);
     };
 
-    window.addEventListener("resize", reapplySettings);
-    window.addEventListener("orientationchange", reapplySettings);
+    globalThis.addEventListener("resize", reapplySettings);
+    globalThis.addEventListener("orientationchange", reapplySettings);
 
     return () => {
-      window.removeEventListener("resize", reapplySettings);
-      window.removeEventListener("orientationchange", reapplySettings);
+      globalThis.removeEventListener("resize", reapplySettings);
+      globalThis.removeEventListener("orientationchange", reapplySettings);
     };
   }, [syncState.settings, scope]);
 
@@ -169,11 +164,11 @@ export function useSyncedReaderSettings(
     const handleFocus = () => handleVisibilityChange();
     
     document.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('focus', handleFocus);
+    globalThis.addEventListener('focus', handleFocus);
     
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('focus', handleFocus);
+      globalThis.removeEventListener('focus', handleFocus);
     };
   }, [getSyncManager, scope, serverSyncEnabled]);
   
@@ -190,7 +185,7 @@ export function useSyncedReaderSettings(
   
   // Optimistic update function
   const updateSettings = useCallback((nextSettings: ReaderSettings) => {
-    if (isMobileMode || !enableServerSync) {
+    if (!enableServerSync) {
       const normalizedSettings = normalizeReaderSettings(nextSettings);
       saveReaderSettingsToStorage(normalizedSettings, isMobileMode ? "mobile" : "desktop");
       applyReaderSettings(normalizedSettings, scope);

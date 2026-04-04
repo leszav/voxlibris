@@ -390,6 +390,7 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
   });
   const { scheduleSave: scheduleProgressSave, saveNow: saveProgressNow } = useDebouncedReaderProgressSave({
     scrollContainerRef: scrollElementRef,
+    contentAreaRef: contentAreaRef as RefObject<HTMLElement | null>,
     currentChapter,
     totalChapters,
     onSave: saveWithSync,
@@ -407,6 +408,7 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
 
   useRestoreReaderScroll({
     scrollContainerRef: scrollElementRef,
+    contentAreaRef: contentAreaRef as RefObject<HTMLElement | null>,
     currentChapter,
     currentPositionRaw: userProgress?.currentPosition,
     contentReady: !contentLoading && !!currentChapterContent,
@@ -430,6 +432,7 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
     manualRestoreCleanupRef.current?.();
     manualRestoreCleanupRef.current = restoreReaderScrollPosition({
       scrollContainerRef: scrollElementRef,
+      contentAreaRef: contentAreaRef as RefObject<HTMLElement | null>,
       currentChapter,
       currentPositionRaw: pendingScrollRestore.positionRaw,
       delayMs: 120,

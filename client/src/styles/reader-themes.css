@@ -34,6 +34,42 @@ body.reader-sepia {
   scroll-behavior: smooth;
 }
 
+.club-reader-content {
+  font-size: var(--club-reader-font-size, 18px);
+  font-family: var(--club-reader-font-family, Georgia);
+  line-height: var(--club-reader-line-height, 1.6);
+  text-align: var(--club-reader-text-align, justify);
+  scroll-behavior: smooth;
+}
+
+.reader-content > p,
+.reader-content > h1,
+.reader-content > h2,
+.reader-content > h3,
+.reader-content > h4,
+.reader-content > h5,
+.reader-content > h6,
+.reader-content > blockquote,
+.reader-content > pre,
+.reader-content > ul,
+.reader-content > ol,
+.reader-content > hr,
+.club-reader-content > p,
+.club-reader-content > h1,
+.club-reader-content > h2,
+.club-reader-content > h3,
+.club-reader-content > h4,
+.club-reader-content > h5,
+.club-reader-content > h6,
+.club-reader-content > blockquote,
+.club-reader-content > pre,
+.club-reader-content > ul,
+.club-reader-content > ol,
+.club-reader-content > hr {
+  content-visibility: auto;
+  contain-intrinsic-size: 0 100px;
+}
+
 /* Reader container alignment */
 .reader-text-align {
   text-align: var(--reader-text-align, justify);

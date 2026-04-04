@@ -13,6 +13,7 @@ interface SaveNowOptions {
 
 interface UseDebouncedReaderProgressSaveOptions {
   scrollContainerRef: RefObject<HTMLElement | null>;
+  contentAreaRef?: RefObject<HTMLElement | null>;
   currentChapter: number | null;
   totalChapters: number;
   onSave: (payload: ReaderProgressPayload) => void;
@@ -22,6 +23,7 @@ interface UseDebouncedReaderProgressSaveOptions {
 
 interface UseRestoreReaderScrollOptions {
   scrollContainerRef: RefObject<HTMLElement | null>;
+  contentAreaRef?: RefObject<HTMLElement | null>;
   currentChapter: number | null;
   currentPositionRaw?: string | null;
   contentReady: boolean;
@@ -32,6 +34,7 @@ interface UseRestoreReaderScrollOptions {
 
 interface RestoreReaderScrollPositionOptions {
   scrollContainerRef: RefObject<HTMLElement | null>;
+  contentAreaRef?: RefObject<HTMLElement | null>;
   currentChapter: number | null;
   currentPositionRaw?: string | null;
   delayMs?: number;
@@ -56,8 +59,97 @@ function isScrollIntentKey(event: KeyboardEvent): boolean {
   );
 }
 
+type CaretDocument = Document & {
+  caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
+  caretRangeFromPoint?: (x: number, y: number) => Range | null;
+};
+
+function getTopLeftTextOffset(scrollContainer: HTMLElement, contentArea: HTMLElement): number | null {
+  const scrollRect = scrollContainer.getBoundingClientRect();
+  const contentRect = contentArea.getBoundingClientRect();
+  const x = Math.max(contentRect.left + 8, scrollRect.left + 8);
+  const y = scrollRect.top + 8;
+  const caretDocument = document as CaretDocument;
+
+  let node: Node | null = null;
+  let offset = 0;
+
+  if (typeof caretDocument.caretPositionFromPoint === "function") {
+    const position = caretDocument.caretPositionFromPoint(x, y);
+    if (position) {
+      node = position.offsetNode;
+      offset = position.offset;
+    }
+  } else if (typeof caretDocument.caretRangeFromPoint === "function") {
+    const range = caretDocument.caretRangeFromPoint(x, y);
+    if (range) {
+      node = range.startContainer;
+      offset = range.startOffset;
+    }
+  }
+
+  if (!node || !contentArea.contains(node instanceof HTMLElement ? node : node.parentElement)) {
+    return null;
+  }
+
+  const range = document.createRange();
+  range.setStart(contentArea, 0);
+  range.setEnd(node, offset);
+  return range.toString().length;
+}
+
+function findTextNodeByOffset(root: HTMLElement, textOffset: number): { node: Text; offset: number } | null {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let remaining = Math.max(0, textOffset);
+  let current = walker.nextNode();
+
+  while (current) {
+    if (current.nodeType === Node.TEXT_NODE) {
+      const textNode = current as Text;
+      const len = textNode.data.length;
+      if (remaining <= len) {
+        return { node: textNode, offset: Math.min(remaining, len) };
+      }
+      remaining -= len;
+    }
+    current = walker.nextNode();
+  }
+
+  return null;
+}
+
+function restoreByTextOffset(
+  scrollContainer: HTMLElement,
+  contentArea: HTMLElement,
+  textOffset: number,
+): boolean {
+  const target = findTextNodeByOffset(contentArea, textOffset);
+  if (!target) {
+    return false;
+  }
+
+  const range = document.createRange();
+  range.setStart(target.node, target.offset);
+  range.setEnd(target.node, target.offset);
+  const rect = range.getClientRects()[0] ?? range.getBoundingClientRect();
+  if (!rect || rect.height <= 0) {
+    return false;
+  }
+
+  const scrollRect = scrollContainer.getBoundingClientRect();
+  const desiredTop = scrollRect.top + 8;
+  const delta = rect.top - desiredTop;
+  if (!Number.isFinite(delta)) {
+    return false;
+  }
+
+  scrollContainer.scrollTop += delta;
+  return true;
+}
+
 function scheduleReaderScrollRestore({
   scrollContainerRef,
+  contentAreaRef,
   currentChapter,
   currentPositionRaw,
   delayMs = 300,
@@ -131,6 +223,15 @@ function scheduleReaderScrollRestore({
 
     if (!container) return;
 
+    const contentArea = contentAreaRef?.current ?? null;
+    if (
+      contentArea &&
+      typeof position.textOffset === "number" &&
+      restoreByTextOffset(container, contentArea, position.textOffset)
+    ) {
+      return;
+    }
+
     let targetScrollTop = normalizedSavedScrollTop;
 
     if (savedScrollable !== null) {
@@ -169,6 +270,7 @@ export function restoreReaderScrollPosition(options: RestoreReaderScrollPosition
 
 export function useDebouncedReaderProgressSave({
   scrollContainerRef,
+  contentAreaRef,
   currentChapter,
   totalChapters,
   onSave,
@@ -200,10 +302,11 @@ export function useDebouncedReaderProgressSave({
       scrollHeight: container.scrollHeight,
       clientHeight: container.clientHeight,
       progressOverride: options?.progressOverride,
+      textOffset: contentAreaRef?.current ? getTopLeftTextOffset(container, contentAreaRef.current) ?? undefined : undefined,
     });
 
     onSave(payload);
-  }, [enabled, scrollContainerRef, currentChapter, totalChapters, onSave]);
+  }, [enabled, scrollContainerRef, contentAreaRef, currentChapter, totalChapters, onSave]);
 
   const scheduleSave = useCallback(() => {
     if (!enabled) return;
@@ -229,6 +332,7 @@ export function useDebouncedReaderProgressSave({
 
 export function useRestoreReaderScroll({
   scrollContainerRef,
+  contentAreaRef,
   currentChapter,
   currentPositionRaw,
   contentReady,
@@ -289,13 +393,14 @@ export function useRestoreReaderScroll({
     }
     cleanupRef.current = scheduleReaderScrollRestore({
       scrollContainerRef,
+      contentAreaRef,
       currentChapter,
       currentPositionRaw,
       delayMs,
       retryAttempts,
       retryDelayMs,
     });
-  }, [contentReady, currentChapter, currentPositionRaw, scrollContainerRef, delayMs, retryAttempts, retryDelayMs]);
+  }, [contentReady, currentChapter, currentPositionRaw, scrollContainerRef, contentAreaRef, delayMs, retryAttempts, retryDelayMs]);
 
   useEffect(() => {
     return () => {
