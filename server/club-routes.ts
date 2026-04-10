@@ -1096,7 +1096,7 @@ router.post('/:clubId/transfer-ownership', jwtAuth, async (req, res) => {
       const [currentMember] = await storage.getClubMembersWithRoles(clubId)
         .then(members => members.filter(m => m.id === currentUserId));
 
-      if (!currentMember || currentMember.role !== 'owner') {
+      if (currentMember?.role !== 'owner') {
         return res.status(403).json({ message: 'Only club owner or admin can transfer ownership' });
       }
     }

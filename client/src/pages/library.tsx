@@ -10,9 +10,11 @@ import {
   Loader2,
   LogIn,
   MoreVertical,
+  CalendarClock,
   Trash2,
 } from "lucide-react";
 import { useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
 import { AccountActivationBanner } from "@/components/AccountActivationBanner";
 import { MainLayout } from "@/components/layout/MainLayout";
@@ -50,11 +52,13 @@ import {
 import { useClearReadingHistory, useReadingHistory } from "@/hooks/use-reading-history";
 import { useAllBookmarks, useDeleteBookmarkEntry } from "@/hooks/use-reader";
 import { savePendingReaderBookmarkNavigation } from "@/lib/reader-bookmark-navigation";
+import { apiRequest } from "@/lib/queryClient";
 import { toast } from "@/hooks/use-toast";
 
 export default function Library() {
   const { isAuthenticated } = useAuth();
   const [, setLocation] = useLocation();
+  const queryClient = useQueryClient();
   const { data: userBooksResponse, isLoading, refetch } = usePersonalBooks();
   const books = userBooksResponse || [];
   const { bookmarks, isLoading: bookmarksLoading } = useAllBookmarks();
@@ -66,6 +70,9 @@ export default function Library() {
   // State for book management dialogs
   const [editingBook, setEditingBook] = useState<PersonalBook | null>(null);
   const [deletingBook, setDeletingBook] = useState<PersonalBook | null>(null);
+  const [planningBook, setPlanningBook] = useState<PersonalBook | null>(null);
+  const [notInterestedBook, setNotInterestedBook] = useState<PersonalBook | null>(null);
+  const [plannedYear, setPlannedYear] = useState<number>(new Date().getFullYear());
   const [editForm, setEditForm] = useState({
     title: "",
     author: "",
@@ -77,6 +84,65 @@ export default function Library() {
   const deleteBookMutation = useDeletePersonalBook();
   const updateBookMutation = useUpdatePersonalBook();
   const deleteBookmarkMutation = useDeleteBookmarkEntry();
+
+  const planBookMutation = useMutation({
+    mutationFn: async ({ bookId, year }: { bookId: string; year: number }) => {
+      await apiRequest('/api/reading-status', {
+        method: 'POST',
+        body: JSON.stringify({
+          bookId,
+          bookType: 'personal',
+          status: 'planned',
+          progress: 0,
+          notes: JSON.stringify({ plannedYear: year }),
+        }),
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['reading-status'] });
+      queryClient.invalidateQueries({ queryKey: ['reading-stats'] });
+      queryClient.invalidateQueries({ queryKey: ['reading-goal'] });
+      toast({
+        title: 'Книга запланирована',
+        description: `Добавили в планы на ${plannedYear} год`,
+      });
+      setPlanningBook(null);
+    },
+    onError: () => {
+      toast({
+        title: 'Ошибка',
+        description: 'Не удалось запланировать книгу',
+        variant: 'destructive',
+      });
+    },
+  });
+
+  const markAsNotInterestedMutation = useMutation({
+    mutationFn: async (bookId: string) => {
+      await apiRequest(`/api/v1/user/books/${bookId}?markAsAbandoned=true`, {
+        method: 'DELETE',
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/v1/user/books'] });
+      queryClient.invalidateQueries({ queryKey: ['reading-status'] });
+      queryClient.invalidateQueries({ queryKey: ['reading-stats'] });
+      queryClient.invalidateQueries({ queryKey: ['reading-goal'] });
+      toast({
+        title: 'Книга перенесена в «Брошено»',
+        description: 'Книга удалена из библиотеки и сохранена в статистике',
+      });
+      setNotInterestedBook(null);
+      refetch();
+    },
+    onError: () => {
+      toast({
+        title: 'Ошибка',
+        description: 'Не удалось удалить книгу из библиотеки',
+        variant: 'destructive',
+      });
+    },
+  });
 
   // Проверка авторизации
   if (!isAuthenticated) {
@@ -178,6 +244,24 @@ export default function Library() {
 
   const handleReadBook = (book: PersonalBook) => {
     setLocation(`/books/${book.id}/read`);
+  };
+
+  const handlePlanBook = (book: PersonalBook) => {
+    setPlanningBook(book);
+    setPlannedYear(new Date().getFullYear());
+  };
+
+  const handleConfirmPlanBook = () => {
+    if (!planningBook) return;
+    planBookMutation.mutate({
+      bookId: planningBook.id,
+      year: plannedYear,
+    });
+  };
+
+  const handleConfirmNotInterested = () => {
+    if (!notInterestedBook) return;
+    markAsNotInterestedMutation.mutate(notInterestedBook.id);
   };
 
   const handleOpenBookmark = (bookmark: {
@@ -367,6 +451,20 @@ export default function Library() {
                       >
                         <Book className="w-4 h-4" /> Читать
                       </Button>
+                      <Button
+                        variant="outline"
+                        className="flex-1 gap-2 sm:flex-none"
+                        onClick={() => handlePlanBook(book)}
+                      >
+                        <CalendarClock className="w-4 h-4" /> Запланировать
+                      </Button>
+                      <Button
+                        variant="outline"
+                        className="flex-1 gap-2 text-muted-foreground hover:text-destructive sm:flex-none"
+                        onClick={() => setNotInterestedBook(book)}
+                      >
+                        <Trash2 className="w-4 h-4" /> Не интересно
+                      </Button>
                     </div>
                   </div>
                 </div>
@@ -435,31 +533,40 @@ export default function Library() {
           </TabsContent>
 
           <TabsContent value="bookmarks">
-            {bookmarksLoading ? (
-              <div className="space-y-4">
-                {[1, 2, 3].map((i) => (
-                  <div key={i} className="flex gap-3 rounded-xl border bg-card p-3 sm:gap-4 sm:p-4">
-                    <Skeleton className="w-20 h-28 rounded-lg shrink-0" />
-                    <div className="flex-1 space-y-3">
-                      <Skeleton className="h-5 w-2/3" />
-                      <Skeleton className="h-4 w-1/3" />
-                      <Skeleton className="h-4 w-1/4" />
-                      <Skeleton className="h-9 w-32" />
-                    </div>
+            {(() => {
+              if (bookmarksLoading) {
+                return (
+                  <div className="space-y-4">
+                    {[1, 2, 3].map((i) => (
+                      <div key={i} className="flex gap-3 rounded-xl border bg-card p-3 sm:gap-4 sm:p-4">
+                        <Skeleton className="w-20 h-28 rounded-lg shrink-0" />
+                        <div className="flex-1 space-y-3">
+                          <Skeleton className="h-5 w-2/3" />
+                          <Skeleton className="h-4 w-1/3" />
+                          <Skeleton className="h-4 w-1/4" />
+                          <Skeleton className="h-9 w-32" />
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-            ) : bookmarks.length === 0 ? (
-              <div className="text-center py-16 bg-secondary/20 rounded-xl border border-dashed">
-                <Bookmark className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
-                <h3 className="font-medium">Нет сохраненных закладок</h3>
-                <p className="text-muted-foreground max-w-sm mx-auto mt-2">
-                  Ставьте закладки прямо во время чтения, чтобы быстро возвращаться к важным местам книги.
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {bookmarks.map((bookmark) => (
+                );
+              }
+
+              if (bookmarks.length === 0) {
+                return (
+                  <div className="text-center py-16 bg-secondary/20 rounded-xl border border-dashed">
+                    <Bookmark className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
+                    <h3 className="font-medium">Нет сохраненных закладок</h3>
+                    <p className="text-muted-foreground max-w-sm mx-auto mt-2">
+                      Ставьте закладки прямо во время чтения, чтобы быстро возвращаться к важным местам книги.
+                    </p>
+                  </div>
+                );
+              }
+
+              return (
+                <div className="space-y-4">
+                  {bookmarks.map((bookmark) => (
                   <div
                     key={bookmark.id}
                     className="group flex flex-col gap-4 rounded-xl border bg-card p-4 transition-all hover:border-primary/20 sm:flex-row"
@@ -521,9 +628,10 @@ export default function Library() {
                       </div>
                     </div>
                   </div>
-                ))}
-              </div>
-            )}
+                  ))}
+                </div>
+              );
+            })()}
           </TabsContent>
         </Tabs>
       </div>
@@ -604,6 +712,61 @@ export default function Library() {
               disabled={deleteBookMutation.isPending}
             >
               {deleteBookMutation.isPending ? "Удаление..." : "Удалить"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Plan Book Dialog */}
+      <Dialog open={!!planningBook} onOpenChange={() => setPlanningBook(null)}>
+        <DialogContent className="max-w-[calc(100vw-2rem)] sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Запланировать чтение</DialogTitle>
+            <DialogDescription>
+              Выберите год, в котором хотите прочитать книгу "{planningBook?.title}".
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-2 py-4">
+            <Label htmlFor="planned-year">Хочу прочитать в году</Label>
+            <Input
+              id="planned-year"
+              type="number"
+              min={new Date().getFullYear()}
+              max={new Date().getFullYear() + 15}
+              value={plannedYear}
+              onChange={(e) => setPlannedYear(Number.parseInt(e.target.value, 10) || new Date().getFullYear())}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPlanningBook(null)}>
+              Отмена
+            </Button>
+            <Button onClick={handleConfirmPlanBook} disabled={planBookMutation.isPending}>
+              {planBookMutation.isPending ? "Сохраняем..." : "Запланировать"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Not Interested Dialog */}
+      <Dialog open={!!notInterestedBook} onOpenChange={() => setNotInterestedBook(null)}>
+        <DialogContent className="max-w-[calc(100vw-2rem)] sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Не интересно</DialogTitle>
+            <DialogDescription>
+              Книга "{notInterestedBook?.title}" будет удалена из личной библиотеки и сохранена в разделе "Брошено" для статистики.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setNotInterestedBook(null)}>
+              Отмена
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleConfirmNotInterested}
+              disabled={markAsNotInterestedMutation.isPending}
+            >
+              {markAsNotInterestedMutation.isPending ? "Удаляем..." : "Подтвердить"}
             </Button>
           </DialogFooter>
         </DialogContent>

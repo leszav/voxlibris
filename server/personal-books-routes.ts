@@ -1,7 +1,7 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import multer from 'multer';
 import { storage } from './repositories/index.js';
-import { BookFormat } from '../shared/schema.js';
+import { BookFormat, bookReadingStatus } from '../shared/schema.js';
 import { jwtAuth, requireActiveUser } from './jwt-middleware.js';
 import crypto from 'node:crypto';
 import { BookParserFactory } from './book-parser.js';
@@ -11,6 +11,8 @@ import { fileStorage } from './file-storage.js';
 import { duplicateDetectionService } from './duplicate-detection-service.js';
 import { logger } from './lib/logger.js';
 import { optimizeImage } from './image-optimizer.js';
+import { db } from './db.js';
+import { and, eq } from 'drizzle-orm';
 
 const router = Router();
 
@@ -20,7 +22,7 @@ function parsePositiveInt(value: string | undefined, fallback: number): number {
 }
 
 function sanitizeUploadFileName(fileName: string): string {
-    return fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+    return fileName.replaceAll(/[^a-zA-Z0-9._-]/g, '_');
 }
 
 const MAX_BOOK_UPLOAD_BYTES = parsePositiveInt(process.env.MAX_BOOK_UPLOAD_MB, 50) * 1024 * 1024;
@@ -55,6 +57,17 @@ type UploadMetadata = Omit<Partial<BookMetadata>, 'coverImageData' | 'coverImage
     coverImageData?: Buffer | string | null;
     coverImageType?: string | null;
 };
+
+function decodeCoverImageData(coverImageData: string, warningMessage: string): Buffer | undefined {
+    try {
+        const matches = coverImageData.match(/^data:([A-Za-z+/-]+);base64,(.+)$/);
+        const encodedImage = matches?.[2] ?? coverImageData;
+        return Buffer.from(encodedImage, 'base64');
+    } catch (error) {
+        console.warn(warningMessage, error);
+        return undefined;
+    }
+}
 
 function normalizeUploadMetadata(metadata: UploadMetadata): UploadMetadata {
     const normalized: UploadMetadata = { ...metadata };
@@ -240,35 +253,16 @@ async function processPersonalCoverImage(
     userId: string,
     sessionId: string
 ): Promise<string | undefined> {
-    let coverBuffer: Buffer | undefined;
-
-    if (metadata.coverImageData && typeof metadata.coverImageData === 'string') {
-        try {
-            const matches = metadata.coverImageData.match(/^data:([A-Za-z+/-]+);base64,(.+)$/);
-            if (matches?.length === 3) {
-                coverBuffer = Buffer.from(matches[2], 'base64');
-            } else {
-                coverBuffer = Buffer.from(metadata.coverImageData, 'base64');
-            }
-        } catch (e) {
-            console.warn('[PersonalBooks] Failed to parse cover image', e);
-        }
-    } else if (metadata.coverImageData === null) {
-        coverBuffer = undefined;
-    } else if (typeof session.parsedMetadata.coverImageData === 'string') {
-        try {
-            const matches = session.parsedMetadata.coverImageData.match(/^data:([A-Za-z+/-]+);base64,(.+)$/);
-            if (matches?.length === 3) {
-                coverBuffer = Buffer.from(matches[2], 'base64');
-            } else {
-                coverBuffer = Buffer.from(session.parsedMetadata.coverImageData, 'base64');
-            }
-        } catch (e) {
-            console.warn('[PersonalBooks] Failed to parse cached cover image', e);
-        }
-    } else if (Buffer.isBuffer(session.parsedMetadata.coverImageData)) {
-        coverBuffer = session.parsedMetadata.coverImageData;
-    }
+    const coverBuffer =
+        typeof metadata.coverImageData === 'string'
+            ? decodeCoverImageData(metadata.coverImageData, '[PersonalBooks] Failed to parse cover image')
+            : metadata.coverImageData === null
+              ? undefined
+              : typeof session.parsedMetadata.coverImageData === 'string'
+                ? decodeCoverImageData(session.parsedMetadata.coverImageData, '[PersonalBooks] Failed to parse cached cover image')
+                : Buffer.isBuffer(session.parsedMetadata.coverImageData)
+                  ? session.parsedMetadata.coverImageData
+                  : undefined;
 
     if (!coverBuffer) return undefined;
 
@@ -475,9 +469,47 @@ router.delete('/:id', jwtAuth, async (req, res) => {
     if (!book) return res.status(404).json({ error: 'Book not found' });
     if (book.userId !== req.user.id) return res.status(403).json({ error: 'Forbidden' });
 
+    const markAsAbandoned = req.query.markAsAbandoned === 'true';
+
     await storage.deletePersonalBook(req.params.id);
+
+    if (markAsAbandoned) {
+        const [existingAbandonedStatus] = await db
+            .select()
+            .from(bookReadingStatus)
+            .where(and(
+                eq(bookReadingStatus.userId, req.user.id),
+                eq(bookReadingStatus.bookId, req.params.id),
+                eq(bookReadingStatus.bookType, 'personal')
+            ))
+            .limit(1);
+
+        if (existingAbandonedStatus) {
+            await db
+                .update(bookReadingStatus)
+                .set({
+                    status: 'abandoned',
+                    progress: 0,
+                    notes: existingAbandonedStatus.notes || 'Отмечено как не интересно',
+                    updatedAt: new Date(),
+                })
+                .where(eq(bookReadingStatus.id, existingAbandonedStatus.id));
+        } else {
+            await db
+                .insert(bookReadingStatus)
+                .values({
+                    userId: req.user.id,
+                    bookId: req.params.id,
+                    bookType: 'personal',
+                    status: 'abandoned',
+                    progress: 0,
+                    notes: 'Отмечено как не интересно',
+                });
+        }
+    }
+
     bookCache.delete(req.params.id);
-    res.json({ success: true });
+    res.json({ success: true, archivedAsAbandoned: markAsAbandoned });
 });
 
 // Get Book Content (для ридера) - с кэшированием и ленивой загрузкой

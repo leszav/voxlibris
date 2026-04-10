@@ -13,6 +13,7 @@ import {
 import { db } from './db.js';
 import { eq, and, asc, lt, isNotNull, inArray } from 'drizzle-orm';
 import { logger } from './lib/logger.js';
+import { syncBookReadingStatus } from './lib/sync-reading-status.js';
 
 const router = express.Router();
 
@@ -149,6 +150,18 @@ router.put('/:clubId/progress', jwtAuth, async (req, res) => {
       });
     
     logger.debug('[Club Reader] Progress saved successfully');
+
+    // Синхронизируем статус чтения (единый механизм с WebSocket-ридером)
+    try {
+      await syncBookReadingStatus({
+        userId,
+        bookId: clubBook.id,
+        bookType: 'club',
+        progress,
+      });
+    } catch (syncErr) {
+      logger.error({ error: syncErr }, '[Club Reader] Failed to sync book_reading_status');
+    }
 
     // Возвращаем обновленный прогресс включая клубный
     const [adminProgress] = await db

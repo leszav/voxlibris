@@ -2,7 +2,7 @@ import { Server as HttpServer } from "node:http";
 import { Server, Socket } from "socket.io";
 import jwt, { JwtPayload } from "jsonwebtoken";
 import { db } from "./db.js";
-import { users, readingProgress, bookmarks, notes, books, clubMembers, bookReadingStatus } from "../shared/schema.js";
+import { users, readingProgress, bookmarks, notes, books, clubMembers } from "../shared/schema.js";
 import { eq, and, desc, isNull } from "drizzle-orm";
 import type {
   ReaderProgressUpdate,
@@ -10,6 +10,7 @@ import type {
   NoteUpdate,
 } from "../shared/schema.js";
 import { logger } from "./lib/logger.js";
+import { syncBookReadingStatus } from "./lib/sync-reading-status.js";
 
 interface AuthenticatedSocket extends Socket {
   userId: string;
@@ -240,32 +241,15 @@ export function initializeReaderWebSocket(httpServer: HttpServer) {
           }
         }
 
-        // Обновляем статус книги в book_reading_status
+        // Синхронизируем статус чтения (единый механизм с REST-ридером)
         try {
           const bookType = normalizedClubId ? 'club' : 'personal';
-          const newStatus = normalizedProgress === 100 ? 'completed' : 'reading';
-          const now = new Date();
-
-          await db
-            .insert(bookReadingStatus)
-            .values({
-              userId: authSocket.userId,
-              bookId: data.bookId,
-              bookType,
-              status: newStatus,
-              progress: normalizedProgress,
-              startedAt: now,
-              completedAt: normalizedProgress === 100 ? now : null,
-            })
-            .onConflictDoUpdate({
-              target: [bookReadingStatus.userId, bookReadingStatus.bookId, bookReadingStatus.bookType],
-              set: {
-                status: newStatus,
-                progress: normalizedProgress,
-                completedAt: normalizedProgress === 100 ? now : undefined,
-                updatedAt: now,
-              },
-            });
+          await syncBookReadingStatus({
+            userId: authSocket.userId,
+            bookId: data.bookId,
+            bookType,
+            progress: normalizedProgress,
+          });
         } catch (statusError) {
           const errorMessage = statusError instanceof Error ? statusError.message : String(statusError);
           logger.error({ error: errorMessage }, "[WS Reader] Error updating book reading status");
