@@ -12,6 +12,7 @@ import {
   LogOut,
   MessageCircle,
   MoreHorizontal,
+  Star,
   Trash2,
   Users,
 } from "lucide-react";
@@ -41,7 +42,7 @@ import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { VoxLibrisUpload } from "@/components/ui/voxlibris-upload";
 import { useAuth } from "@/hooks/use-auth";
-import { useDeleteClubBook } from "@/hooks/use-books-v2";
+import { useClubBooks, useDeleteClubBook, useSetActiveBook, type ClubBook } from "@/hooks/use-books-v2";
 import { useClub, useClubMembers, useRemoveMember, type ClubDetailsResponse, type ClubMemberWithUser } from "@/hooks/use-clubs";
 import { modalConfirm, useToast } from "@/hooks/use-toast";
 import { getAccessToken } from "@/lib/token-store";
@@ -733,6 +734,100 @@ function MembersListCard({ clubId, clubTitle, members, memberCount, membersLoadi
   );
 }
 
+// Component: Club Library Tab
+interface ClubLibraryTabProps {
+  readonly clubId: string;
+  readonly activeBookId: string | null | undefined;
+  readonly isOwner: boolean;
+  readonly isMember: boolean;
+  readonly setLocation: (path: string) => void;
+}
+
+function ClubLibraryTab({ clubId, activeBookId, isOwner, isMember, setLocation }: ClubLibraryTabProps) {
+  const { data: books = [], isLoading } = useClubBooks(clubId);
+  const setActiveBook = useSetActiveBook(clubId);
+  const deleteBookMutation = useDeleteClubBook(clubId);
+  const { toast } = useToast();
+
+  const handleSetActive = async (bookId: string) => {
+    setActiveBook.mutate(bookId, {
+      onSuccess: () => toast({ title: "Активная книга изменена" }),
+      onError: () => toast({ title: "Ошибка", description: "Не удалось изменить активную книгу", variant: "destructive" }),
+    });
+  };
+
+  const handleDelete = async (book: ClubBook) => {
+    const confirmed = await modalConfirm(`Удалить книгу «${book.title}»?`);
+    if (!confirmed) return;
+    deleteBookMutation.mutate(book.id, {
+      onError: () => toast({ title: "Ошибка", description: "Не удалось удалить книгу", variant: "destructive" }),
+    });
+  };
+
+  if (isLoading) {
+    return <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>;
+  }
+
+  if (books.length === 0) {
+    return (
+      <div className="text-center py-12 text-muted-foreground">
+        <BookOpen className="w-12 h-12 mx-auto mb-4 opacity-20" />
+        <p>В библиотеке клуба пока нет книг</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {books.map((book) => {
+        const isActive = book.id === activeBookId;
+        return (
+          <div key={book.id} className={`flex gap-3 rounded-lg border p-3 ${isActive ? "border-primary/40 bg-primary/5" : "bg-card"}`}>
+            <div className="w-12 h-16 shrink-0 overflow-hidden rounded">
+              {book.coverUrl ? (
+                <img src={book.coverUrl} alt={book.title} className="h-full w-full object-cover" />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center bg-muted">
+                  <BookOpen className="w-5 h-5 text-muted-foreground" />
+                </div>
+              )}
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="font-medium text-sm leading-tight truncate">{book.title}</p>
+                  <p className="text-xs text-muted-foreground truncate">{book.author}</p>
+                </div>
+                {isActive && <Badge variant="outline" className="text-xs shrink-0 border-primary/40 text-primary">Активная</Badge>}
+              </div>
+              <div className="flex flex-wrap gap-2 mt-2">
+                {isMember && (
+                  <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setLocation(`/clubs/${clubId}/books/${book.id}/read`)}>
+                    <BookOpen className="w-3 h-3 mr-1" />
+                    Читать
+                  </Button>
+                )}
+                {isOwner && !isActive && (
+                  <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => handleSetActive(book.id)} disabled={setActiveBook.isPending}>
+                    <Star className="w-3 h-3 mr-1" />
+                    Сделать активной
+                  </Button>
+                )}
+                {isOwner && (
+                  <Button size="sm" variant="outline" className="h-7 text-xs text-destructive hover:text-destructive" onClick={() => handleDelete(book)} disabled={deleteBookMutation.isPending}>
+                    <Trash2 className="w-3 h-3 mr-1" />
+                    Удалить
+                  </Button>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // Component: Club Content Tabs
 interface ClubContentTabsProps {
   readonly clubId: string;
@@ -741,9 +836,11 @@ interface ClubContentTabsProps {
   readonly currentUserId: string;
   readonly settings: ClubSettings;
   readonly scheduleItems: ScheduleItem[];
+  readonly activeBookId: string | null | undefined;
+  readonly setLocation: (path: string) => void;
 }
 
-function ClubContentTabs({ clubId, isMember, isOwner, currentUserId, settings, scheduleItems }: ClubContentTabsProps) {
+function ClubContentTabs({ clubId, isMember, isOwner, currentUserId, settings, scheduleItems, activeBookId, setLocation }: ClubContentTabsProps) {
   return (
     <Tabs defaultValue="about" className="w-full">
       <TabsList className="-mx-4 flex h-auto w-[calc(100%+2rem)] justify-start gap-2 overflow-x-auto whitespace-nowrap border-b rounded-none bg-transparent px-4 py-0 sm:mx-0 sm:w-full sm:gap-6 sm:px-0">
@@ -771,6 +868,14 @@ function ClubContentTabs({ clubId, isMember, isOwner, currentUserId, settings, s
         >
           Расписание
         </TabsTrigger>
+        {isMember && (
+          <TabsTrigger
+            value="library"
+            className="rounded-none border-b-2 border-transparent data-[state=active]:border-accent data-[state=active]:bg-transparent data-[state=active]:shadow-none py-3 px-1 font-medium"
+          >
+            Библиотека
+          </TabsTrigger>
+        )}
       </TabsList>
 
       <TabsContent value="reading-plan" className="pt-6 animate-in slide-in-from-bottom-2">
@@ -895,6 +1000,16 @@ function ClubContentTabs({ clubId, isMember, isOwner, currentUserId, settings, s
           )}
         </div>
       </TabsContent>
+
+      <TabsContent value="library" className="pt-6 animate-in slide-in-from-bottom-2">
+        <ClubLibraryTab
+          clubId={clubId}
+          activeBookId={activeBookId}
+          isOwner={isOwner}
+          isMember={isMember}
+          setLocation={setLocation}
+        />
+      </TabsContent>
     </Tabs>
   );
 }
@@ -993,20 +1108,7 @@ export default function ClubDetails() {
             deleteBookMutation={deleteBookMutation}
             setLocation={setLocation}
           />
-        </div>
 
-        <div className="order-2 lg:col-span-2">
-          <ClubContentTabs
-            clubId={clubId}
-            isMember={isMember}
-            isOwner={isOwner}
-            currentUserId={user?.id || ''}
-            settings={settings}
-            scheduleItems={scheduleItems}
-          />
-        </div>
-
-        <div className="order-3 space-y-6 lg:col-span-1 lg:space-y-8">
           <MembersListCard
             clubId={clubId}
             clubTitle={club.title}
@@ -1025,6 +1127,19 @@ export default function ClubDetails() {
               <InvitationsList clubId={clubId} isOwner={isOwner} />
             </div>
           )}
+        </div>
+
+        <div className="order-2 lg:col-span-2">
+          <ClubContentTabs
+            clubId={clubId}
+            isMember={isMember}
+            isOwner={isOwner}
+            currentUserId={user?.id || ''}
+            settings={settings}
+            scheduleItems={scheduleItems}
+            activeBookId={club.bookId}
+            setLocation={setLocation}
+          />
         </div>
       </div>
 

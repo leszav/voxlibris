@@ -61,14 +61,19 @@ export class ClubRepository extends BaseRepository {
         .where(inArray(clubMembers.clubId, clubIds))
         .groupBy(clubMembers.clubId),
       includeBook
-        ? this.db
-            .select()
-            .from(clubBooks)
-            .where(and(
-              inArray(clubBooks.clubId, clubIds),
-              eq(clubBooks.isDeleted, false),
-            ))
-            .orderBy(desc(clubBooks.uploadedAt))
+        ? (() => {
+            const activeBookIds = clubsData
+              .map((c) => c.bookId)
+              .filter((id): id is string => id !== null && id !== undefined);
+            if (activeBookIds.length === 0) return Promise.resolve([] as (typeof clubBooks.$inferSelect)[]);
+            return this.db
+              .select()
+              .from(clubBooks)
+              .where(and(
+                inArray(clubBooks.id, activeBookIds),
+                eq(clubBooks.isDeleted, false),
+              ));
+          })()
         : Promise.resolve([] as (typeof clubBooks.$inferSelect)[]),
       includeTags
         ? this.db
@@ -87,11 +92,9 @@ export class ClubRepository extends BaseRepository {
       memberCounts.map((entry) => [entry.clubId, Number(entry.count || 0)]),
     );
 
-    const latestBookMap = new Map<string, typeof clubBooks.$inferSelect>();
+    const activeBookMap = new Map<string, typeof clubBooks.$inferSelect>();
     for (const book of latestBooks) {
-      if (!latestBookMap.has(book.clubId)) {
-        latestBookMap.set(book.clubId, book);
-      }
+      activeBookMap.set(book.id, book);
     }
 
     const tagsMap = new Map<string, string[]>();
@@ -106,7 +109,7 @@ export class ClubRepository extends BaseRepository {
 
     return clubsData.map((club) => ({
       ...club,
-      book: includeBook ? latestBookMap.get(club.id) || null : null,
+      book: includeBook ? (club.bookId ? activeBookMap.get(club.bookId) || null : null) : null,
       owner: ownersMap.get(club.ownerId) || null,
       memberCount: memberCountMap.get(club.id) || 0,
       tags: includeTags ? (tagsMap.get(club.id) || []) : [],
@@ -134,11 +137,12 @@ export class ClubRepository extends BaseRepository {
     }
   }
 
-  async getPublicCatalogClubs(limit?: number): Promise<ClientPublicCatalogClub[]> {
+  async getPublicCatalogClubs(limit?: number, searchQuery?: string): Promise<ClientPublicCatalogClub[]> {
     try {
       const normalizedLimit = typeof limit === 'number' && Number.isFinite(limit) && limit > 0
         ? Math.min(Math.trunc(limit), 100)
         : undefined;
+      const normalizedSearch = typeof searchQuery === 'string' ? searchQuery.trim().toLowerCase() : '';
 
       let query = this.db
         .select({
@@ -152,7 +156,8 @@ export class ClubRepository extends BaseRepository {
         .orderBy(desc(clubs.popularityScore), desc(clubs.createdAt))
         .$dynamic();
 
-      if (normalizedLimit) {
+      // Для поискового запроса сначала получаем полный набор и фильтруем по клубу/книге/автору.
+      if (normalizedLimit && !normalizedSearch) {
         query = query.limit(normalizedLimit);
       }
 
@@ -186,7 +191,7 @@ export class ClubRepository extends BaseRepository {
         }
       }
 
-      return result.map((club) => ({
+      const catalogClubs = result.map((club) => ({
         id: club.id,
         title: club.title,
         description: club.description ?? null,
@@ -195,6 +200,26 @@ export class ClubRepository extends BaseRepository {
         author: latestBookMap.get(club.id)?.author ?? null,
         bookCoverUrl: latestBookMap.get(club.id)?.coverUrl ?? null,
       }));
+
+      const filtered = normalizedSearch
+        ? catalogClubs.filter((club) => {
+            const title = club.title.toLowerCase();
+            const description = (club.description ?? '').toLowerCase();
+            const bookTitle = (club.bookTitle ?? '').toLowerCase();
+            const author = (club.author ?? '').toLowerCase();
+
+            return title.includes(normalizedSearch)
+              || description.includes(normalizedSearch)
+              || bookTitle.includes(normalizedSearch)
+              || author.includes(normalizedSearch);
+          })
+        : catalogClubs;
+
+      if (!normalizedLimit) {
+        return filtered;
+      }
+
+      return filtered.slice(0, normalizedLimit);
     } catch (error) {
       this.logError('getPublicCatalogClubs', error);
       return [];
@@ -279,7 +304,7 @@ export class ClubRepository extends BaseRepository {
       // Возвращаем клуб со всеми данными
       return {
         ...club,
-        book: books[0] || null,
+        book: books.find(b => b.id === club.bookId) || null,
         books: books,
         owner: owner || null,
         memberCount: Number(memberCount),

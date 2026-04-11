@@ -84,15 +84,25 @@ export interface PublicCatalogClub {
 }
 
 // Получить все клубы для каталога (не требует аутентификации)
-export function useCatalogClubs(limit?: number) {
+export function useCatalogClubs(limit?: number, searchQuery?: string) {
+  const normalizedSearch = typeof searchQuery === "string" ? searchQuery.trim() : "";
+
   return useQuery({
-    queryKey: ["catalog-clubs", limit ?? "all"],
+    queryKey: ["catalog-clubs", limit ?? "all", normalizedSearch || "no-query"],
     queryFn: async (): Promise<PublicCatalogClub[]> => {
-      // Используем простой fetch без авторизации для публичного эндпоинта
-      const search = typeof limit === "number" && Number.isFinite(limit) && limit > 0
-        ? `?limit=${Math.trunc(limit)}`
-        : "";
-      const res = await fetch(`/api/clubs/catalog${search}`);
+      const params = new URLSearchParams();
+
+      if (typeof limit === "number" && Number.isFinite(limit) && limit > 0) {
+        params.set("limit", String(Math.trunc(limit)));
+      }
+
+      if (normalizedSearch) {
+        params.set("q", normalizedSearch);
+      }
+
+      const queryString = params.toString();
+      const url = queryString ? `/api/clubs/catalog?${queryString}` : "/api/clubs/catalog";
+      const res = await fetch(url);
       if (!res.ok) {
         throw new Error("Failed to fetch clubs");
       }

@@ -179,10 +179,15 @@ router.get('/catalog', async (req, res) => {
   try {
     const rawLimit = typeof req.query.limit === 'string' ? Number.parseInt(req.query.limit, 10) : undefined;
     const limit = Number.isFinite(rawLimit) && rawLimit && rawLimit > 0 ? rawLimit : undefined;
-    const clubs = await storage.getPublicCatalogClubs(limit);
+    const searchQuery = typeof req.query.q === 'string' ? req.query.q.trim() : undefined;
+    const clubs = await storage.getPublicCatalogClubs(limit, searchQuery);
 
-    // Публичный список клубов меняется нечасто, поэтому даем браузеру и CDN короткое кеширование.
-    res.setHeader('Cache-Control', 'public, max-age=300, stale-while-revalidate=3600');
+    // Поисковые запросы не кэшируем, общий каталог можно кэшировать.
+    if (searchQuery) {
+      res.setHeader('Cache-Control', 'no-store');
+    } else {
+      res.setHeader('Cache-Control', 'public, max-age=300, stale-while-revalidate=3600');
+    }
     res.json(clubs);
   } catch (error) {
     console.error('Error getting catalog clubs:', error);

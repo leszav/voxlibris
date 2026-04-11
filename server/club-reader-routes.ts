@@ -1,6 +1,7 @@
 import express from 'express';
 import { jwtAuth } from './jwt-middleware.js';
 import {
+  clubs,
   clubBooks,
   clubMembers,
   readingProgress,
@@ -16,6 +17,25 @@ import { logger } from './lib/logger.js';
 import { syncBookReadingStatus } from './lib/sync-reading-status.js';
 
 const router = express.Router();
+
+/** Возвращает активную книгу клуба через clubs.bookId (детерминированный запрос) */
+async function findClubActiveBook(clubId: string) {
+  const [club] = await db
+    .select({ bookId: clubs.bookId })
+    .from(clubs)
+    .where(eq(clubs.id, clubId))
+    .limit(1);
+
+  if (!club?.bookId) return null;
+
+  const [book] = await db
+    .select()
+    .from(clubBooks)
+    .where(and(eq(clubBooks.id, club.bookId), eq(clubBooks.isDeleted, false)))
+    .limit(1);
+
+  return book ?? null;
+}
 
 /**
  * PUT /api/clubs/:clubId/progress
@@ -44,11 +64,7 @@ router.get('/:clubId/progress', jwtAuth, async (req, res) => {
       return res.status(403).json({ message: 'Not a member of this club' });
     }
 
-    const [clubBook] = await db
-      .select()
-      .from(clubBooks)
-      .where(and(eq(clubBooks.clubId, clubId), eq(clubBooks.isDeleted, false)))
-      .limit(1);
+    const clubBook = await findClubActiveBook(clubId);
 
     if (!clubBook) {
       return res.status(404).json({ message: 'No active book for this club' });
@@ -121,11 +137,7 @@ router.put('/:clubId/progress', jwtAuth, async (req, res) => {
       return res.status(403).json({ message: 'Not a member of this club' });
     }
 
-    const [clubBook] = await db
-      .select()
-      .from(clubBooks)
-      .where(and(eq(clubBooks.clubId, clubId), eq(clubBooks.isDeleted, false)))
-      .limit(1);
+    const clubBook = await findClubActiveBook(clubId);
 
     if (!clubBook) {
       return res.status(404).json({ message: 'No active book for this club' });
@@ -321,11 +333,7 @@ router.get('/:clubId/reading-plan', jwtAuth, async (req, res) => {
       return res.status(403).json({ message: 'Not a member of this club' });
     }
 
-    const [clubBook] = await db
-      .select()
-      .from(clubBooks)
-      .where(and(eq(clubBooks.clubId, clubId), eq(clubBooks.isDeleted, false)))
-      .limit(1);
+    const clubBook = await findClubActiveBook(clubId);
 
     if (!clubBook) {
       return res.status(404).json({ message: 'No book selected for this club', code: 'NO_BOOK_SELECTED' });
@@ -425,11 +433,7 @@ router.post('/:clubId/reading-plan', jwtAuth, async (req, res) => {
       return res.status(403).json({ message: 'Only owner or moderator can create reading plans' });
     }
 
-    const [clubBook] = await db
-      .select()
-      .from(clubBooks)
-      .where(and(eq(clubBooks.clubId, clubId), eq(clubBooks.isDeleted, false)))
-      .limit(1);
+    const clubBook = await findClubActiveBook(clubId);
 
     if (!clubBook) {
       return res.status(404).json({ message: 'No book selected for this club', code: 'NO_BOOK_SELECTED' });
@@ -734,11 +738,7 @@ router.get('/:clubId/members-progress', jwtAuth, async (req, res) => {
       return res.status(403).json({ message: 'Not a member of this club' });
     }
 
-    const [clubBook] = await db
-      .select()
-      .from(clubBooks)
-      .where(and(eq(clubBooks.clubId, clubId), eq(clubBooks.isDeleted, false)))
-      .limit(1);
+    const clubBook = await findClubActiveBook(clubId);
 
     if (!clubBook) {
       return res.status(404).json({ message: 'No book selected for this club', code: 'NO_BOOK_SELECTED' });

@@ -557,6 +557,33 @@ router.patch('/clubs/:clubId/books/:bookId', jwtAuth, requireActiveUser, async (
     }
 });
 
+router.put('/clubs/:clubId/active-book', jwtAuth, requireActiveUser, async (req, res) => {
+    try {
+        if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
+        const { clubId } = req.params;
+        const { bookId } = req.body as { bookId?: string };
+
+        if (!bookId) return res.status(400).json({ error: 'bookId is required' });
+
+        const membersWithRoles = await storage.getClubMembersWithRoles(clubId);
+        const membership = membersWithRoles.find((m) => m.id === req.user?.id);
+        if (!membership || membership.role !== 'owner') {
+            return res.status(403).json({ error: 'Only the club owner can change the active book' });
+        }
+
+        const book = await storage.getClubBook(bookId);
+        if (!book || book.clubId !== clubId || book.isDeleted) {
+            return res.status(404).json({ error: 'Book not found in this club' });
+        }
+
+        await storage.updateClub(clubId, { bookId });
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Set active book error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 router.use((err: unknown, _req: Request, res: Response, next: NextFunction) => {
     if (err instanceof multer.MulterError) {
         if (err.code === 'LIMIT_FILE_SIZE') {

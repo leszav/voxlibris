@@ -222,3 +222,19 @@ export function useUpdateClubBook(clubId: string) {
     },
   });
 }
+
+export function useSetActiveBook(clubId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation<void, Error, string>({
+    mutationFn: async (bookId: string) => {
+      await apiRequest(`/api/v1/clubs/${clubId}/active-book`, {
+        method: "PUT",
+        body: JSON.stringify({ bookId }),
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["club", clubId] });
+    },
+  });
+}

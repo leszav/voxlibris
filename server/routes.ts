@@ -569,6 +569,75 @@ export async function registerRoutes(
     }
   });
 
+  // Global search across clubs, books, users, and future features
+  app.get("/api/search/global", async (req: Request, res: Response) => {
+    try {
+      const { q } = req.query;
+      const rawLimit = typeof req.query.limit === "string" ? Number.parseInt(req.query.limit, 10) : 6;
+      const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 20) : 6;
+
+      if (!q || typeof q !== "string" || q.trim().length < 2) {
+        return res.json({
+          query: typeof q === "string" ? q : "",
+          results: {
+            clubs: [],
+            books: [],
+            users: [],
+            features: [],
+          },
+        });
+      }
+
+      const query = q.trim();
+      const queryLower = query.toLowerCase();
+
+      const [clubs, books, users] = await Promise.all([
+        storage.getPublicCatalogClubs(limit, query),
+        storage.searchBooks(query),
+        storage.searchUsers(query, limit),
+      ]);
+
+      const searchableFeatures = [
+        { id: "catalog", title: "Каталог клубов", description: "Открыть все клубы", path: "/catalog", isFuture: false },
+        { id: "readers", title: "Топ чтецов", description: "Раздел чтецов и рейтингов", path: "/readers", isFuture: false },
+        { id: "library", title: "Моя библиотека", description: "Личные книги, история, закладки", path: "/library", isFuture: false },
+        { id: "pricing", title: "Тарифы", description: "Тарифные планы и возможности", path: "/pricing", isFuture: false },
+        { id: "become-reader", title: "Стать чтецом", description: "Подача заявки и onboarding", path: "/become-reader", isFuture: false },
+        { id: "rules", title: "Правила сообщества", description: "Раздел в разработке", path: "", isFuture: true },
+        { id: "privacy", title: "Приватность", description: "Раздел в разработке", path: "", isFuture: true },
+        { id: "terms", title: "Условия", description: "Раздел в разработке", path: "", isFuture: true },
+      ];
+
+      const features = searchableFeatures
+        .filter((item) => {
+          const haystack = `${item.title} ${item.description}`.toLowerCase();
+          return haystack.includes(queryLower);
+        })
+        .slice(0, limit);
+
+      res.json({
+        query,
+        results: {
+          clubs: clubs.slice(0, limit),
+          books: books.slice(0, limit).map((book) => ({
+            id: book.id,
+            title: book.title,
+            author: book.author,
+          })),
+          users: users.slice(0, limit).map((user) => ({
+            id: user.id,
+            username: user.username,
+            status: user.status,
+          })),
+          features,
+        },
+      });
+    } catch (error) {
+      console.error("Global search error:", error);
+      res.status(500).json({ message: "Внутренняя ошибка сервера" });
+    }
+  });
+
   // Get book by ID
   app.get("/api/books/:id", async (req: Request, res: Response) => {
     try {
