@@ -594,6 +594,14 @@ function ReaderWorkspaceView({
   syncError: string | null;
   progress: { currentChapter: number; currentPosition: string; progress: number } | null;
 }>) {
+  const tocActiveRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    if (tocOpen) {
+      tocActiveRef.current?.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+    }
+  }, [tocOpen]);
+
   return (
     <div className="flex flex-col h-screen bg-background text-foreground overflow-hidden">
       {selectionState && (
@@ -641,26 +649,41 @@ function ReaderWorkspaceView({
                 <List className="w-4 h-4 mr-1 sm:mr-2" />
                 <span className="hidden xs:inline">Оглавление</span>
               </Button>
-              {tocOpen && (
-                <div className="absolute left-0 top-full mt-2 w-[85vw] max-w-[320px] sm:w-80 max-h-96 overflow-y-auto bg-background text-foreground border rounded-md shadow-lg p-3 sm:p-4 z-50">
-                  <h3 className="font-semibold text-lg mb-4">Оглавление</h3>
-                  <div className="space-y-2">
+            </div>
+            {tocOpen && (
+              <div className="fixed inset-0 z-50 flex items-start justify-end pointer-events-none">
+                <div className="bg-background border rounded-lg shadow-xl w-[85vw] max-w-[320px] sm:max-w-md max-h-[80vh] overflow-y-auto pointer-events-auto mt-14 mr-2 sm:mr-4 flex flex-col">
+                  <div className="sticky top-0 bg-background border-b p-3 sm:p-4 flex items-center justify-between flex-none">
+                    <h3 className="font-semibold text-base sm:text-lg">Оглавление</h3>
+                    <Button variant="ghost" size="sm" onClick={() => setTocOpen(false)}>✕</Button>
+                  </div>
+                  <div className="p-2 sm:p-3 flex-1 space-y-0.5">
                     {bookData.isPersonalBook && bookData.chapters ? (
-                      bookData.chapters.map((chapter: Chapter) => (
-                        <Button
-                          key={chapter.chapterNumber}
-                          variant={currentChapter === chapter.chapterNumber ? "secondary" : "ghost"}
-                          className="w-full justify-start"
-                          onClick={() => {
-                            changeChapter(chapter.chapterNumber);
-                            setTocOpen(false);
-                          }}
-                        >
-                          {chapter.title || `Глава ${chapter.chapterNumber}`}
-                        </Button>
-                      ))
+                      bookData.chapters.map((chapter: Chapter) => {
+                        const isActive = currentChapter === chapter.chapterNumber;
+                        return (
+                          <Button
+                            key={chapter.chapterNumber}
+                            ref={isActive ? tocActiveRef : undefined}
+                            variant={isActive ? "secondary" : "ghost"}
+                            className="w-full justify-start text-left h-auto py-2 px-3"
+                            onClick={() => {
+                              changeChapter(chapter.chapterNumber);
+                              setTocOpen(false);
+                            }}
+                          >
+                            <div className="flex flex-col items-start">
+                              <span className="font-medium text-sm">{chapter.title || `Глава ${chapter.chapterNumber}`}</span>
+                              {chapter.title && (
+                                <span className="text-xs text-muted-foreground mt-0.5">Глава {chapter.chapterNumber}</span>
+                              )}
+                            </div>
+                          </Button>
+                        );
+                      })
                     ) : (
                       <Button
+                        ref={tocActiveRef}
                         variant={currentChapter === 1 ? "secondary" : "ghost"}
                         className="w-full justify-start"
                         onClick={() => {
@@ -673,8 +696,8 @@ function ReaderWorkspaceView({
                     )}
                   </div>
                 </div>
-              )}
-            </div>
+              </div>
+            )}
 
             <div className="relative">
               <Button
