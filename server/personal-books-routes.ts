@@ -60,13 +60,34 @@ type UploadMetadata = Omit<Partial<BookMetadata>, 'coverImageData' | 'coverImage
 
 function decodeCoverImageData(coverImageData: string, warningMessage: string): Buffer | undefined {
     try {
-        const matches = coverImageData.match(/^data:([A-Za-z+/-]+);base64,(.+)$/);
+        const dataUrlRegex = /^data:([A-Za-z+/-]+);base64,(.+)$/;
+        const matches = dataUrlRegex.exec(coverImageData);
         const encodedImage = matches?.[2] ?? coverImageData;
         return Buffer.from(encodedImage, 'base64');
     } catch (error) {
         console.warn(warningMessage, error);
         return undefined;
     }
+}
+
+function resolveCoverBuffer(metadata: UploadMetadata, session: UploadSession): Buffer | undefined {
+    if (typeof metadata.coverImageData === 'string') {
+        return decodeCoverImageData(metadata.coverImageData, '[PersonalBooks] Failed to parse cover image');
+    }
+
+    if (metadata.coverImageData === null) {
+        return undefined;
+    }
+
+    if (typeof session.parsedMetadata.coverImageData === 'string') {
+        return decodeCoverImageData(session.parsedMetadata.coverImageData, '[PersonalBooks] Failed to parse cached cover image');
+    }
+
+    if (Buffer.isBuffer(session.parsedMetadata.coverImageData)) {
+        return session.parsedMetadata.coverImageData;
+    }
+
+    return undefined;
 }
 
 function normalizeUploadMetadata(metadata: UploadMetadata): UploadMetadata {
@@ -253,16 +274,7 @@ async function processPersonalCoverImage(
     userId: string,
     sessionId: string
 ): Promise<string | undefined> {
-    const coverBuffer =
-        typeof metadata.coverImageData === 'string'
-            ? decodeCoverImageData(metadata.coverImageData, '[PersonalBooks] Failed to parse cover image')
-            : metadata.coverImageData === null
-              ? undefined
-              : typeof session.parsedMetadata.coverImageData === 'string'
-                ? decodeCoverImageData(session.parsedMetadata.coverImageData, '[PersonalBooks] Failed to parse cached cover image')
-                : Buffer.isBuffer(session.parsedMetadata.coverImageData)
-                  ? session.parsedMetadata.coverImageData
-                  : undefined;
+    const coverBuffer = resolveCoverBuffer(metadata, session);
 
     if (!coverBuffer) return undefined;
 

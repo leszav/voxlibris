@@ -194,30 +194,32 @@ export function Bookshelf({ userId }: BookshelfProps) {
                       )}
                       
                       {/* Меню смены статуса */}
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="sm" className="mt-2 h-7 text-xs">
-                            Изменить статус
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent>
-                          {bookshelfStatuses
-                            .filter(s => s.id !== item.status)
-                            .map((status) => (
-                              <DropdownMenuItem
-                                key={status.id}
-                                onClick={() => updateStatusMutation.mutate({
-                                  bookId: item.bookId,
-                                  bookType: item.bookType,
-                                  newStatus: status.id,
-                                })}
-                              >
-                                <div className={`w-2 h-2 rounded-full ${status.color} mr-2`} />
-                                {status.label}
-                              </DropdownMenuItem>
-                            ))}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
+                      {item.status !== 'abandoned' && (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="sm" className="mt-2 h-7 text-xs">
+                              Изменить статус
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent>
+                            {bookshelfStatuses
+                              .filter(s => s.id !== item.status)
+                              .map((status) => (
+                                <DropdownMenuItem
+                                  key={status.id}
+                                  onClick={() => updateStatusMutation.mutate({
+                                    bookId: item.bookId,
+                                    bookType: item.bookType,
+                                    newStatus: status.id,
+                                  })}
+                                >
+                                  <div className={`w-2 h-2 rounded-full ${status.color} mr-2`} />
+                                  {status.label}
+                                </DropdownMenuItem>
+                              ))}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      )}
                     </div>
                   </div>
                 </CardContent>

@@ -25,6 +25,13 @@ interface DatabaseErrorLike {
   code?: string;
 }
 
+type NormalizedProgressUpdate = {
+  clubId: string | null;
+  currentChapter: number;
+  currentPosition: string;
+  progress: number;
+};
+
 function extractPositionTimestamp(raw: string | null | undefined): number | null {
   if (!raw) return null;
 
@@ -55,6 +62,149 @@ function isUniqueViolation(error: unknown): boolean {
   return typeof error === "object"
     && error !== null
     && (error as DatabaseErrorLike).code === "23505";
+}
+
+function normalizeProgressUpdate(data: ReaderProgressUpdate): NormalizedProgressUpdate {
+  const clubId = typeof data.clubId === "string" && data.clubId.length > 0 ? data.clubId : null;
+  const currentChapter = typeof data.currentChapter === "number" && data.currentChapter > 0 ? data.currentChapter : 1;
+  const currentPosition = typeof data.currentPosition === "string"
+    ? data.currentPosition
+    : JSON.stringify(data.currentPosition || {});
+  const progress = typeof data.progress === "number" ? data.progress : 0;
+
+  return {
+    clubId,
+    currentChapter,
+    currentPosition,
+    progress,
+  };
+}
+
+async function findLatestProgress(userId: string, bookId: string, clubId: string | null) {
+  const [existingProgress] = await db
+    .select({
+      id: readingProgress.id,
+      currentPosition: readingProgress.currentPosition,
+    })
+    .from(readingProgress)
+    .where(and(
+      eq(readingProgress.userId, userId),
+      eq(readingProgress.bookId, bookId),
+      clubId ? eq(readingProgress.clubId, clubId) : isNull(readingProgress.clubId),
+    ))
+    .orderBy(desc(readingProgress.updatedAt), desc(readingProgress.lastReadAt))
+    .limit(1);
+
+  return existingProgress;
+}
+
+async function updateProgressRecord(
+  progressId: string,
+  normalized: NormalizedProgressUpdate,
+) {
+  await db
+    .update(readingProgress)
+    .set({
+      currentChapter: normalized.currentChapter,
+      currentPosition: normalized.currentPosition,
+      progress: normalized.progress,
+      clubId: normalized.clubId,
+      lastReadAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .where(eq(readingProgress.id, progressId));
+}
+
+async function saveReadingProgress(
+  userId: string,
+  bookId: string,
+  normalized: NormalizedProgressUpdate,
+): Promise<{ stale: boolean }> {
+  const existingProgress = await findLatestProgress(userId, bookId, normalized.clubId);
+
+  if (existingProgress) {
+    const stale = isStaleProgressUpdate(existingProgress.currentPosition, normalized.currentPosition);
+    if (stale) {
+      return { stale: true };
+    }
+
+    await updateProgressRecord(existingProgress.id, normalized);
+    return { stale: false };
+  }
+
+  try {
+    await db
+      .insert(readingProgress)
+      .values({
+        userId,
+        bookId,
+        clubId: normalized.clubId,
+        currentChapter: normalized.currentChapter,
+        currentPosition: normalized.currentPosition,
+        progress: normalized.progress,
+        lastReadAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+    return { stale: false };
+  } catch (error) {
+    if (!isUniqueViolation(error)) {
+      throw error;
+    }
+
+    const currentProgress = await findLatestProgress(userId, bookId, normalized.clubId);
+    if (currentProgress && !isStaleProgressUpdate(currentProgress.currentPosition, normalized.currentPosition)) {
+      await updateProgressRecord(currentProgress.id, normalized);
+    }
+
+    return { stale: false };
+  }
+}
+
+async function handleProgressUpdate(
+  socket: Socket,
+  authSocket: AuthenticatedSocket,
+  data: ReaderProgressUpdate,
+): Promise<void> {
+  try {
+    const normalized = normalizeProgressUpdate(data);
+    const saveResult = await saveReadingProgress(authSocket.userId, data.bookId, normalized);
+
+    if (saveResult.stale) {
+      socket.emit("progress_saved", { success: true, ignored: true, reason: "stale_progress_update" });
+      return;
+    }
+
+    try {
+      const bookType = normalized.clubId ? "club" : "personal";
+      await syncBookReadingStatus({
+        userId: authSocket.userId,
+        bookId: data.bookId,
+        bookType,
+        progress: normalized.progress,
+      });
+    } catch (statusError) {
+      const errorMessage = statusError instanceof Error ? statusError.message : String(statusError);
+      logger.error({ error: errorMessage }, "[WS Reader] Error updating book reading status");
+    }
+
+    if (normalized.clubId) {
+      const roomName = `club:${normalized.clubId}:book:${data.bookId}`;
+      socket.to(roomName).emit("member_progress", {
+        userId: authSocket.userId,
+        username: authSocket.username,
+        currentChapter: normalized.currentChapter,
+        progress: normalized.progress,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    socket.emit("progress_saved", { success: true });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error({ error: errorMessage }, "[WS Reader] Error updating progress");
+    socket.emit("error", { message: "Failed to save progress" });
+  }
 }
 
 // Улучшенная аутентификация через JWT с проверкой пользователя в БД
@@ -148,131 +298,7 @@ export function initializeReaderWebSocket(httpServer: HttpServer) {
 
     // Обновление прогресса чтения
     socket.on("progress_update", async (data: ReaderProgressUpdate) => {
-      try {
-        const normalizedClubId = typeof data.clubId === 'string' && data.clubId.length > 0
-          ? data.clubId
-          : null;
-        const normalizedCurrentChapter = typeof data.currentChapter === 'number' && data.currentChapter > 0
-          ? data.currentChapter
-          : 1;
-        const normalizedCurrentPosition = typeof data.currentPosition === 'string'
-          ? data.currentPosition
-          : JSON.stringify(data.currentPosition || {});
-        const normalizedProgress = typeof data.progress === 'number' ? data.progress : 0;
-
-        // Сохранение прогресса без ON CONFLICT: в reading_progress нет unique(user_id, book_id)
-        const [existingProgress] = await db
-          .select({
-            id: readingProgress.id,
-            currentPosition: readingProgress.currentPosition,
-          })
-          .from(readingProgress)
-          .where(and(
-            eq(readingProgress.userId, authSocket.userId),
-            eq(readingProgress.bookId, data.bookId),
-            normalizedClubId ? eq(readingProgress.clubId, normalizedClubId) : isNull(readingProgress.clubId),
-          ))
-          .orderBy(desc(readingProgress.updatedAt), desc(readingProgress.lastReadAt))
-          .limit(1);
-
-        if (existingProgress) {
-          if (isStaleProgressUpdate(existingProgress.currentPosition, normalizedCurrentPosition)) {
-            socket.emit("progress_saved", { success: true, ignored: true, reason: "stale_progress_update" });
-            return;
-          }
-
-          await db
-            .update(readingProgress)
-            .set({
-              currentChapter: normalizedCurrentChapter,
-              currentPosition: normalizedCurrentPosition,
-              progress: normalizedProgress,
-              clubId: normalizedClubId,
-              lastReadAt: new Date(),
-              updatedAt: new Date(),
-            })
-            .where(eq(readingProgress.id, existingProgress.id));
-        } else {
-          try {
-            await db
-              .insert(readingProgress)
-              .values({
-                userId: authSocket.userId,
-                bookId: data.bookId,
-                clubId: normalizedClubId,
-                currentChapter: normalizedCurrentChapter,
-                currentPosition: normalizedCurrentPosition,
-                progress: normalizedProgress,
-                lastReadAt: new Date(),
-                updatedAt: new Date(),
-              });
-          } catch (error) {
-            if (!isUniqueViolation(error)) {
-              throw error;
-            }
-
-            const [currentProgress] = await db
-              .select({
-                id: readingProgress.id,
-                currentPosition: readingProgress.currentPosition,
-              })
-              .from(readingProgress)
-              .where(and(
-                eq(readingProgress.userId, authSocket.userId),
-                eq(readingProgress.bookId, data.bookId),
-                normalizedClubId ? eq(readingProgress.clubId, normalizedClubId) : isNull(readingProgress.clubId),
-              ))
-              .orderBy(desc(readingProgress.updatedAt), desc(readingProgress.lastReadAt))
-              .limit(1);
-
-            if (currentProgress && !isStaleProgressUpdate(currentProgress.currentPosition, normalizedCurrentPosition)) {
-              await db
-                .update(readingProgress)
-                .set({
-                  currentChapter: normalizedCurrentChapter,
-                  currentPosition: normalizedCurrentPosition,
-                  progress: normalizedProgress,
-                  clubId: normalizedClubId,
-                  lastReadAt: new Date(),
-                  updatedAt: new Date(),
-                })
-                .where(eq(readingProgress.id, currentProgress.id));
-            }
-          }
-        }
-
-        // Синхронизируем статус чтения (единый механизм с REST-ридером)
-        try {
-          const bookType = normalizedClubId ? 'club' : 'personal';
-          await syncBookReadingStatus({
-            userId: authSocket.userId,
-            bookId: data.bookId,
-            bookType,
-            progress: normalizedProgress,
-          });
-        } catch (statusError) {
-          const errorMessage = statusError instanceof Error ? statusError.message : String(statusError);
-          logger.error({ error: errorMessage }, "[WS Reader] Error updating book reading status");
-        }
-
-        // Broadcast в комнату (для клубов)
-        if (normalizedClubId) {
-          const roomName = `club:${normalizedClubId}:book:${data.bookId}`;
-          socket.to(roomName).emit("member_progress", {
-            userId: authSocket.userId,
-            username: authSocket.username,
-            currentChapter: normalizedCurrentChapter,
-            progress: normalizedProgress,
-            timestamp: new Date().toISOString(),
-          });
-        }
-        
-        socket.emit("progress_saved", { success: true });
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        logger.error({ error: errorMessage }, "[WS Reader] Error updating progress");
-        socket.emit("error", { message: "Failed to save progress" });
-      }
+      await handleProgressUpdate(socket, authSocket, data);
     });
 
     // Добавление закладки

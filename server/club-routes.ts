@@ -1093,8 +1093,8 @@ router.post('/:clubId/transfer-ownership', jwtAuth, async (req, res) => {
     
     if (!isAdmin) {
       // Если не админ, проверяем что пользователь - владелец клуба
-      const [currentMember] = await storage.getClubMembersWithRoles(clubId)
-        .then(members => members.filter(m => m.id === currentUserId));
+      const currentMember = await storage.getClubMembersWithRoles(clubId)
+        .then(members => members.find(m => m.id === currentUserId));
 
       if (currentMember?.role !== 'owner') {
         return res.status(403).json({ message: 'Only club owner or admin can transfer ownership' });
@@ -1102,8 +1102,8 @@ router.post('/:clubId/transfer-ownership', jwtAuth, async (req, res) => {
     }
 
     // Проверяем что новый владелец - участник клуба
-    const [newOwnerMember] = await storage.getClubMembersWithRoles(clubId)
-      .then(members => members.filter(m => m.id === newOwnerId));
+    const newOwnerMember = await storage.getClubMembersWithRoles(clubId)
+      .then(members => members.find(m => m.id === newOwnerId));
 
     if (!newOwnerMember) {
       return res.status(404).json({ message: 'New owner must be a club member' });
