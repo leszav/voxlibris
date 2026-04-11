@@ -1,11 +1,11 @@
 import { QueryClientProvider } from "@tanstack/react-query";
-import { Route, Switch } from "wouter";
+import { Route, Switch, Redirect } from "wouter";
 import { Suspense, lazy, useEffect, useState } from "react";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { EmailVerificationModal } from "@/components/ui/email-verification-modal";
-import { AuthProvider } from "@/hooks/use-auth";
+import { AuthProvider, useAuth } from "@/hooks/use-auth";
 import Home from "@/pages/home";
 import { queryClient } from "./lib/queryClient";
 import { YandexMetrikaTracker } from "./lib/yandexMetrika";
@@ -53,27 +53,47 @@ function RouteFallback() {
   );
 }
 
+/**
+ * Защищённый маршрут — перенаправляет на /auth/login если пользователь
+ * не аутентифицирован. Пока идёт загрузка состояния auth — показывает
+ * заглушку (не редиректит, чтобы не сбрасывать URL при refresh-токене).
+ */
+function ProtectedRoute({ component: Component }: Readonly<{ component: React.ComponentType }>) {
+  const { isAuthenticated, isLoading } = useAuth();
+  if (isLoading) return <RouteFallback />;
+  if (!isAuthenticated) return <Redirect to="/auth/login" />;
+  return <Component />;
+}
+
+// Именованные обёртки для защищённых маршрутов — вынесены на уровень модуля,
+// чтобы не создавать компоненты внутри компонента (S6478).
+const ProtectedStudio          = () => <ProtectedRoute component={ReaderStudio} />;
+const ProtectedMyClubs         = () => <ProtectedRoute component={MyClubs} />;
+const ProtectedCreateClub      = () => <ProtectedRoute component={CreateClub} />;
+const ProtectedReaderWorkspace = () => <ProtectedRoute component={ReaderWorkspacePage} />;
+const ProtectedClubReader      = () => <ProtectedRoute component={ClubReaderPage} />;
+
 function Router() {
   return (
     <Switch>
       <Route path="/" component={Home} />
       <Route path="/catalog" component={Catalog} />
-      <Route path="/reader-studio" component={ReaderStudio} />
+      <Route path="/studio/:clubId/:bookId/:chapter?" component={ProtectedStudio} />
 
       {/* Guest Routes */}
       <Route path="/guest/library" component={GuestLibrary} />
       <Route path="/guest/reader/:bookId" component={GuestReader} />
 
       {/* Club Routes */}
-      <Route path="/clubs" component={MyClubs} />
-      <Route path="/clubs/create" component={CreateClub} />
+      <Route path="/clubs" component={ProtectedMyClubs} />
+      <Route path="/clubs/create" component={ProtectedCreateClub} />
       <Route path="/clubs/:id" component={ClubDetails} />
       {/* Legacy route for compatibility */}
       <Route path="/club/:id" component={ClubDetails} />
 
       {/* Reader Routes */}
-      <Route path="/books/:bookId/read" component={ReaderWorkspacePage} />
-      <Route path="/clubs/:clubId/books/:bookId/read" component={ClubReaderPage} />
+      <Route path="/books/:bookId/read" component={ProtectedReaderWorkspace} />
+      <Route path="/clubs/:clubId/books/:bookId/read" component={ProtectedClubReader} />
 
       {/* Authentication Routes */}
       <Route path="/auth/login" component={Login} />

@@ -76,7 +76,7 @@ check_dependencies() {
 
 # Проверка статуса Docker сервисов
 check_docker_services() {
-    local services=("postgres" "minio" "redis")
+    local services=("postgres" "minio" "redis" "icecast")
     local running_services=()
     local stopped_services=()
     
@@ -126,6 +126,34 @@ check_app_services() {
     else
         echo -e "  🔴 Frontend: ${RED}Остановлен${NC} (http://localhost:3000)"
     fi
+
+    # Проверка Icecast (порт 8000)
+    if check_port 8000; then
+        echo -e "  🟢 Icecast: ${GREEN}Запущен${NC} (http://localhost:8000)"
+    else
+        echo -e "  🔴 Icecast: ${RED}Остановлен${NC} (http://localhost:8000)"
+    fi
+}
+
+# Запуск Icecast
+start_icecast() {
+    print_log "$BLUE" "INFO" "🎙️  Запуск Icecast..."
+    docker compose up -d icecast
+    
+    local max_attempts=15
+    local attempt=1
+    while [ $attempt -le $max_attempts ]; do
+        if check_port 8000; then
+            print_log "$GREEN" "INFO" "✅ Icecast готов (http://localhost:8000)"
+            return 0
+        fi
+        echo -n "."
+        sleep 1
+        ((attempt++))
+    done
+    
+    print_log "$YELLOW" "WARN" "⚠️  Icecast не ответил за ${max_attempts}с — продолжаем без него"
+    return 0  # Не блокируем запуск если Icecast недоступен
 }
 
 # Запуск Docker сервисов
@@ -133,6 +161,7 @@ start_docker_services() {
     print_log "$BLUE" "INFO" "🚀 Запуск Docker сервисов..."
     
     docker compose up -d postgres minio redis
+    start_icecast
     
     # Ожидание готовности сервисов
     print_log "$CYAN" "INFO" "⏳ Ожидание готовности сервисов..."
@@ -237,6 +266,7 @@ show_status() {
     echo -e "  🗄️  PostgreSQL: localhost:5432"
     echo -e "  📦 MinIO: http://localhost:9000 (Console: http://localhost:9001)"
     echo -e "  🔴 Redis: localhost:6379"
+    echo -e "  🎙️  Icecast: http://localhost:8000 (Admin: http://localhost:8000/admin)"
 }
 
 # Очистка логов
@@ -603,6 +633,7 @@ show_help() {
     echo -e "  ${GREEN}restart${NC}      Перезапуск всех сервисов"
     echo -e "  ${GREEN}status${NC}       Показать статус сервисов"
     echo -e "  ${GREEN}services${NC}     Запуск только Docker сервисов"
+    echo -e "  ${GREEN}icecast${NC}      Запуск только Icecast"
     echo -e "  ${GREEN}build${NC}        Сборка проекта"
     echo -e "  ${GREEN}check${NC}        Проверка типов TypeScript"
     echo -e "  ${GREEN}logs${NC}         Показать логи"
@@ -652,6 +683,11 @@ main() {
             check_dependencies
             check_env_file
             start_docker_services
+            ;;
+        "icecast")
+            check_dependencies
+            check_env_file
+            start_icecast
             ;;
         "build")
             check_dependencies

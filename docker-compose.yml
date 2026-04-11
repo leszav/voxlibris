@@ -59,6 +59,29 @@ services:
       timeout: 20s
       retries: 3
 
+  # Icecast — аудиостриминг для VoxLibris Studio (dev)
+  icecast:
+    build:
+      context: ./infra/icecast
+      dockerfile: Dockerfile
+    container_name: xlibris-icecast
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      ICECAST_SOURCE_PASSWORD: ${ICECAST_SOURCE_PASSWORD:-dev_source_pass}
+      ICECAST_ADMIN_PASSWORD: ${ICECAST_ADMIN_PASSWORD:-dev_admin_pass}
+      ICECAST_ADMIN_USERNAME: admin
+      ICECAST_HOSTNAME: localhost
+      ICECAST_MAX_CLIENTS: "100"
+      ICECAST_MAX_SOURCES: "10"
+    healthcheck:
+      test: ["CMD", "nc", "-zw1", "localhost", "8000"]
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
   # Local Verdaccio Registry (резервный)
   verdaccio:
     image: verdaccio/verdaccio:latest

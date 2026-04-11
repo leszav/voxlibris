@@ -3,8 +3,7 @@ import { storage } from "./repositories/index.js";
 import { logger } from "./lib/logger.js";
 import { AudioBroadcaster } from "./audio/audio-broadcaster.js";
 import { authService } from "./auth-service.js";
-import type { AudioChunk } from "./audio/types.js";
-import type { AudioSessionConfig } from "./audio/types.js";
+import type { AudioChunk, AudioSessionConfig } from "./audio/types.js";
 import type {
   SessionPositionUpdate,
   ListenerUpdate
@@ -71,7 +70,7 @@ export function setupWebSocketHandlers(io: SocketIOServer) {
       }
 
       const user = await storage.getUser(payload.userId);
-      if (!user || user.status !== "active" || !user.emailConfirmed) {
+      if (user?.status !== "active" || !user.emailConfirmed) {
         logger.error({ userId: payload.userId }, "WebSocket auth failed: user inactive or not confirmed");
         return next(new Error("User not allowed"));
       }
@@ -97,15 +96,25 @@ export function setupWebSocketHandlers(io: SocketIOServer) {
           return;
         }
 
-        // Verify session exists and is active
+        // Verify session exists.
+        // Чтецу разрешаем войти в свою комнату до официального старта (isLive=false),
+        // чтобы он гарантированно получил session_started при WS-реконнекте.
+        // Слушателям по-прежнему нужен активный эфир.
         const session = await storage.getReadingSession(sessionId);
-        if (session?.isLive !== true) {
+        if (!session) {
+          socket.emit("error", { message: "Session not found or not active" });
+          return;
+        }
+        const isReader = session.readerId === socket.userId;
+        if (!isReader && session.isLive !== true) {
           socket.emit("error", { message: "Session not found or not active" });
           return;
         }
 
-        // Join the session as a listener
-        await storage.joinSession(sessionId, socket.userId);
+        // Join the session as a listener (only for actual listeners, not the reader)
+        if (!isReader) {
+          await storage.joinSession(sessionId, socket.userId);
+        }
         
         // Join socket room
         await socket.join(`session_${sessionId}`);
@@ -127,8 +136,15 @@ export function setupWebSocketHandlers(io: SocketIOServer) {
           sessionId,
           currentChapter: session.currentChapter,
           currentPosition: session.currentPosition,
-          listenerCount
+          listenerCount,
+          isLive: session.isLive ?? false,
+          isPaused: false,
         });
+
+        // Если чтец реконнектится к уже активной сессии — дублируем session_started
+        if (session.isLive && socket.userId === session.readerId) {
+          socket.emit("session_started", { sessionId });
+        }
 
         logger.info(`User ${socket.userId} joined session ${sessionId}`);
       } catch (error) {

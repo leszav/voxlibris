@@ -18,6 +18,7 @@ import { logger } from "./lib/logger.js";
 import { getPublicBaseUrl } from "./lib/public-base-url.js";
 import { storeOptimizedImageIfNeeded } from "./lib/uploaded-image-storage.js";
 import { db } from "./db.js";
+import { getIO } from "./lib/socket-registry.js";
 import {
   analyticsEvents,
   insertClubSchema,
@@ -999,6 +1000,24 @@ export async function registerRoutes(
       const success = await storage.startSession(sessionId);
       if (!success) {
         return res.status(400).json({ message: "Не удалось запустить сессию" });
+      }
+
+      // Уведомляем чтеца и слушателей что сессия официально в эфире.
+      // Чтец может ещё не быть в room (join_session требует isLive=true),
+      // поэтому ищем его сокет по userId и добавляем в room + эмитим напрямую.
+      try {
+        const io = getIO();
+        const room = `session_${sessionId}`;
+        // Найти все сокеты чтеца и добавить в room
+        for (const [, sock] of io.sockets.sockets) {
+          const authSock = sock as typeof sock & { userId?: string };
+          if (authSock.userId === userId) {
+            await authSock.join(room);
+          }
+        }
+        io.to(room).emit("session_started", { sessionId });
+      } catch {
+        // io может не быть инициализирован в тестах — не критично
       }
 
       res.json({ message: "Сессия запущена" });

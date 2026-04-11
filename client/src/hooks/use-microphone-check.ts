@@ -94,6 +94,24 @@ export function useMicrophoneCheck() {
   const recordingNoiseSamplesRef = useRef<number[]>([]);
   const isRecordingRef = useRef(false);
   const recordingStopTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const playbackAudioRef = useRef<HTMLAudioElement | null>(null);
+  const playbackUrlRef = useRef<string | null>(null);
+
+  const cleanupPlayback = useCallback(() => {
+    if (playbackAudioRef.current) {
+      playbackAudioRef.current.onended = null;
+      playbackAudioRef.current.onerror = null;
+      playbackAudioRef.current.pause();
+      playbackAudioRef.current = null;
+    }
+
+    if (playbackUrlRef.current) {
+      URL.revokeObjectURL(playbackUrlRef.current);
+      playbackUrlRef.current = null;
+    }
+
+    setIsPlaying(false);
+  }, []);
 
   const applyGainLevel = useCallback((value: number) => {
     const normalized = clamp(value, MIN_GAIN, MAX_GAIN);
@@ -215,7 +233,7 @@ export function useMicrophoneCheck() {
         throw new Error('Ваш браузер не поддерживает доступ к микрофону');
       }
 
-      if (!window.MediaRecorder) {
+      if (!globalThis.MediaRecorder) {
         throw new Error('Браузер не поддерживает запись аудио');
       }
 
@@ -392,43 +410,45 @@ export function useMicrophoneCheck() {
   }, [analyzeCurrentRecording, initializeMicrophone, isInitialized, recordTestFragment]);
 
   const playRecording = useCallback(async (audioBlob: Blob) => {
+    cleanupPlayback();
     setIsPlaying(true);
 
     const audioUrl = URL.createObjectURL(audioBlob);
     const audio = new Audio(audioUrl);
+    playbackAudioRef.current = audio;
+    playbackUrlRef.current = audioUrl;
 
-    const cleanupAudio = () => {
-      setIsPlaying(false);
-      URL.revokeObjectURL(audioUrl);
-    };
-
-    audio.onended = cleanupAudio;
+    audio.onended = cleanupPlayback;
     audio.onerror = () => {
-      cleanupAudio();
+      cleanupPlayback();
       setError('Не удалось воспроизвести тестовую запись');
     };
 
     try {
       await audio.play();
     } catch (err) {
-      cleanupAudio();
+      cleanupPlayback();
       const message = err instanceof Error ? err.message : 'Неизвестная ошибка';
       setError(`Не удалось воспроизвести тестовую запись: ${message}`);
     }
-  }, []);
+  }, [cleanupPlayback]);
+
+  const stopPlayback = useCallback(() => {
+    cleanupPlayback();
+  }, [cleanupPlayback]);
 
   const stopTest = useCallback(() => {
     if (mediaRecorderRef.current?.state === 'recording') {
       mediaRecorderRef.current.stop();
     }
 
+    cleanupPlayback();
     isRecordingRef.current = false;
     cleanupMonitoring();
     setIsInitializing(false);
     setIsInitialized(false);
     setIsRecording(false);
-    setIsPlaying(false);
-  }, [cleanupMonitoring]);
+  }, [cleanupMonitoring, cleanupPlayback]);
 
   useEffect(() => stopTest, [stopTest]);
 
@@ -445,6 +465,7 @@ export function useMicrophoneCheck() {
     initializeMicrophone,
     runFullTest,
     playRecording,
+    stopPlayback,
     stopTest,
     setGainLevel: updateGainLevel,
     testDurationMs: TEST_DURATION_MS,

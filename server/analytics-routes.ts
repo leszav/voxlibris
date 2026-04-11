@@ -46,6 +46,192 @@ function sortCountEntries(map: Map<string, number>) {
     .sort((a, b) => b.count - a.count);
 }
 
+type MobilePwaNormalizedEventType =
+  | 'pwa_install'
+  | 'pwa_homescreen_open'
+  | 'mobile_reader_open'
+  | 'mobile_club_join';
+
+interface MobilePwaSummary {
+  pwaInstall: number;
+  pwaHomescreenOpen: number;
+  mobileReaderOpen: number;
+  mobileClubJoin: number;
+}
+
+interface MobilePwaTrendEntry {
+  date: string;
+  total: number;
+  pwaInstall: number;
+  pwaHomescreenOpen: number;
+  mobileReaderOpen: number;
+  mobileClubJoin: number;
+}
+
+interface MobilePwaEventRow {
+  eventType: string;
+  metadata: string | null;
+  createdAt: Date;
+}
+
+function resolvePeriodStartDate(periodRaw: unknown): Date {
+  const period = typeof periodRaw === 'string' ? periodRaw : '30d';
+  const startDate = new Date();
+
+  if (period === '7d') {
+    startDate.setDate(startDate.getDate() - 7);
+    return startDate;
+  }
+
+  if (period === '30d') {
+    startDate.setDate(startDate.getDate() - 30);
+    return startDate;
+  }
+
+  if (period === '90d') {
+    startDate.setDate(startDate.getDate() - 90);
+    return startDate;
+  }
+
+  if (period === 'all') {
+    return new Date('2020-01-01');
+  }
+
+  startDate.setDate(startDate.getDate() - 30);
+  return startDate;
+}
+
+function createMobilePwaSummary(): MobilePwaSummary {
+  return {
+    pwaInstall: 0,
+    pwaHomescreenOpen: 0,
+    mobileReaderOpen: 0,
+    mobileClubJoin: 0,
+  };
+}
+
+function createMobilePwaTrendEntry(date: string): MobilePwaTrendEntry {
+  return {
+    date,
+    total: 0,
+    pwaInstall: 0,
+    pwaHomescreenOpen: 0,
+    mobileReaderOpen: 0,
+    mobileClubJoin: 0,
+  };
+}
+
+function normalizeMobilePwaEventType(
+  eventType: string,
+  deviceType: string | null,
+  source: string | null,
+): MobilePwaNormalizedEventType | null {
+  if (eventType === 'pwa_install') {
+    return 'pwa_install';
+  }
+
+  if (eventType === 'pwa_homescreen_open') {
+    return 'pwa_homescreen_open';
+  }
+
+  const isMobileContext = deviceType === 'mobile' || deviceType === 'tablet';
+
+  if (eventType === 'book_open' && isMobileContext && (source === 'personal_reader' || source === 'club_reader')) {
+    return 'mobile_reader_open';
+  }
+
+  if (eventType === 'club_join' && isMobileContext) {
+    return 'mobile_club_join';
+  }
+
+  return null;
+}
+
+function incrementMobilePwaSummary(summary: MobilePwaSummary, eventType: MobilePwaNormalizedEventType) {
+  if (eventType === 'pwa_install') {
+    summary.pwaInstall += 1;
+    return;
+  }
+
+  if (eventType === 'pwa_homescreen_open') {
+    summary.pwaHomescreenOpen += 1;
+    return;
+  }
+
+  if (eventType === 'mobile_reader_open') {
+    summary.mobileReaderOpen += 1;
+    return;
+  }
+
+  summary.mobileClubJoin += 1;
+}
+
+function incrementMobilePwaTrend(entry: MobilePwaTrendEntry, eventType: MobilePwaNormalizedEventType) {
+  entry.total += 1;
+
+  if (eventType === 'pwa_install') {
+    entry.pwaInstall += 1;
+    return;
+  }
+
+  if (eventType === 'pwa_homescreen_open') {
+    entry.pwaHomescreenOpen += 1;
+    return;
+  }
+
+  if (eventType === 'mobile_reader_open') {
+    entry.mobileReaderOpen += 1;
+    return;
+  }
+
+  entry.mobileClubJoin += 1;
+}
+
+function collectMobilePwaStats(events: MobilePwaEventRow[]) {
+  const eventTypeMap = new Map<string, number>();
+  const deviceTypeMap = new Map<string, number>();
+  const osMap = new Map<string, number>();
+  const displayModeMap = new Map<string, number>();
+  const sourceMap = new Map<string, number>();
+  const trendMap = new Map<string, MobilePwaTrendEntry>();
+  const summary = createMobilePwaSummary();
+
+  for (const event of events) {
+    const metadata = parseAnalyticsMetadata(event.metadata);
+    const deviceType = typeof metadata.deviceType === 'string' ? metadata.deviceType : null;
+    const os = typeof metadata.os === 'string' ? metadata.os : null;
+    const displayMode = typeof metadata.displayMode === 'string' ? metadata.displayMode : null;
+    const source = typeof metadata.source === 'string' ? metadata.source : null;
+
+    const normalizedEventType = normalizeMobilePwaEventType(event.eventType, deviceType, source);
+    if (!normalizedEventType) {
+      continue;
+    }
+
+    incrementMobilePwaSummary(summary, normalizedEventType);
+    incrementCounter(eventTypeMap, normalizedEventType);
+    incrementCounter(deviceTypeMap, deviceType);
+    incrementCounter(osMap, os);
+    incrementCounter(displayModeMap, displayMode);
+    incrementCounter(sourceMap, source);
+
+    const date = new Date(event.createdAt).toISOString().slice(0, 10);
+    const dayEntry = trendMap.get(date) || createMobilePwaTrendEntry(date);
+    incrementMobilePwaTrend(dayEntry, normalizedEventType);
+    trendMap.set(date, dayEntry);
+  }
+
+  return {
+    summary,
+    eventTypeMap,
+    deviceTypeMap,
+    osMap,
+    displayModeMap,
+    sourceMap,
+    trendMap,
+  };
+}
+
 function detectDeviceType(userAgent: string): 'desktop' | 'mobile' | 'tablet' | 'unknown' {
   const ua = userAgent.toLowerCase();
   if (
@@ -629,16 +815,7 @@ router.get('/mobile-pwa', jwtAuth, requireAdmin, async (req: Request, res: Respo
   try {
     const { period = '30d' } = req.query;
 
-    let startDate = new Date();
-    if (period === '7d') {
-      startDate.setDate(startDate.getDate() - 7);
-    } else if (period === '30d') {
-      startDate.setDate(startDate.getDate() - 30);
-    } else if (period === '90d') {
-      startDate.setDate(startDate.getDate() - 90);
-    } else if (period === 'all') {
-      startDate = new Date('2020-01-01');
-    }
+    const startDate = resolvePeriodStartDate(period);
 
     const events = await db
       .select({
@@ -655,88 +832,25 @@ router.get('/mobile-pwa', jwtAuth, requireAdmin, async (req: Request, res: Respo
       )
       .orderBy(desc(analyticsEvents.createdAt));
 
-    const eventTypeMap = new Map<string, number>();
-    const deviceTypeMap = new Map<string, number>();
-    const osMap = new Map<string, number>();
-    const displayModeMap = new Map<string, number>();
-    const sourceMap = new Map<string, number>();
-    const trendMap = new Map<string, {
-      date: string;
-      total: number;
-      pwaInstall: number;
-      pwaHomescreenOpen: number;
-      mobileReaderOpen: number;
-      mobileClubJoin: number;
-    }>();
+    const {
+      summary,
+      eventTypeMap,
+      deviceTypeMap,
+      osMap,
+      displayModeMap,
+      sourceMap,
+      trendMap,
+    } = collectMobilePwaStats(events);
 
-    const summary = {
-      pwaInstall: 0,
-      pwaHomescreenOpen: 0,
-      mobileReaderOpen: 0,
-      mobileClubJoin: 0,
-    };
-
-    for (const event of events) {
-      const metadata = parseAnalyticsMetadata(event.metadata);
-      const deviceType = typeof metadata.deviceType === 'string' ? metadata.deviceType : null;
-      const os = typeof metadata.os === 'string' ? metadata.os : null;
-      const displayMode = typeof metadata.displayMode === 'string' ? metadata.displayMode : null;
-      const source = typeof metadata.source === 'string' ? metadata.source : null;
-      const isMobileContext = deviceType === 'mobile' || deviceType === 'tablet';
-
-      let normalizedEventType: 'pwa_install' | 'pwa_homescreen_open' | 'mobile_reader_open' | 'mobile_club_join' | null = null;
-
-      if (event.eventType === 'pwa_install') {
-        normalizedEventType = 'pwa_install';
-        summary.pwaInstall += 1;
-      } else if (event.eventType === 'pwa_homescreen_open') {
-        normalizedEventType = 'pwa_homescreen_open';
-        summary.pwaHomescreenOpen += 1;
-      } else if (event.eventType === 'book_open' && isMobileContext && (source === 'personal_reader' || source === 'club_reader')) {
-        normalizedEventType = 'mobile_reader_open';
-        summary.mobileReaderOpen += 1;
-      } else if (event.eventType === 'club_join' && isMobileContext) {
-        normalizedEventType = 'mobile_club_join';
-        summary.mobileClubJoin += 1;
-      }
-
-      if (!normalizedEventType) {
-        continue;
-      }
-
-      incrementCounter(eventTypeMap, normalizedEventType);
-      incrementCounter(deviceTypeMap, deviceType);
-      incrementCounter(osMap, os);
-      incrementCounter(displayModeMap, displayMode);
-      incrementCounter(sourceMap, source);
-
-      const date = new Date(event.createdAt).toISOString().slice(0, 10);
-      const dayEntry = trendMap.get(date) || {
-        date,
-        total: 0,
-        pwaInstall: 0,
-        pwaHomescreenOpen: 0,
-        mobileReaderOpen: 0,
-        mobileClubJoin: 0,
-      };
-
-      dayEntry.total += 1;
-      if (normalizedEventType === 'pwa_install') {
-        dayEntry.pwaInstall += 1;
-      } else if (normalizedEventType === 'pwa_homescreen_open') {
-        dayEntry.pwaHomescreenOpen += 1;
-      } else if (normalizedEventType === 'mobile_reader_open') {
-        dayEntry.mobileReaderOpen += 1;
-      } else if (normalizedEventType === 'mobile_club_join') {
-        dayEntry.mobileClubJoin += 1;
-      }
-
-      trendMap.set(date, dayEntry);
-    }
+    const totalTrackedEvents =
+      summary.pwaInstall +
+      summary.pwaHomescreenOpen +
+      summary.mobileReaderOpen +
+      summary.mobileClubJoin;
 
     res.json({
       period,
-      totalTrackedEvents: summary.pwaInstall + summary.pwaHomescreenOpen + summary.mobileReaderOpen + summary.mobileClubJoin,
+      totalTrackedEvents,
       summary,
       eventsByType: sortCountEntries(eventTypeMap).map(({ name, count }) => ({ eventType: name, count })),
       deviceTypes: sortCountEntries(deviceTypeMap),

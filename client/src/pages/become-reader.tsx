@@ -33,9 +33,9 @@ export default function BecomeReader() {
                <Button size="lg" className="bg-amber-600 hover:bg-amber-700 text-white border-none h-12 px-8">
                  Подать заявку
                </Button>
-               <Link href="/reader-studio">
+               <Link href="/clubs">
                  <Button size="lg" variant="outline" className="text-white border-white/20 hover:bg-white/10 h-12">
-                   <Play className="w-4 h-4 mr-2" /> Тест студии
+                   <Play className="w-4 h-4 mr-2" /> Мои клубы
                  </Button>
                </Link>
              </div>
@@ -129,7 +129,7 @@ export default function BecomeReader() {
   );
 }
 
-function BenefitCard({ icon, title, description }: { icon: React.ReactNode, title: string, description: string }) {
+function BenefitCard({ icon, title, description }: Readonly<{ icon: React.ReactNode, title: string, description: string }>) {
   return (
     <Card className="border-none shadow-none bg-secondary/20">
       <CardContent className="pt-6 text-center space-y-4">
@@ -145,7 +145,7 @@ function BenefitCard({ icon, title, description }: { icon: React.ReactNode, titl
   );
 }
 
-function Check({ className }: { className?: string }) {
+function Check({ className }: Readonly<{ className?: string }>) {
    return (
       <svg className={className} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
    )

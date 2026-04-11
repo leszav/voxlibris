@@ -168,23 +168,22 @@ export function AuthProvider({ children }: AuthProviderProps) {
     let bootstrapTimeoutId: ReturnType<typeof setTimeout> | null = null;
     let bootstrapIdleId: number | null = null;
 
+    const logBootstrapError = (error: unknown) => {
+      if (import.meta.env.DEV) {
+        console.error('Deferred auth bootstrap failed:', error);
+      }
+    };
+
     const scheduleBackgroundAuthBootstrap = () => {
       const run = () => {
-        if (!isMounted || hasExplicitLogoutRef.current) {
-          return;
-        }
-
-        fetchCurrentUser().catch((error) => {
-          if (import.meta.env.DEV) {
-            console.error('Deferred auth bootstrap failed:', error);
-          }
-        });
+        if (!isMounted || hasExplicitLogoutRef.current) return;
+        fetchCurrentUser().catch(logBootstrapError);
       };
 
-      if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
-        bootstrapIdleId = window.requestIdleCallback(() => {
-          run();
-        }, { timeout: 2500 });
+      const idleCallback = globalThis.window?.requestIdleCallback ?? null;
+
+      if (idleCallback) {
+        bootstrapIdleId = idleCallback(() => { run(); }, { timeout: 2500 });
         return;
       }
 
@@ -261,8 +260,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
       if (bootstrapTimeoutId) {
         clearTimeout(bootstrapTimeoutId);
       }
-      if (bootstrapIdleId !== null && typeof window !== 'undefined' && typeof window.cancelIdleCallback === 'function') {
-        window.cancelIdleCallback(bootstrapIdleId);
+      if (bootstrapIdleId !== null && globalThis.window?.cancelIdleCallback) {
+        globalThis.window.cancelIdleCallback(bootstrapIdleId);
       }
       globalThis.removeEventListener('token-refreshed', handleTokenRefresh);
       globalThis.removeEventListener('account-status-changed', handleAccountStatusChanged);

@@ -25,6 +25,8 @@ interface SessionJoinedPayload {
   listenerCount: number;
   currentChapter: number;
   currentPosition: string;
+  isLive: boolean;
+  isPaused: boolean;
 }
 
 export function useReadingSession() {
@@ -41,6 +43,11 @@ export function useReadingSession() {
   
   const socketRef = useRef<Socket | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const sessionRef = useRef<ReadingSessionState>(session);
+
+  useEffect(() => {
+    sessionRef.current = session;
+  }, [session]);
 
   // Initialize WebSocket connection
   useEffect(() => {
@@ -52,10 +59,12 @@ export function useReadingSession() {
       return;
     }
 
-    const token = getAccessToken();
     const socket = io(globalThis.location.origin, {
       withCredentials: true,
-      auth: token ? { token } : undefined
+      auth: (cb) => {
+        const token = getAccessToken();
+        cb(token ? { token } : {});
+      },
     });
 
     socketRef.current = socket;
@@ -65,12 +74,20 @@ export function useReadingSession() {
         console.warn('WebSocket connected');
       }
       setSession(prev => ({ ...prev, isConnected: true }));
+
+      // Если сессия уже создана до подключения сокета, присоединяемся при первом connect.
+      if (sessionRef.current.sessionId) {
+        socket.emit('join_session', sessionRef.current.sessionId);
+      }
     });
 
     socket.on('disconnect', () => {
       if (import.meta.env.DEV) {
         console.warn('WebSocket disconnected');
       }
+      // Icecast-стрим независим от WS-соединения — не сбрасываем isLive/isPaused.
+      // Таймер останавливаем: без WS неизвестно жив ли стрим.
+      stopTimer();
       setSession(prev => ({ ...prev, isConnected: false }));
     });
 
@@ -80,14 +97,22 @@ export function useReadingSession() {
       }
       setSession(prev => ({
         ...prev,
+        isConnected: true,
         listenerCount: data.listenerCount,
         currentChapter: data.currentChapter,
-        currentPosition: data.currentPosition
+        currentPosition: data.currentPosition,
+        isLive: data.isLive,
+        isPaused: data.isPaused,
       }));
+      // Если сессия уже в эфире (реконнект), запускаем таймер
+      if (data.isLive && !data.isPaused) {
+        startTimer();
+      }
     });
 
     socket.on('session_started', () => {
       setSession(prev => ({ ...prev, isLive: true, isPaused: false }));
+      startTimer();
     });
 
     socket.on('listener_update', () => {
@@ -176,32 +201,38 @@ export function useReadingSession() {
   };
 
   // Start live reading
-  const startReading = () => {
+  const startReading = async () => {
     if (!session.sessionId || !socketRef.current) {
       if (import.meta.env.DEV) {
         console.error('Cannot start reading: missing sessionId or socket connection');
       }
       return;
     }
-    
-    if (!session.isConnected) {
-      if (import.meta.env.DEV) {
-        console.error('Cannot start reading: WebSocket not connected');
-      }
-      return;
-    }
-    
+
     if (import.meta.env.DEV) {
       console.warn('Starting reading session:', session.sessionId);
     }
-    socketRef.current.emit('start_reading', session.sessionId);
-    startTimer();
-    
-    setSession(prev => ({
-      ...prev,
-      isLive: true,
-      isPaused: false
-    }));
+
+    // Устанавливаем isLive=true в БД.
+    // Состояние обновляем локально сразу после успешного HTTP-ответа —
+    // не ждём WS session_started, т.к. сокет может быть временно разорван.
+    // WS-событие придёт позже и будет идемпотентно (без сайд-эффектов).
+    const token = getAccessToken();
+    try {
+      const resp = await fetch(`/api/sessions/${session.sessionId}/start`, {
+        method: 'PUT',
+        credentials: 'include',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (resp.ok) {
+        setSession(prev => ({ ...prev, isLive: true, isPaused: false }));
+        startTimer();
+      }
+    } catch (err) {
+      if (import.meta.env.DEV) {
+        console.error('Failed to mark session as live in DB:', err);
+      }
+    }
   };
 
   // Pause reading

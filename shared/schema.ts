@@ -346,7 +346,7 @@ export const readingSessions = pgTable("reading_sessions", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   clubId: varchar("club_id").notNull().references(() => clubs.id, { onDelete: "cascade" }),
   readerId: varchar("reader_id").notNull().references(() => users.id),
-  bookId: varchar("book_id").notNull().references(() => books.id, { onDelete: "cascade" }),
+  bookId: varchar("book_id").notNull(), // Может ссылаться на books.id или club_books.id
   title: text("title").notNull(),
   currentChapter: integer("current_chapter").notNull().default(1),
   currentPosition: text("current_position"), // JSON with detailed position info

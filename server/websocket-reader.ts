@@ -360,6 +360,109 @@ export function initializeReaderWebSocket(httpServer: HttpServer) {
     socket.on("disconnect", () => {
       logger.info(`[WS Reader] User ${authSocket.username} (${authSocket.userId}) disconnected`);
     });
+
+    // ── Live-чтецы: события для клубной комнаты ──────────────────────────
+
+    /**
+     * Чтец начал читать вслух.
+     * Отправляет уведомление всем в комнате club:${clubId}:book:${bookId}.
+     */
+    socket.on("live_reader:start", async (data: {
+      clubId: string;
+      bookId: string;
+      sessionId: string;
+      chapter: number;
+      readerName: string;
+      streamUrl: string;
+    }) => {
+      const { clubId, bookId, sessionId, chapter, readerName, streamUrl } = data;
+      const roomName = `club:${clubId}:book:${bookId}`;
+      const clubRoom = `club:${clubId}`;
+
+      // Проверяем доступ
+      const canAccess = await verifyBookAccess(authSocket.userId, bookId, clubId);
+      if (!canAccess) {
+        socket.emit('error', { message: 'Access denied' });
+        return;
+      }
+
+      // Присоединяемся к клубной комнате если ещё нет
+      socket.join(clubRoom);
+
+      // Уведомляем всех в комнате книги
+      socket.to(roomName).emit('live_reader:started', {
+        sessionId,
+        readerId: authSocket.userId,
+        readerName,
+        chapter,
+        streamUrl,
+        startedAt: new Date().toISOString(),
+      });
+      // И всех в клубной комнате (кто не открыл книгу)
+      socket.to(clubRoom).emit('live_reader:started', {
+        sessionId,
+        readerId: authSocket.userId,
+        readerName,
+        chapter,
+        streamUrl,
+        startedAt: new Date().toISOString(),
+      });
+
+      logger.info(`[WS Reader] ${readerName} started live reading in club ${clubId}`);
+    });
+
+    /**
+     * Чтец закончил читать.
+     */
+    socket.on("live_reader:stop", (data: { clubId: string; bookId: string; sessionId: string }) => {
+      const { clubId, bookId, sessionId } = data;
+      const roomName = `club:${clubId}:book:${bookId}`;
+      const clubRoom = `club:${clubId}`;
+
+      socket.to(roomName).emit('live_reader:ended', {
+        sessionId,
+        readerId: authSocket.userId,
+        endedAt: new Date().toISOString(),
+      });
+      socket.to(clubRoom).emit('live_reader:ended', {
+        sessionId,
+        readerId: authSocket.userId,
+        endedAt: new Date().toISOString(),
+      });
+
+      logger.info(`[WS Reader] ${authSocket.username} stopped live reading in club ${clubId}`);
+    });
+
+    /**
+     * Синхронизация позиции чтения для слушателей.
+     */
+    socket.on("live_reader:position", (data: {
+      clubId: string;
+      bookId: string;
+      sessionId: string;
+      chapter: number;
+      positionRaw: string;
+    }) => {
+      const { clubId, bookId, sessionId, chapter, positionRaw } = data;
+      const roomName = `club:${clubId}:book:${bookId}`;
+
+      socket.to(roomName).emit('live_reader:position_update', {
+        sessionId,
+        readerId: authSocket.userId,
+        chapter,
+        positionRaw,
+        timestamp: Date.now(),
+      });
+    });
+
+    /**
+     * Присоединиться к клубной комнате для получения уведомлений о чтецах.
+     */
+    socket.on("join_club", (data: { clubId: string }) => {
+      const { clubId } = data;
+      socket.join(`club:${clubId}`);
+      logger.info(`[WS Reader] ${authSocket.username} joined club room ${clubId}`);
+    });
   });
 
   logger.info("[WS Reader] WebSocket server initialized at /ws/reader");

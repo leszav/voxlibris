@@ -6,8 +6,8 @@ import { logger } from '../lib/logger.js';
 
 export class AudioBroadcaster {
   private static instance: AudioBroadcaster;
-  private sessions: Map<string, AudioSession> = new Map();
-  private sessionStats: Map<string, AudioSessionStats> = new Map();
+  private readonly sessions: Map<string, AudioSession> = new Map();
+  private readonly sessionStats: Map<string, AudioSessionStats> = new Map();
   private readonly endedSessionCleanupTimers: Map<string, NodeJS.Timeout> = new Map();
   private readonly MAX_TRACKED_SESSIONS = 500;
   private readonly MAX_LISTENERS_PER_SESSION = 1000;
@@ -134,7 +134,7 @@ export class AudioBroadcaster {
    */
   addListener(sessionId: string, socketId: string): boolean {
     const session = this.sessions.get(sessionId);
-    if (!session || !session.isActive) {
+    if (!session?.isActive) {
       logger.warn(`Cannot add listener to inactive session: ${sessionId}`);
       return false;
     }
@@ -147,14 +147,10 @@ export class AudioBroadcaster {
     session.listeners.add(socketId);
     
     // Обновляем статистику
-    const stats = this.sessionStats.get(sessionId);
-    if (stats) {
-      stats.listenerCount = session.listeners.size;
-    }
+    const statsAfterAdd = this.sessionStats.get(sessionId);
+    if (statsAfterAdd) statsAfterAdd.listenerCount = session.listeners.size;
     
-    logger.info({
-      totalListeners: session.listeners.size
-    }, `Listener joined: ${socketId} to session ${sessionId}`);
+    logger.info({ totalListeners: session.listeners.size }, `Listener joined: ${socketId} to session ${sessionId}`);
     
     return true;
   }
@@ -168,14 +164,10 @@ export class AudioBroadcaster {
       session.listeners.delete(socketId);
       
       // Обновляем статистику
-      const stats = this.sessionStats.get(sessionId);
-      if (stats) {
-        stats.listenerCount = session.listeners.size;
-      }
-      
-      logger.info({
-        totalListeners: session.listeners.size
-      }, `Listener left: ${socketId} from session ${sessionId}`);
+      const statsAfterRemove = this.sessionStats.get(sessionId);
+      if (statsAfterRemove) statsAfterRemove.listenerCount = session.listeners.size;
+
+      logger.info({ totalListeners: session.listeners.size }, `Listener left: ${socketId} from session ${sessionId}`);
     }
   }
   
@@ -184,7 +176,7 @@ export class AudioBroadcaster {
    */
   broadcastChunk(io: SocketIOServer, chunk: AudioChunk): void {
     const session = this.sessions.get(chunk.sessionId);
-    if (!session || !session.isActive) {
+    if (!session?.isActive) {
       logger.warn(`Attempting to broadcast to inactive session: ${chunk.sessionId}`);
       return;
     }

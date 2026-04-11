@@ -51,6 +51,13 @@ export default defineConfig({
         changeOrigin: true,
         secure: false,
       },
+      // Socket.IO WebSocket — нужен явный proxy, иначе Vite не проксирует /socket.io/
+      // и socket.io-клиент не может подключиться к Express-бэкенду в dev-режиме.
+      '/socket.io': {
+        target: 'http://localhost:5000',
+        ws: true,
+        changeOrigin: true,
+      },
     },
     fs: {
       strict: true,

@@ -38,7 +38,7 @@ const TOP_READERS = [
     id: 3,
     name: "Елена Темникова",
     bio: "Читаем сказки на ночь и добрые истории для всей семьи.",
-    rating: 5.0,
+    rating: 5,
     followers: 2100,
     hoursRead: 560,
     currentBook: "Маленький принц",
@@ -130,7 +130,7 @@ export default function Readers() {
   );
 }
 
-function ReaderCard({ reader }: { reader: typeof TOP_READERS[0] }) {
+function ReaderCard({ reader }: Readonly<{ reader: typeof TOP_READERS[0] }>) {
   return (
     <Card className="overflow-hidden hover:shadow-md transition-shadow">
       <CardContent className="p-6 space-y-6">

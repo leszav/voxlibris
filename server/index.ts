@@ -38,8 +38,10 @@ import { setupReadingSessionsHandlers } from "./websocket/reading-sessions.js";
 import { scheduler } from "./services/scheduler.js";
 import readingSessionsRoutes from "./routes/reading-sessions.js";
 import reactionsRoutes from "./routes/reactions.js";
+import { registerIO } from "./lib/socket-registry.js";
 import questionsRoutes from "./routes/questions.js";
 import scheduleRoutes from "./routes/schedule.js";
+import studioStreamRouter from "./routes/studio-stream.js";
 import { logger } from "./lib/logger.js";
 import { loadFeatureFlags } from "./lib/feature-flags.js";
 import { responseCompression } from "./lib/response-compression.js";
@@ -64,6 +66,7 @@ const io = new SocketIOServer(httpServer, {
 	},
 	transports: ["websocket", "polling"],
 });
+registerIO(io);
 
 // Utility functions
 export function log(message: string, source = "express") {
@@ -683,7 +686,12 @@ app.use("/api/auth/forgot-password", authLimiter);
 app.use("/api/auth/reset-password", authLimiter);
 app.use("/api/auth/resend-confirmation", resendConfirmationLimiter);
 app.use("/api/auth", speedLimiter);
-app.use("/api", anonymousBurstLimiter);
+// Studio stream — долгоживущий запрос, монтируем ДО rate-limiters для /api
+	// Собственный rate-limit: 1 активный поток на пользователя обеспечивается
+	// логикой сессии на уровне приложения (один reader_id = один mount point)
+	app.use("/api/studio/stream", studioStreamRouter);
+
+	app.use("/api", anonymousBurstLimiter);
 app.use("/api", anonymousReadLimiter);
 app.use("/api", anonymousWriteLimiter);
 app.use("/api", expensiveLimiter);

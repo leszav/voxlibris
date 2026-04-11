@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
-import { Mic, CheckCircle, AlertTriangle, XCircle, Play, Loader2 } from 'lucide-react';
+import { Mic, CheckCircle, AlertTriangle, XCircle, Play, Square, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
   useMicrophoneCheck,
@@ -10,6 +10,7 @@ import {
 
 interface MicrophoneCheckModalProps {
   onComplete: () => void;
+  onSkip: () => void;
 }
 
 interface LevelMetricsProps {
@@ -96,7 +97,7 @@ function LevelMetrics({ noiseLevel, volumeLevel }: Readonly<LevelMetricsProps>) 
   );
 }
 
-export function MicrophoneCheckModal({ onComplete }: Readonly<MicrophoneCheckModalProps>) {
+export function MicrophoneCheckModal({ onComplete, onSkip }: Readonly<MicrophoneCheckModalProps>) {
   const [recordedAudio, setRecordedAudio] = useState<Blob | null>(null);
   const [secondsLeft, setSecondsLeft] = useState(10);
 
@@ -113,6 +114,7 @@ export function MicrophoneCheckModal({ onComplete }: Readonly<MicrophoneCheckMod
     initializeMicrophone,
     runFullTest,
     playRecording,
+    stopPlayback,
     stopTest,
     setGainLevel,
     testDurationMs,
@@ -166,12 +168,17 @@ export function MicrophoneCheckModal({ onComplete }: Readonly<MicrophoneCheckMod
 
   const handlePlayRecording = () => {
     if (!recordedAudio) return;
+    if (isPlaying) {
+      stopPlayback();
+      return;
+    }
     playRecording(recordedAudio).catch((err) => {
       console.error('[MicCheck] Failed to play recording:', err);
     });
   };
 
   const handleConfirm = () => {
+    stopPlayback();
     stopTest();
     onComplete();
   };
@@ -241,28 +248,33 @@ export function MicrophoneCheckModal({ onComplete }: Readonly<MicrophoneCheckMod
                 variant="outline"
                 size="sm"
                 onClick={handlePlayRecording}
-                disabled={isPlaying}
                 className="border-stone-600 text-stone-300 hover:bg-stone-800"
               >
-                <Play className="w-4 h-4 mr-1" />
-                {isPlaying ? 'Воспроизведение...' : 'Прослушать запись'}
+                {isPlaying ? <Square className="w-4 h-4 mr-1" /> : <Play className="w-4 h-4 mr-1" />}
+                {isPlaying ? 'Остановить' : 'Прослушать запись'}
               </Button>
             </div>
           </div>
         )}
 
         {showInitRetry && (
-          <Button onClick={handleRetryInitialize} disabled={isInitializing} className="w-full bg-amber-600 hover:bg-amber-700">
-            Повторить инициализацию
-          </Button>
+          <div className="space-y-3">
+            <Button onClick={handleRetryInitialize} disabled={isInitializing} className="w-full bg-amber-600 hover:bg-amber-700">
+              Повторить инициализацию
+            </Button>
+            <Button variant="ghost" onClick={onSkip} className="w-full text-stone-400 hover:text-stone-200">
+              Пропустить проверку
+            </Button>
+          </div>
         )}
 
         {showTestActions && (
           <div className="space-y-3">
             <Button onClick={handleStartTest} disabled={isRecording || isInitializing} className="w-full bg-amber-600 hover:bg-amber-700">
               {isRecording ? `Идет запись... ${secondsLeft} сек` : 'Проверить микрофон (10 сек)'}
+            </Button>            <Button variant="ghost" onClick={onSkip} className="w-full text-stone-400 hover:text-stone-200">
+              Пропустить проверку
             </Button>
-
             <p className="text-xs text-stone-500 text-center">
               При записи говорите обычным голосом. Если звук тихий, увеличьте усиление и повторите тест.
             </p>

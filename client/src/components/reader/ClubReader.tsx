@@ -35,6 +35,15 @@ import { useClubReaderAdapter } from "./core/use-reader-data-adapters";
 import { useSyncedReaderSettings } from "./core/use-synced-reader-settings";
 import { useReaderSyncState } from "./core/use-reader-sync-state";
 import { ChatWidget } from "@/components/chat/ChatWidget";
+import { ReadNowBubble } from "@/components/studio/ReadNowBubble";
+import { LiveReadersBubble, ActiveReadersModal } from "@/components/studio/LiveReadersBubble";
+import { ListenerOverlay } from "@/components/studio/ListenerOverlay";
+import { useLiveReaders, type LiveReader } from "@/hooks/use-live-readers";
+import { useStudioMode } from "@/hooks/use-studio-mode";
+import { useAuth } from "@/hooks/use-auth";
+import { LiveTopBar, type NetworkQuality } from "@/components/studio/LiveTopBar";
+import { ControlBar } from "@/components/studio/ControlBar";
+import { MicrophoneCheckModal } from "@/components/studio/microphone-check-modal";
 import type { ReaderSettings } from "@/lib/reader-settings";
 
 interface ClubReaderProps {
@@ -71,6 +80,18 @@ interface PendingScrollRestore {
   positionRaw: string;
 }
 
+function getStudioPrepStatusText(isConnected: boolean, micCheckPassed: boolean): string {
+  if (micCheckPassed) {
+    return isConnected
+      ? 'Микрофон проверен. Готов к эфиру.'
+      : 'Микрофон проверен. Соединение сессии восстанавливается, запуск доступен.';
+  }
+
+  return isConnected
+    ? 'Проверьте микрофон.'
+    : 'Проверьте микрофон. Соединение сессии восстанавливается.';
+}
+
 function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
   const [currentChapter, setCurrentChapter] = useState<number | null>(null);
   const [tocOpen, setTocOpen] = useState(false);
@@ -80,6 +101,53 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
   const [pendingScrollRestore, setPendingScrollRestore] = useState<PendingScrollRestore | null>(null);
   const chapterScrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const manualRestoreCleanupRef = useRef<(() => void) | null>(null);
+
+  // ── Авторизация ─────────────────────────────────────────────────────
+  const { user } = useAuth();
+
+  // ── Live-чтецы ────────────────────────────────────────────────────────
+  const [liveModalOpen, setLiveModalOpen] = useState(false);
+  const [listeningTo, setListeningTo] = useState<LiveReader | null>(null);
+
+  // ── Режим студии ─────────────────────────────────────────────────
+  const [studioOpen, setStudioOpen] = useState(false);
+  const [studioMode, setStudioMode] = useState<'balanced' | 'focus' | 'control'>('balanced');
+
+  const handlePositionUpdate = useCallback((update: { chapter: number; positionRaw: string }) => {
+    // Синхронизируем позицию ридера с чтецом
+    if (update.chapter !== currentChapter) {
+      setCurrentChapter(update.chapter);
+    }
+    setPendingScrollRestore({
+      chapter: update.chapter,
+      positionRaw: update.positionRaw,
+    });
+  }, [currentChapter]);
+
+  const { readers, flashCount, announceLiveStart, announceLiveStop } = useLiveReaders({
+    clubId,
+    bookId,
+    listeningToSessionId: listeningTo?.sessionId ?? null,
+    onPositionUpdate: handlePositionUpdate,
+  });
+
+  const studio = useStudioMode({
+    clubId,
+    bookId,
+    currentChapter: currentChapter ?? 1,
+    readerName: user?.username ?? 'Чтец',
+    userId: user?.id,
+    enabled: studioOpen,
+  });
+
+  const networkQuality: NetworkQuality = 'good';
+
+  // Если чтец, которого слушаем, ушёл — останавливаем плеер
+  useEffect(() => {
+    if (!listeningTo) return;
+    const still = readers.some((r) => r.sessionId === listeningTo.sessionId);
+    if (!still) setListeningTo(null);
+  }, [readers, listeningTo]);
   
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const contentAreaRef = useRef<HTMLDivElement>(null);
@@ -695,13 +763,96 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
         </div>
       )}
 
+      {/* ── Студия: inline топ-бар (не fixed) — сдвигает контент вниз ────────────── */}
+      {studioOpen && (
+        <LiveTopBar
+          bookTitle={bookData.title ?? 'Книга'}
+          chapterTitle={`Глава ${currentChapter ?? 1}`}
+          isLive={studio.state === 'live'}
+          isRecording={false}
+          recordingTime={studio.elapsedTime}
+          networkQuality={networkQuality}
+          mode={studioMode}
+          onModeChange={setStudioMode}
+          onBookmark={() => setBookmarksOpen(true)}
+          onTextSettings={() => setSettingsOpen(true)}
+        />
+      )}
+
+      {/* Студия: проверка микрофона */}
+      {studioOpen && studio.showMicCheck && !studio.micCheckPassed && (
+        <MicrophoneCheckModal
+          onComplete={() => {
+            studio.setMicCheckPassed(true);
+            studio.setShowMicCheck(false);
+            sessionStorage.setItem('mic_check_passed', Date.now().toString());
+          }}
+          onSkip={() => {
+            studio.setMicCheckPassed(true);
+            studio.setShowMicCheck(false);
+          }}
+        />
+      )}
+
+      {/* Студия: prep-панель — кнопка «Начать эфир» + закрытие студии */}
+      {studioOpen && studio.state === 'prep' && (
+        <div className="shrink-0 flex items-center justify-between gap-3 px-4 py-2 bg-amber-50 dark:bg-amber-950/30 border-b border-amber-200 dark:border-amber-800">
+          <div className="flex items-center gap-2">
+            {studio.streamStartError && (
+              <span className="text-xs text-destructive">{studio.streamStartError}</span>
+            )}
+            {studio.streamStartError === null && (
+              <span className="text-xs text-muted-foreground">
+                {getStudioPrepStatusText(studio.session.isConnected, studio.micCheckPassed)}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              className="bg-amber-500 hover:bg-amber-600 text-white border-none text-xs h-8"
+              disabled={!studio.micCheckPassed || studio.isStartingBroadcast}
+              onClick={() =>
+                studio.handleStartBroadcast((sessionId) => {
+                  announceLiveStart({
+                    sessionId,
+                    chapter: currentChapter ?? 1,
+                    readerName: user?.username ?? 'Чтец',
+                    streamUrl: `${import.meta.env.VITE_ICECAST_PUBLIC_URL ?? ''}/live/${sessionId}`,
+                  });
+                })
+              }
+            >
+              {studio.isStartingBroadcast ? 'Запуск...' : '🔴 В эфир'}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="text-xs h-8"
+              onClick={studio.openMicCheck}
+              title="Проверить микрофон"
+            >
+              🎤
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="text-xs h-8"
+              onClick={() => setStudioOpen(false)}
+            >
+              Выйти
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Основная область с боковыми панелями */}
       <div className="flex-1 flex relative overflow-hidden">
         {/* Основной контент */}
         <main className="flex-1 flex flex-col relative">
           <div
             ref={scrollContainerRef}
-            className="flex-1 overflow-y-auto"
+            className={`flex-1 overflow-y-auto${studioOpen ? ' pb-24' : ''}`}
             onScroll={scheduleProgressSave}
           >
             <div 
@@ -735,8 +886,68 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
       {/* Справка по горячим клавишам */}
       <KeyboardHelp isOpen={helpOpen} onClose={() => setHelpOpen(false)} />
 
+      {/* ── Студия: ControlBar (появляется fixed снизу, scroll-ареа уже имеет pb-24) ───────── */}
+      {studioOpen && (
+        <ControlBar
+          state={studio.state}
+          isOnline={studio.session.isConnected}
+          micMuted={studio.micMuted}
+          onMicToggle={() => studio.setMicMuted(!studio.micMuted)}
+          elapsedTime={studio.elapsedTime}
+          listenerCount={studio.listenerCount}
+          micLevel={studio.micLevel}
+          micBars={studio.micBars}
+          onPause={studio.handlePause}
+          onResume={studio.handleResume}
+          onEnd={() =>
+            studio.handleEnd((sessionId) => {
+              announceLiveStop(sessionId);
+              setStudioOpen(false);
+            })
+          }
+          onOpenChat={() => {}}
+          onSettings={() => setSettingsOpen(true)}
+        />
+      )}
+
+      {/* Пузыри над чатом: живые чтецы + кнопка читать вслух */}
+      {!studioOpen && (
+        <div className="fixed bottom-20 right-4 z-30 flex flex-col items-end gap-2">
+          <LiveReadersBubble
+            readers={readers}
+            flashCount={flashCount}
+            onOpenModal={() => setLiveModalOpen(true)}
+          />
+          <ReadNowBubble
+            onClick={() => setStudioOpen(true)}
+          />
+        </div>
+      )}
+
       {/* Чат клуба */}
       <ChatWidget clubId={clubId} />
+
+      {/* Модалка активных чтецов */}
+      <ActiveReadersModal
+        open={liveModalOpen}
+        onClose={() => setLiveModalOpen(false)}
+        readers={readers}
+        listeningToSessionId={listeningTo?.sessionId ?? null}
+        onPlay={(reader) => setListeningTo(reader)}
+        onStop={() => setListeningTo(null)}
+      />
+
+      {/* Оверлей плеера слушателя */}
+      {listeningTo && (
+        <ListenerOverlay
+          reader={listeningTo}
+          bookTitle={bookData.title ?? ''}
+          bookAuthor={(bookData as { author?: string }).author}
+          coverUrl={(bookData as { coverUrl?: string }).coverUrl}
+          onStop={() => setListeningTo(null)}
+          onStreamEnded={() => setListeningTo(null)}
+        />
+      )}
     </div>
   );
 }
