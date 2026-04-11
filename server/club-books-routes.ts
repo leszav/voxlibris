@@ -567,7 +567,7 @@ router.put('/clubs/:clubId/active-book', jwtAuth, requireActiveUser, async (req,
 
         const membersWithRoles = await storage.getClubMembersWithRoles(clubId);
         const membership = membersWithRoles.find((m) => m.id === req.user?.id);
-        if (!membership || membership.role !== 'owner') {
+        if (membership?.role !== 'owner') {
             return res.status(403).json({ error: 'Only the club owner can change the active book' });
         }
 

@@ -107,13 +107,16 @@ export class ClubRepository extends BaseRepository {
       }
     }
 
-    return clubsData.map((club) => ({
-      ...club,
-      book: includeBook ? (club.bookId ? activeBookMap.get(club.bookId) || null : null) : null,
-      owner: ownersMap.get(club.ownerId) || null,
-      memberCount: memberCountMap.get(club.id) || 0,
-      tags: includeTags ? (tagsMap.get(club.id) || []) : [],
-    })) as ClubWithDetails[];
+    return clubsData.map((club) => {
+      const activeBook = includeBook && club.bookId ? activeBookMap.get(club.bookId) ?? null : null;
+      return {
+        ...club,
+        book: activeBook,
+        owner: ownersMap.get(club.ownerId) || null,
+        memberCount: memberCountMap.get(club.id) || 0,
+        tags: includeTags ? (tagsMap.get(club.id) || []) : [],
+      };
+    }) as ClubWithDetails[];
   }
 
   
