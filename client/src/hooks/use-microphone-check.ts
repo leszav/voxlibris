@@ -312,7 +312,10 @@ export function useMicrophoneCheck() {
     let status: MicrophoneCheckResult['status'];
     let message: string;
 
-    if (noiseLevel > 42) {
+    if (volumeLevel < 2) {
+      status = 'needs-adjustment';
+      message = 'Сигнал с микрофона не поступает. Проверьте, что микрофон включен и выбран в системе.';
+    } else if (noiseLevel > 42) {
       status = 'needs-adjustment';
       message = 'Слышно много фонового шума. Такой уровень может быть некомфортным для слушателей.';
     } else if (volumeLevel < 14) {
@@ -409,6 +412,20 @@ export function useMicrophoneCheck() {
     }
   }, [analyzeCurrentRecording, initializeMicrophone, isInitialized, recordTestFragment]);
 
+  const stopRecording = useCallback(() => {
+    const recorder = mediaRecorderRef.current;
+    if (!recorder || recorder.state !== 'recording') {
+      return;
+    }
+
+    if (recordingStopTimeoutRef.current) {
+      clearTimeout(recordingStopTimeoutRef.current);
+      recordingStopTimeoutRef.current = null;
+    }
+
+    recorder.stop();
+  }, []);
+
   const playRecording = useCallback(async (audioBlob: Blob) => {
     cleanupPlayback();
     setIsPlaying(true);
@@ -464,6 +481,7 @@ export function useMicrophoneCheck() {
     gainLevel,
     initializeMicrophone,
     runFullTest,
+    stopRecording,
     playRecording,
     stopPlayback,
     stopTest,

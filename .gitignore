@@ -94,6 +94,10 @@ server/public/
 server/storage.ts.backup
 vite.config.ts.*
 
+# Runtime uploads (created automatically on first use)
+uploads/*
+!uploads/.gitkeep
+
 # Database
 *.sqlite
 *.sqlite3

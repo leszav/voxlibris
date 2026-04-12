@@ -80,15 +80,24 @@ interface PendingScrollRestore {
   positionRaw: string;
 }
 
-function getStudioPrepStatusText(isConnected: boolean, micCheckPassed: boolean): string {
+function getStudioPrepStatusText(
+  isConnected: boolean,
+  micCheckPassed: boolean,
+  microphoneAvailable: boolean,
+  microphoneError: string | null,
+): string {
+  if (!microphoneAvailable) {
+    return microphoneError ?? 'Микрофон отсутствует/выключен. Подключите или включите микрофон.';
+  }
+
   if (micCheckPassed) {
     return isConnected
       ? 'Микрофон проверен. Готов к эфиру.'
-      : 'Микрофон проверен. Соединение сессии восстанавливается, запуск доступен.';
+      : 'Микрофон проверен. Соединение сессии восстанавливается.';
   }
 
   return isConnected
-    ? 'Проверьте микрофон.'
+    ? 'Проверьте микрофон перед запуском эфира.'
     : 'Проверьте микрофон. Соединение сессии восстанавливается.';
 }
 
@@ -111,7 +120,6 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
 
   // ── Режим студии ─────────────────────────────────────────────────
   const [studioOpen, setStudioOpen] = useState(false);
-  const [studioMode, setStudioMode] = useState<'balanced' | 'focus' | 'control'>('balanced');
 
   const handlePositionUpdate = useCallback((update: { chapter: number; positionRaw: string }) => {
     // Синхронизируем позицию ридера с чтецом
@@ -772,8 +780,6 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
           isRecording={false}
           recordingTime={studio.elapsedTime}
           networkQuality={networkQuality}
-          mode={studioMode}
-          onModeChange={setStudioMode}
           onBookmark={() => setBookmarksOpen(true)}
           onTextSettings={() => setSettingsOpen(true)}
         />
@@ -782,14 +788,18 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
       {/* Студия: проверка микрофона */}
       {studioOpen && studio.showMicCheck && !studio.micCheckPassed && (
         <MicrophoneCheckModal
+          microphoneAvailable={studio.microphoneAvailable}
+          microphoneLoading={studio.microphoneLoading}
+          microphoneError={studio.microphoneError}
           onComplete={() => {
             studio.setMicCheckPassed(true);
             studio.setShowMicCheck(false);
             sessionStorage.setItem('mic_check_passed', Date.now().toString());
           }}
           onSkip={() => {
-            studio.setMicCheckPassed(true);
+            studio.setMicCheckPassed(false);
             studio.setShowMicCheck(false);
+            sessionStorage.removeItem('mic_check_passed');
           }}
         />
       )}
@@ -803,7 +813,12 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
             )}
             {studio.streamStartError === null && (
               <span className="text-xs text-muted-foreground">
-                {getStudioPrepStatusText(studio.session.isConnected, studio.micCheckPassed)}
+                {getStudioPrepStatusText(
+                  studio.session.isConnected,
+                  studio.micCheckPassed,
+                  studio.microphoneAvailable,
+                  studio.microphoneError,
+                )}
               </span>
             )}
           </div>

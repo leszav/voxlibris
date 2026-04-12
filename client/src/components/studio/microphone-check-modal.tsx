@@ -9,6 +9,9 @@ import {
 } from '@/hooks/use-microphone-check';
 
 interface MicrophoneCheckModalProps {
+  microphoneAvailable: boolean;
+  microphoneLoading: boolean;
+  microphoneError: string | null;
   onComplete: () => void;
   onSkip: () => void;
 }
@@ -57,6 +60,18 @@ function getVolumeLevelClass(volumeLevel: number): string {
   return 'bg-red-500';
 }
 
+function getMicStatusLabel(microphoneLoading: boolean, microphoneAvailable: boolean): string {
+  if (microphoneLoading) return 'Проверка...';
+  if (microphoneAvailable) return 'Микрофон включен';
+  return 'Микрофон отсутствует/выключен';
+}
+
+function getMicStatusClass(microphoneLoading: boolean, microphoneAvailable: boolean): string {
+  if (microphoneLoading) return 'text-amber-400';
+  if (microphoneAvailable) return 'text-emerald-400';
+  return 'text-red-400';
+}
+
 function getMetricWidth(level: number): number {
   if (level <= 0) return 0;
   return Math.max(6, Math.min(100, level));
@@ -97,7 +112,13 @@ function LevelMetrics({ noiseLevel, volumeLevel }: Readonly<LevelMetricsProps>) 
   );
 }
 
-export function MicrophoneCheckModal({ onComplete, onSkip }: Readonly<MicrophoneCheckModalProps>) {
+export function MicrophoneCheckModal({
+  microphoneAvailable,
+  microphoneLoading,
+  microphoneError,
+  onComplete,
+  onSkip,
+}: Readonly<MicrophoneCheckModalProps>) {
   const [recordedAudio, setRecordedAudio] = useState<Blob | null>(null);
   const [secondsLeft, setSecondsLeft] = useState(10);
 
@@ -113,6 +134,7 @@ export function MicrophoneCheckModal({ onComplete, onSkip }: Readonly<Microphone
     gainLevel,
     initializeMicrophone,
     runFullTest,
+    stopRecording,
     playRecording,
     stopPlayback,
     stopTest,
@@ -177,6 +199,10 @@ export function MicrophoneCheckModal({ onComplete, onSkip }: Readonly<Microphone
     });
   };
 
+  const handleStopRecording = () => {
+    stopRecording();
+  };
+
   const handleConfirm = () => {
     stopPlayback();
     stopTest();
@@ -185,8 +211,18 @@ export function MicrophoneCheckModal({ onComplete, onSkip }: Readonly<Microphone
 
   const activeNoiseLevel = result?.noiseLevel ?? liveNoiseLevel;
   const activeVolumeLevel = result?.volumeLevel ?? liveVolumeLevel;
+  const noSignalDetected = microphoneAvailable && !microphoneLoading && isInitialized && !isRecording && activeVolumeLevel < 2;
+  const canConfirm = (result?.volumeLevel ?? 0) >= 2;
 
   const subtitle = useMemo(() => {
+    if (microphoneLoading) {
+      return 'Проверяем доступность микрофона...';
+    }
+
+    if (!microphoneAvailable) {
+      return microphoneError ?? 'Микрофон отсутствует или выключен. Подключите микрофон и повторите проверку.';
+    }
+
     if (isInitializing) {
       return 'Инициализируем микрофон...';
     }
@@ -199,11 +235,22 @@ export function MicrophoneCheckModal({ onComplete, onSkip }: Readonly<Microphone
       return result.message;
     }
 
-    return 'Нажмите «Проверить микрофон», чтобы записать 10 секунд и оценить качество звука.';
-  }, [error, isInitialized, isInitializing, result]);
+    if (noSignalDetected) {
+      return 'Сигнал с микрофона не поступает. Проверьте, что микрофон включен и не отключен аппаратной кнопкой.';
+    }
 
-  const showInitRetry = !isInitializing && !isInitialized;
+    return 'Нажмите «Проверить микрофон», чтобы записать 10 секунд и оценить качество звука.';
+  }, [error, isInitialized, isInitializing, microphoneAvailable, microphoneError, microphoneLoading, noSignalDetected, result]);
+
+  const showInitRetry = !isInitializing && (!isInitialized || !microphoneAvailable);
   const showTestActions = isInitialized && !result;
+
+  const micStatusLabel = noSignalDetected
+    ? 'Микрофон не передает звук'
+    : getMicStatusLabel(microphoneLoading, microphoneAvailable);
+  const micStatusClass = noSignalDetected
+    ? 'text-red-400'
+    : getMicStatusClass(microphoneLoading, microphoneAvailable);
 
   return (
     <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
@@ -214,6 +261,7 @@ export function MicrophoneCheckModal({ onComplete, onSkip }: Readonly<Microphone
           </div>
 
           <h2 className="text-2xl font-serif font-bold text-white mb-2">Проверка микрофона</h2>
+          <p className={cn('text-sm mb-2', micStatusClass)}>{micStatusLabel}</p>
           <p className="text-stone-400 whitespace-pre-line">{subtitle}</p>
         </div>
 
@@ -243,7 +291,7 @@ export function MicrophoneCheckModal({ onComplete, onSkip }: Readonly<Microphone
         {recordedAudio && result && (
           <div className="mb-6 p-3 bg-black/20 rounded-lg">
             <div className="flex items-center justify-between gap-3">
-              <span className="text-sm text-stone-400">Тестовая запись (10 сек)</span>
+              <span className="text-sm text-stone-400">Тестовая запись</span>
               <Button
                 variant="outline"
                 size="sm"
@@ -268,15 +316,25 @@ export function MicrophoneCheckModal({ onComplete, onSkip }: Readonly<Microphone
           </div>
         )}
 
-        {showTestActions && (
+        {showTestActions && microphoneAvailable && (
           <div className="space-y-3">
-            <Button onClick={handleStartTest} disabled={isRecording || isInitializing} className="w-full bg-amber-600 hover:bg-amber-700">
-              {isRecording ? `Идет запись... ${secondsLeft} сек` : 'Проверить микрофон (10 сек)'}
-            </Button>            <Button variant="ghost" onClick={onSkip} className="w-full text-stone-400 hover:text-stone-200">
+            {!isRecording && (
+              <Button onClick={handleStartTest} disabled={isInitializing} className="w-full bg-amber-600 hover:bg-amber-700">
+                Проверить микрофон (до 10 сек)
+              </Button>
+            )}
+
+            {isRecording && (
+              <Button onClick={handleStopRecording} variant="destructive" className="w-full">
+                Остановить запись ({secondsLeft} сек)
+              </Button>
+            )}
+
+            <Button variant="ghost" onClick={onSkip} disabled={isRecording} className="w-full text-stone-400 hover:text-stone-200">
               Пропустить проверку
             </Button>
             <p className="text-xs text-stone-500 text-center">
-              При записи говорите обычным голосом. Если звук тихий, увеличьте усиление и повторите тест.
+              Можно остановить запись раньше 10 секунд и сразу прослушать результат.
             </p>
           </div>
         )}
@@ -294,12 +352,15 @@ export function MicrophoneCheckModal({ onComplete, onSkip }: Readonly<Microphone
 
             <Button
               onClick={handleConfirm}
+              disabled={!canConfirm}
               className={cn(
                 'w-full',
                 result.status === 'needs-adjustment' ? 'bg-amber-600 hover:bg-amber-700' : 'bg-emerald-600 hover:bg-emerald-700'
               )}
             >
-              {result.status === 'needs-adjustment' ? 'Продолжить несмотря на рекомендацию' : 'Продолжить'}
+              {canConfirm
+                ? (result.status === 'needs-adjustment' ? 'Продолжить несмотря на рекомендацию' : 'Продолжить')
+                : 'Сначала включите микрофон'}
             </Button>
 
             <p className="text-xs text-stone-500 text-center">

@@ -1,17 +1,8 @@
-import { Wifi, WifiOff, Radio, BookOpen, ChevronRight, Bookmark, Settings2, LayoutTemplate } from "lucide-react";
+import { Wifi, WifiOff, Radio, BookOpen, ChevronRight, Bookmark, Settings2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { cn } from "@/lib/utils";
-
-export type StudioMode = "balanced" | "focus" | "control";
+import { cn } from "@/lib/utils";import studioLogo from '/vlstudio-logo.webp';
 export type NetworkQuality = "good" | "fair" | "poor" | "offline";
 
 interface LiveTopBarProps {
@@ -21,8 +12,6 @@ interface LiveTopBarProps {
   isRecording: boolean;
   recordingTime: number; // секунды
   networkQuality: NetworkQuality;
-  mode: StudioMode;
-  onModeChange: (mode: StudioMode) => void;
   onBookmark: () => void;
   onTextSettings: () => void;
 }
@@ -35,12 +24,6 @@ function formatTime(seconds: number): string {
   return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
 }
 
-const MODE_LABELS: Record<StudioMode, string> = {
-  balanced: "Balanced",
-  focus: "Focus",
-  control: "Control",
-};
-
 function networkQualityColor(quality: NetworkQuality): string {
   if (quality === "good") return "text-emerald-600 dark:text-emerald-400";
   if (quality === "fair") return "text-amber-500";
@@ -48,9 +31,9 @@ function networkQualityColor(quality: NetworkQuality): string {
 }
 
 function networkQualityLabel(quality: NetworkQuality): string {
-  if (quality === "good") return "Хорошо";
-  if (quality === "fair") return "Нормально";
-  return "Плохо";
+  if (quality === "good") return "Сеть стабильна";
+  if (quality === "fair") return "Сеть нестабильна";
+  return "Проблемы с сетью";
 }
 
 function NetworkIndicator({ quality }: Readonly<{ quality: NetworkQuality }>) {
@@ -77,13 +60,14 @@ export function LiveTopBar({
   isRecording,
   recordingTime,
   networkQuality,
-  mode,
-  onModeChange,
   onBookmark,
   onTextSettings,
 }: Readonly<LiveTopBarProps>) {
   return (
     <header className="h-12 shrink-0 border-b border-border bg-card/80 backdrop-blur-sm flex items-center px-4 gap-4 z-20">
+      {/* Логотип */}
+      <img src={studioLogo} alt="VL Studio" className="h-6 w-auto shrink-0 opacity-90" />
+      <Separator orientation="vertical" className="h-5 shrink-0" />
       {/* Левая зона: книга + глава */}
       <div className="flex items-center gap-2 min-w-0 flex-1">
         <BookOpen className="w-4 h-4 text-muted-foreground shrink-0" />
@@ -121,23 +105,6 @@ export function LiveTopBar({
 
       {/* Правая зона: действия */}
       <div className="flex items-center gap-1 shrink-0">
-        {/* Режим */}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="sm" className="h-8 gap-1.5 text-muted-foreground hover:text-foreground text-xs">
-              <LayoutTemplate className="w-3.5 h-3.5" />
-              {MODE_LABELS[mode]}
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-40">
-            <DropdownMenuRadioGroup value={mode} onValueChange={(v) => onModeChange(v as StudioMode)}>
-              <DropdownMenuRadioItem value="balanced">Balanced</DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="focus">Focus</DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="control">Control</DropdownMenuRadioItem>
-            </DropdownMenuRadioGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
-
         <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground" onClick={onBookmark} title="Закладка">
           <Bookmark className="w-4 h-4" />
         </Button>

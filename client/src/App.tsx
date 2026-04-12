@@ -31,6 +31,7 @@ const AdminReports = lazy(() => import("@/pages/admin/reports"));
 const AdminAnalytics = lazy(() => import("@/pages/admin/analytics"));
 const AdminKPI = lazy(() => import("@/pages/admin/kpi"));
 const AdminAudit = lazy(() => import("@/pages/admin/audit"));
+const AdminRecordings = lazy(() => import("@/pages/admin/recordings"));
 const AdminSettings = lazy(() => import("@/pages/admin/settings"));
 const Readers = lazy(() => import("@/pages/readers"));
 const Library = lazy(() => import("@/pages/library"));
@@ -115,6 +116,7 @@ function Router() {
       <Route path="/admin/analytics" component={AdminAnalytics} />
       <Route path="/admin/kpi" component={AdminKPI} />
       <Route path="/admin/audit" component={AdminAudit} />
+      <Route path="/admin/recordings" component={AdminRecordings} />
       <Route path="/admin/settings" component={AdminSettings} />
 
       {/* Implemented Pages */}

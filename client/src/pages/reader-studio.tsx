@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useLocation, useRoute } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
@@ -15,8 +15,7 @@ import { MicrophoneCheckModal } from "@/components/studio/microphone-check-modal
 import { LiveTopBar, type NetworkQuality } from "@/components/studio/LiveTopBar";
 import { ControlBar } from "@/components/studio/ControlBar";
 import { ReadingStage, THEMES, FONTS, type ThemeKey } from "@/components/studio/ReadingStage";
-import { RightDock } from "@/components/studio/RightDock";
-import { LiveShell, type StudioMode } from "@/components/studio/LiveShell";
+import { LiveShell } from "@/components/studio/LiveShell";
 import { useLiveReaders } from "@/hooks/use-live-readers";
 
 export default function ReaderStudio() {
@@ -25,7 +24,6 @@ export default function ReaderStudio() {
   const { user } = useAuth();
   const { session, createSession, startReading, pauseReading, resumeReading, endReading } = useReadingSession();
 
-  const [studioMode, setStudioMode] = useState<StudioMode>("balanced");
   const [showTextSettings, setShowTextSettings] = useState(false);
   const [fontSize, setFontSize] = useState([22]);
   const [currentTheme, setCurrentTheme] = useState<ThemeKey>('sepia');
@@ -163,12 +161,15 @@ export default function ReaderStudio() {
     if (cachedCheck) {
       const timestamp = Number.parseInt(cachedCheck, 10);
       const tenMinutes = 10 * 60 * 1000;
-      if (Date.now() - timestamp < tenMinutes) {
+      if (Date.now() - timestamp < tenMinutes && microphoneAvailable) {
         setMicCheckPassed(true);
         setShowMicCheck(false);
+      } else {
+        setMicCheckPassed(false);
+        sessionStorage.removeItem('mic_check_passed');
       }
     }
-  }, []);
+  }, [microphoneAvailable]);
 
   useEffect(() => {
     const savedTheme = localStorage.getItem('reader_theme');
@@ -271,8 +272,12 @@ export default function ReaderStudio() {
       return;
     }
 
-    if (!microphoneAvailable) {
+    const isMicAvailableNow = await retryDetection();
+    if (!isMicAvailableNow) {
       setStreamStartError(microphoneError ?? 'Микрофон недоступен');
+      setMicCheckPassed(false);
+      sessionStorage.removeItem('mic_check_passed');
+      setShowMicCheck(true);
       return;
     }
 
@@ -339,10 +344,6 @@ export default function ReaderStudio() {
 
   // Синхронизируем индикатор сети с реальным состоянием соединения с сервером
   const networkQuality: NetworkQuality = session.isConnected ? "good" : "poor";
-
-  const renderRightDock = useCallback((isOpen: boolean, onClose: () => void) => (
-    <RightDock isOpen={isOpen} onClose={onClose} listenerCount={listenerCount} />
-  ), [listenerCount]);
 
   // Book display info
   const bookTitle =
@@ -436,6 +437,9 @@ export default function ReaderStudio() {
       {/* Проверка микрофона */}
       {state === "prep" && showMicCheck && microphoneAvailable && !microphoneLoading && (
         <MicrophoneCheckModal
+          microphoneAvailable={microphoneAvailable}
+          microphoneLoading={microphoneLoading}
+          microphoneError={microphoneError}
           onComplete={() => {
             setMicCheckPassed(true);
             setShowMicCheck(false);
@@ -444,8 +448,9 @@ export default function ReaderStudio() {
             sessionStorage.setItem('mic_check_passed', Date.now().toString());
           }}
           onSkip={() => {
-            setMicCheckPassed(true);
+            setMicCheckPassed(false);
             setShowMicCheck(false);
+            sessionStorage.removeItem('mic_check_passed');
           }}
         />
       )}
@@ -513,7 +518,6 @@ export default function ReaderStudio() {
     <div className="relative">
       {textSettingsPanel}
       <LiveShell
-        mode={studioMode}
         topBar={
           <LiveTopBar
             bookTitle={bookTitle}
@@ -522,8 +526,6 @@ export default function ReaderStudio() {
             isRecording={false}
             recordingTime={0}
             networkQuality={networkQuality}
-            mode={studioMode}
-            onModeChange={setStudioMode}
             onBookmark={() => {}}
             onTextSettings={() => setShowTextSettings((v) => !v)}
           />
@@ -580,7 +582,6 @@ export default function ReaderStudio() {
             onSettings={() => setShowTextSettings((v) => !v)}
           />
         }
-        rightDock={renderRightDock}
       />
     </div>
   );

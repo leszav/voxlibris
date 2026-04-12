@@ -1,30 +1,16 @@
-import { useState, type ReactNode } from "react";
-import { cn } from "@/lib/utils";
-import type { StudioMode } from "./LiveTopBar";
+import type { ReactNode } from "react";
 
 interface LiveShellProps {
   topBar: ReactNode;
   stage: ReactNode;
   controlBar: ReactNode;
-  rightDock: (isOpen: boolean, onClose: () => void) => ReactNode;
-  /** Controlled from outside only to allow "open chat" from ControlBar */
-  defaultRightDockOpen?: boolean;
-  mode: StudioMode;
 }
 
 export function LiveShell({
   topBar,
   stage,
   controlBar,
-  rightDock,
-  defaultRightDockOpen = true,
-  mode,
 }: Readonly<LiveShellProps>) {
-  const [rightDockOpen, setRightDockOpen] = useState(defaultRightDockOpen);
-
-  // In Focus mode the dock is always hidden
-  const dockVisible = mode !== "focus" && rightDockOpen;
-
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-[#F9F8F6] dark:bg-background">
       {/* Top bar */}
@@ -44,33 +30,9 @@ export function LiveShell({
         </nav>
 
         {/* Stage area */}
-        <div
-          className={cn(
-            "flex flex-1 overflow-hidden transition-all duration-220",
-            mode === "control" && "max-w-[calc(100%-420px)]"
-          )}
-        >
+        <div className="flex flex-1 overflow-hidden transition-all duration-220">
           {stage}
         </div>
-
-        {/* Right dock (Balanced + Control) */}
-        {dockVisible && (
-          <div
-            className={cn(
-              "shrink-0 overflow-hidden transition-all duration-220",
-              mode === "control" ? "w-[420px]" : "w-80 xl:w-96"
-            )}
-          >
-            {rightDock(dockVisible, () => setRightDockOpen(false))}
-          </div>
-        )}
-
-        {/* Focus mode: show "open chat" hint when dock was closed */}
-        {mode === "focus" && (
-          <div className="absolute right-0 top-1/2 -translate-y-1/2 z-20">
-            {/* RightDock renders nothing when isOpen=false; handled in ControlBar chatOpen button */}
-          </div>
-        )}
       </div>
 
       {/* Floating control bar */}
@@ -78,5 +40,3 @@ export function LiveShell({
     </div>
   );
 }
-
-export type { StudioMode } from "./LiveTopBar";

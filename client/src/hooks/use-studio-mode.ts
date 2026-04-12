@@ -37,7 +37,7 @@ export interface StudioModeState {
   microphoneAvailable: boolean;
   microphoneLoading: boolean;
   microphoneError: string | null;
-  retryDetection: () => void;
+  retryDetection: () => Promise<boolean>;
   micLevel: number;
   micBars: ReadonlyArray<number>;
   listenerCount: number;
@@ -118,9 +118,17 @@ export function useStudioMode({
   });
 
   // ── Кэш проверки микрофона ─────────────────────────────────────────────
-  // Авто-пропуск: если микрофон работает и есть кэш — не показываем модалку.
+  // Используем кэш только если микрофон реально доступен прямо сейчас.
   useEffect(() => {
     if (!enabled) return;
+
+    if (!microphoneAvailable) {
+      setMicCheckPassed(false);
+      setShowMicCheck(true);
+      sessionStorage.removeItem('mic_check_passed');
+      return;
+    }
+
     const cached = sessionStorage.getItem('mic_check_passed');
     if (cached) {
       const ts = Number.parseInt(cached, 10);
@@ -130,11 +138,9 @@ export function useStudioMode({
         return;
       }
     }
-    // Если микрофон уже доступен — пропускаем проверку (можно запустить вручную через openMicCheck)
-    if (microphoneAvailable) {
-      setMicCheckPassed(true);
-      setShowMicCheck(false);
-    }
+
+    setMicCheckPassed(false);
+    setShowMicCheck(true);
   }, [enabled, microphoneAvailable]);
 
   // ── Синхронизация mute ─────────────────────────────────────────────────
@@ -156,8 +162,20 @@ export function useStudioMode({
   useEffect(() => {
     if (!microphoneIssue) return;
     setMicCheckPassed(false);
+    setShowMicCheck(true);
     sessionStorage.removeItem('mic_check_passed');
   }, [microphoneIssue]);
+
+  // Если микрофон отключился/исчез в процессе — блокируем студию до повторной проверки
+  useEffect(() => {
+    if (!enabled) return;
+    if (microphoneLoading) return;
+    if (microphoneAvailable) return;
+
+    setMicCheckPassed(false);
+    setShowMicCheck(true);
+    sessionStorage.removeItem('mic_check_passed');
+  }, [enabled, microphoneAvailable, microphoneLoading]);
 
   // ── Инициализация сессии при открытии студии ───────────────────────────
   useEffect(() => {
@@ -203,8 +221,19 @@ export function useStudioMode({
       if (startLockRef.current) return;
       if (!userId) { setStreamStartError('Пользователь не авторизован'); return; }
       if (!session.sessionId) { setStreamStartError('Сессия ещё не создана. Подождите.'); return; }
-      if (!microphoneAvailable) { setStreamStartError(microphoneError ?? 'Микрофон недоступен'); return; }
-      if (!micCheckPassed) { setStreamStartError('Сначала пройдите проверку микрофона'); return; }
+
+      const availableNow = await retryDetection();
+      if (!availableNow) {
+        setMicCheckPassed(false);
+        setShowMicCheck(true);
+        setStreamStartError(microphoneError ?? 'Микрофон недоступен. Подключите или включите микрофон.');
+        return;
+      }
+      if (!micCheckPassed) {
+        setShowMicCheck(true);
+        setStreamStartError('Сначала пройдите проверку микрофона');
+        return;
+      }
 
       startLockRef.current = true;
       setIsStartingBroadcast(true);
@@ -227,9 +256,9 @@ export function useStudioMode({
     [
       userId,
       session.sessionId,
-      microphoneAvailable,
       microphoneError,
       micCheckPassed,
+      retryDetection,
       startAudioStream,
       notifyBroadcastStarted,
       startReading,

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Mic, MicOff, Pause, Play, Square, MessageSquare, Users, Settings2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import studioLogo from '/vlstudio-logo.webp';
 
 interface ControlBarProps {
   state: "prep" | "live" | "paused";
@@ -95,6 +96,9 @@ export function ControlBar({
       role="toolbar"
       aria-label="Панель управления трансляцией"
     >
+      {/* Логотип */}
+      <img src={studioLogo} alt="VL Studio" className="h-5 w-auto shrink-0 opacity-75 mr-1 pr-2 border-r border-border" />
+
       {/* Left group: mic + VU */}
       <div className="flex items-center gap-2 pr-3 border-r border-border">
         <Button
