@@ -26,6 +26,29 @@ import type {
 import { logger } from '../lib/logger.js';
 import type { ClientPublicCatalogClub } from '../lib/client-serializers.js';
 
+function matchesCatalogSearch(
+  club: { title: string; description: string | null; bookTitle: string | null; author: string | null },
+  q: string,
+): boolean {
+  return club.title.toLowerCase().includes(q)
+    || (club.description ?? '').toLowerCase().includes(q)
+    || (club.bookTitle ?? '').toLowerCase().includes(q)
+    || (club.author ?? '').toLowerCase().includes(q);
+}
+
+function buildTagsMap(tagRows: Array<{ clubId: string; slug: string }>): Map<string, string[]> {
+  const map = new Map<string, string[]>();
+  for (const row of tagRows) {
+    const existing = map.get(row.clubId);
+    if (existing) {
+      existing.push(row.slug);
+    } else {
+      map.set(row.clubId, [row.slug]);
+    }
+  }
+  return map;
+}
+
 /**
  * Club Domain Repository - единственная ответственность: управление клубами
  * Архитектурная изоляция: все операции с клубами, участниками и приглашениями
@@ -140,11 +163,15 @@ export class ClubRepository extends BaseRepository {
     }
   }
 
-  async getPublicCatalogClubs(limit?: number, searchQuery?: string): Promise<ClientPublicCatalogClub[]> {
+  async getPublicCatalogClubs(limit?: number, offset?: number, searchQuery?: string): Promise<ClientPublicCatalogClub[]> {
     try {
+      const PAGE_SIZE = 12;
       const normalizedLimit = typeof limit === 'number' && Number.isFinite(limit) && limit > 0
         ? Math.min(Math.trunc(limit), 100)
-        : undefined;
+        : PAGE_SIZE;
+      const normalizedOffset = typeof offset === 'number' && Number.isFinite(offset) && offset >= 0
+        ? Math.trunc(offset)
+        : 0;
       const normalizedSearch = typeof searchQuery === 'string' ? searchQuery.trim().toLowerCase() : '';
 
       let query = this.db
@@ -153,21 +180,44 @@ export class ClubRepository extends BaseRepository {
           title: clubs.title,
           description: clubs.description,
           coverImage: clubs.coverImage,
+          type: clubs.type,
+          isPrivate: clubs.isPrivate,
+          isLive: clubs.isLive,
+          maxMembers: clubs.maxMembers,
         })
         .from(clubs)
         .where(ne(clubs.status, 'pending'))
         .orderBy(desc(clubs.popularityScore), desc(clubs.createdAt))
         .$dynamic();
 
-      // Для поискового запроса сначала получаем полный набор и фильтруем по клубу/книге/автору.
-      if (normalizedLimit && !normalizedSearch) {
-        query = query.limit(normalizedLimit);
+      // Для поискового запроса сначала получаем полный набор и фильтруем по клубу/книге/автору,
+      // затем срезаем нужную страницу. Без поиска — SQL LIMIT/OFFSET.
+      if (!normalizedSearch) {
+        query = query.limit(normalizedLimit).offset(normalizedOffset);
       }
 
       const result = await query;
       if (result.length === 0) {
         return [];
       }
+
+      // Загружаем кол-во участников и теги параллельно
+      const clubIds = result.map((c) => c.id);
+      const [memberCountRows, tagRows] = await Promise.all([
+        this.db
+          .select({ clubId: clubMembers.clubId, cnt: count() })
+          .from(clubMembers)
+          .where(and(inArray(clubMembers.clubId, clubIds), eq(clubMembers.isActive, true)))
+          .groupBy(clubMembers.clubId),
+        this.db
+          .select({ clubId: clubTags.clubId, slug: tags.slug })
+          .from(clubTags)
+          .innerJoin(tags, eq(clubTags.tagId, tags.id))
+          .where(inArray(clubTags.clubId, clubIds)),
+      ]);
+
+      const memberCountMap = new Map(memberCountRows.map((r) => [r.clubId, Number(r.cnt)]));
+      const tagsMap = buildTagsMap(tagRows);
 
       const latestBooks = await this.db
         .select({
@@ -178,7 +228,7 @@ export class ClubRepository extends BaseRepository {
         })
         .from(clubBooks)
         .where(and(
-          inArray(clubBooks.clubId, result.map((club) => club.id)),
+          inArray(clubBooks.clubId, clubIds),
           eq(clubBooks.isDeleted, false),
         ))
         .orderBy(desc(clubBooks.uploadedAt));
@@ -202,27 +252,25 @@ export class ClubRepository extends BaseRepository {
         bookTitle: latestBookMap.get(club.id)?.title ?? null,
         author: latestBookMap.get(club.id)?.author ?? null,
         bookCoverUrl: latestBookMap.get(club.id)?.coverUrl ?? null,
+        type: club.type,
+        isPrivate: club.isPrivate,
+        isLive: club.isLive,
+        memberCount: memberCountMap.get(club.id) ?? 0,
+        maxMembers: club.maxMembers,
+        tags: tagsMap.get(club.id) ?? [],
       }));
 
       const filtered = normalizedSearch
-        ? catalogClubs.filter((club) => {
-            const title = club.title.toLowerCase();
-            const description = (club.description ?? '').toLowerCase();
-            const bookTitle = (club.bookTitle ?? '').toLowerCase();
-            const author = (club.author ?? '').toLowerCase();
-
-            return title.includes(normalizedSearch)
-              || description.includes(normalizedSearch)
-              || bookTitle.includes(normalizedSearch)
-              || author.includes(normalizedSearch);
-          })
+        ? catalogClubs.filter((club) => matchesCatalogSearch(club, normalizedSearch))
         : catalogClubs;
 
-      if (!normalizedLimit) {
-        return filtered;
+      // При поиске применяем offset/limit в JS (т.к. фильтрация происходила в JS)
+      if (normalizedSearch) {
+        return filtered.slice(normalizedOffset, normalizedOffset + normalizedLimit);
       }
 
-      return filtered.slice(0, normalizedLimit);
+      // Без поиска offset/limit уже применён в SQL
+      return filtered;
     } catch (error) {
       this.logError('getPublicCatalogClubs', error);
       return [];

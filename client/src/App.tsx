@@ -26,6 +26,7 @@ const InviteAccept = lazy(() => import("@/pages/invite-accept"));
 const AdminDashboard = lazy(() => import("@/pages/admin/dashboard"));
 const AdminUsers = lazy(() => import("@/pages/admin/users"));
 const AdminBooks = lazy(() => import("@/pages/admin/books"));
+const AdminGenres = lazy(() => import("@/pages/admin/genres"));
 const AdminClubs = lazy(() => import("@/pages/admin/clubs"));
 const AdminReports = lazy(() => import("@/pages/admin/reports"));
 const AdminAnalytics = lazy(() => import("@/pages/admin/analytics"));
@@ -111,6 +112,7 @@ function Router() {
       <Route path="/admin/dashboard" component={AdminDashboard} />
       <Route path="/admin/users" component={AdminUsers} />
       <Route path="/admin/books" component={AdminBooks} />
+      <Route path="/admin/genres" component={AdminGenres} />
       <Route path="/admin/clubs" component={AdminClubs} />
       <Route path="/admin/reports" component={AdminReports} />
       <Route path="/admin/analytics" component={AdminAnalytics} />

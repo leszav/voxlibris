@@ -1,4 +1,5 @@
-import { Mic } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { BookOpen, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface ReadNowBubbleProps {
@@ -14,24 +15,59 @@ export function ReadNowBubble({
   onClick,
   className,
 }: Readonly<ReadNowBubbleProps>) {
+  const [isIdle, setIsIdle] = useState(false);
+  const idleTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    const resetIdle = () => {
+      setIsIdle(false);
+      if (idleTimeoutRef.current) {
+        clearTimeout(idleTimeoutRef.current);
+      }
+      idleTimeoutRef.current = setTimeout(() => {
+        setIsIdle(true);
+      }, 3000);
+    };
+
+    globalThis.addEventListener("mousemove", resetIdle);
+    globalThis.addEventListener("keydown", resetIdle);
+    globalThis.addEventListener("click", resetIdle);
+
+    resetIdle();
+
+    return () => {
+      globalThis.removeEventListener("mousemove", resetIdle);
+      globalThis.removeEventListener("keydown", resetIdle);
+      globalThis.removeEventListener("click", resetIdle);
+      if (idleTimeoutRef.current) {
+        clearTimeout(idleTimeoutRef.current);
+      }
+    };
+  }, []);
+
   return (
     <button
       type="button"
       onClick={onClick}
       className={cn(
-        "group relative flex items-center justify-center",
-        "w-11 h-11 rounded-full",
-        "bg-amber-500 hover:bg-amber-600 active:scale-95",
-        "text-white shadow-lg shadow-amber-500/30",
-        "transition-all duration-200 ease-out",
+        "group flex min-w-[220px] items-center gap-3 rounded-2xl border px-4 py-3 text-left",
+        "bg-card/95 text-foreground shadow-lg backdrop-blur-sm",
+        "border-amber-200/80 hover:border-amber-300 hover:bg-card",
+        isIdle ? "opacity-30 hover:opacity-100" : "opacity-100",
+        "active:scale-[0.99] transition-all duration-200 ease-out",
         className
       )}
       title="Начать читать вслух"
       aria-label="Открыть студию чтеца"
     >
-      <Mic className="w-5 h-5 shrink-0" />
-      {/* Мягкий пульс-ореол */}
-      <span className="absolute inset-0 rounded-full bg-amber-500/30 animate-ping opacity-60 group-hover:opacity-0 transition-opacity" />
+      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-amber-200 bg-amber-500/10 text-amber-600 dark:border-amber-800 dark:text-amber-400">
+        <BookOpen className="h-4.5 w-4.5" />
+      </span>
+      <span className="min-w-0 flex-1 text-left">
+        <span className="block text-sm font-semibold">VoxLibris Studio</span>
+        <span className="mt-1 block text-xs text-muted-foreground">Начать чтение вслух</span>
+      </span>
+      <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200 group-hover:translate-x-0.5" />
     </button>
   );
 }

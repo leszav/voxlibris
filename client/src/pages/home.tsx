@@ -7,16 +7,18 @@ import { ArrowRight, Sparkles, Loader2 } from "lucide-react";
 import { ReadingDreamIllustration } from "@/components/illustrations/reading-dream";
 import { Link } from "wouter";
 import { useCatalogClubs } from "@/hooks/use-clubs";
+import { useGridColumns } from "@/hooks/use-grid-columns";
 import heroImageAvif from "@assets/generated_images/cozy_library_atmosphere_with_warm_lighting.avif";
 import heroImagePng from "@assets/generated_images/cozy_library_atmosphere_with_warm_lighting.png";
 import heroImageWebp from "@assets/generated_images/cozy_library_atmosphere_with_warm_lighting.webp";
 
 
 export default function Home() {
-  // Получаем реальные клубы для каталога с автообновлением каждые 30 секунд
-  const { data: clubs, isLoading, error } = useCatalogClubs(6);
-  
-  // Главная больше не тянет весь каталог: сервер возвращает только TOP-6.
+  // Главная: grid md:grid-cols-2 lg:grid-cols-3 → breakpoints md=768, lg=1024
+  const cols = useGridColumns({ sm: 768, lg: 1024 });
+  // Показываем 2 строки, кратно cols
+  const { data: clubs, isLoading, error } = useCatalogClubs(cols * 2);
+
   const featuredClubs = clubs || [];
 
   return (
@@ -117,12 +119,12 @@ export default function Home() {
                 coverUrl={club.coverImage ?? undefined}
                 bookCoverUrl={club.bookCoverUrl ?? undefined}
                 description={club.description ?? undefined}
-                members={0}
-                maxMembers={0}
-                isLive={false}
-                isPrivate={false}
-                type={"standard"}
-                tags={[]}
+                members={club.memberCount}
+                maxMembers={club.maxMembers}
+                isLive={club.isLive}
+                isPrivate={club.isPrivate}
+                type={club.type as "standard" | "premium" | "reader-led" | "reading_club"}
+                tags={club.tags}
               />
             ))}
             

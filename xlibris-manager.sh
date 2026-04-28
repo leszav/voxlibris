@@ -18,6 +18,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
 LOG_DIR="$SCRIPT_DIR/logs"
 LOG_FILE="$LOG_DIR/xlibris-manager.log"
 ENV_FILE="$SCRIPT_DIR/.env"
+BACKEND_PID=""
 
 # Создание папки для логов
 mkdir -p "$LOG_DIR"
@@ -109,6 +110,81 @@ check_port() {
     fi
 }
 
+# Ожидание доступности порта с проверкой, что процесс не завершился раньше времени
+wait_for_port() {
+    local port="$1"
+    local label="$2"
+    local max_attempts="${3:-30}"
+    local delay_seconds="${4:-1}"
+    local attempt=1
+
+    print_log "$CYAN" "INFO" "⏳ Ожидание готовности $label на порту $port..."
+
+    while [ $attempt -le $max_attempts ]; do
+        if check_port "$port"; then
+            print_log "$GREEN" "INFO" "✅ $label готов на порту $port"
+            return 0
+        fi
+
+        if [[ -n "$BACKEND_PID" ]] && ! kill -0 "$BACKEND_PID" 2>/dev/null; then
+            print_log "$RED" "ERROR" "❌ Процесс $label завершился до готовности порта $port"
+            return 1
+        fi
+
+        echo -n "."
+        sleep "$delay_seconds"
+        ((attempt++))
+    done
+
+    echo ""
+    print_log "$RED" "ERROR" "❌ $label не стал доступен на порту $port за ${max_attempts} попыток"
+    return 1
+}
+
+# Остановка локальных dev-процессов приложения (без PostgreSQL)
+stop_local_dev_processes() {
+    local ports=(3000 5000)
+    local pids=""
+
+    for port in "${ports[@]}"; do
+        pids=$(lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)
+        if [[ -n "$pids" ]]; then
+            for pid in $pids; do
+                kill "$pid" 2>/dev/null || true
+            done
+            sleep 1
+
+            # Если процесс не завершился мягко, завершаем принудительно
+            pids=$(lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)
+            if [[ -n "$pids" ]]; then
+                for pid in $pids; do
+                    kill -9 "$pid" 2>/dev/null || true
+                done
+            fi
+            print_log "$GREEN" "INFO" "✅ Освобожден порт $port"
+        else
+            print_log "$GREEN" "INFO" "✅ Порт $port уже свободен"
+        fi
+    done
+}
+
+# Проверка: занят ли PostgreSQL порт внешним процессом
+is_postgres_port_occupied() {
+    lsof -tiTCP:5432 -sTCP:LISTEN >/dev/null 2>&1
+}
+
+# Показать владельца порта PostgreSQL
+print_postgres_port_owner() {
+    local owner_info
+    owner_info=$(lsof -nP -iTCP:5432 -sTCP:LISTEN 2>/dev/null | awk 'NR>1 {print $1 "(PID:" $2 ")"}' | paste -sd ', ' -)
+
+    if [[ -n "$owner_info" ]]; then
+        print_log "$YELLOW" "WARN" "ℹ️ Порт 5432 уже занят: $owner_info"
+    else
+        print_log "$YELLOW" "WARN" "ℹ️ Порт 5432 уже занят внешним процессом"
+    fi
+}
+
 # Проверка статуса приложений
 check_app_services() {
     echo -e "${CYAN}Статус приложений:${NC}"
@@ -159,8 +235,15 @@ start_icecast() {
 # Запуск Docker сервисов
 start_docker_services() {
     print_log "$BLUE" "INFO" "🚀 Запуск Docker сервисов..."
-    
+
+    if check_port 5432 && ! docker compose ps --services --filter "status=running" | grep -q "^postgres$"; then
+        print_postgres_port_owner
+        print_log "$YELLOW" "WARN" "⚠️ Обнаружен PostgreSQL на :5432 вне docker compose. Не используем его повторно: останавливаем compose-окружение и поднимаем контейнеры начисто, чтобы избежать подключения к старому экземпляру."
+    fi
+
+    docker compose down --remove-orphans 2>/dev/null || true
     docker compose up -d postgres minio redis
+
     start_icecast
     
     # Ожидание готовности сервисов
@@ -172,8 +255,18 @@ start_docker_services() {
     local attempt=1
     
     while [ $attempt -le $max_attempts ]; do
-        if docker compose ps --services --filter "status=running" | grep -q postgres && \
-           docker compose ps --services --filter "status=running" | grep -q minio; then
+        local minio_ready=0
+        local postgres_ready=0
+
+        if docker compose ps --services --filter "status=running" | grep -q "^minio$"; then
+            minio_ready=1
+        fi
+
+        if docker compose ps --services --filter "status=running" | grep -q "^postgres$"; then
+            postgres_ready=1
+        fi
+
+        if [[ $minio_ready -eq 1 && $postgres_ready -eq 1 ]]; then
             print_log "$GREEN" "INFO" "✅ Все сервисы готовы к работе"
             return 0
         fi
@@ -190,6 +283,14 @@ start_docker_services() {
 # Остановка Docker сервисов
 stop_docker_services() {
     print_log "$BLUE" "INFO" "🛑 Остановка Docker сервисов..."
+
+    print_log "$BLUE" "INFO" "🧹 Остановка локальных dev-процессов на портах проекта..."
+    if stop_local_dev_processes; then
+        print_log "$GREEN" "INFO" "✅ Локальные dev-процессы остановлены"
+    else
+        print_log "$YELLOW" "WARN" "⚠️ Не удалось полностью остановить dev-процессы, продолжаем остановку Docker"
+    fi
+
     docker compose down
     print_log "$GREEN" "INFO" "✅ Сервисы остановлены"
 }
@@ -210,7 +311,7 @@ start_dev() {
     print_log "$BLUE" "INFO" "🚀 Запуск приложения в режиме разработки..."
     
     # Освобождение портов
-    pnpm run kill-ports
+    stop_local_dev_processes
     
     # Запуск сервисов
     start_docker_services || return 1
@@ -218,9 +319,17 @@ start_dev() {
     # Инициализация хранилища
     init_storage || return 1
     
-    # Запуск приложения
-    print_log "$GREEN" "INFO" "🌟 Запуск сервера и клиента..."
-    pnpm run dev:both
+    # Запуск backend с ожиданием готовности до старта frontend
+    print_log "$GREEN" "INFO" "🌟 Запуск backend..."
+    pnpm run dev:server \
+        > >(sed 's/^/[backend] /') \
+        2> >(sed 's/^/[backend] /' >&2) &
+    BACKEND_PID=$!
+
+    wait_for_port 5000 "Backend API" 60 1 || return 1
+
+    print_log "$GREEN" "INFO" "🌐 Backend готов, запускаем frontend..."
+    pnpm run dev:client
 }
 
 # Сборка проекта
@@ -729,7 +838,7 @@ main() {
 }
 
 # Обработка сигналов
-trap 'print_log "INFO" "INFO" "🛑 Получен сигнал завершения"; exit 0' SIGINT SIGTERM
+trap 'if [[ -n "$BACKEND_PID" ]] && kill -0 "$BACKEND_PID" 2>/dev/null; then kill "$BACKEND_PID" 2>/dev/null || true; fi; print_log "INFO" "INFO" "🛑 Получен сигнал завершения"; exit 0' SIGINT SIGTERM EXIT
 
 # Запуск
 main "$@"

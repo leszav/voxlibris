@@ -35,6 +35,154 @@ export interface IcecastPlayerControls {
   toggleMute: () => void;
 }
 
+type StatusListener = (status: PlayerStatus) => void;
+type ErrorListener = (message: string) => void;
+
+let sharedAudio: HTMLAudioElement | null = null;
+let sharedStreamUrl: string | null = null;
+let sharedStatus: PlayerStatus = 'idle';
+let sharedError: string | null = null;
+let sharedVolume = 0.9;
+let sharedMuted = false;
+let stallTimer: ReturnType<typeof setInterval> | null = null;
+let lastUpdateTime = 0;
+let suppressNextAudioError = false;
+
+const statusListeners = new Set<StatusListener>();
+const errorListeners = new Set<ErrorListener>();
+
+function notifyStatus(status: PlayerStatus): void {
+  sharedStatus = status;
+  statusListeners.forEach((listener) => listener(status));
+}
+
+function notifyError(message: string): void {
+  sharedError = message;
+  errorListeners.forEach((listener) => listener(message));
+}
+
+function clearStallTimer(): void {
+  if (!stallTimer) return;
+  clearInterval(stallTimer);
+  stallTimer = null;
+}
+
+function attachSharedAudioEvents(audio: HTMLAudioElement): void {
+  audio.onwaiting = () => notifyStatus('stalled');
+  audio.onplaying = () => notifyStatus('playing');
+  audio.onpause = () => {
+    if (!audio.ended && audio.src) {
+      notifyStatus('paused');
+    }
+  };
+  audio.onended = () => notifyStatus('ended');
+  audio.ontimeupdate = () => {
+    lastUpdateTime = Date.now();
+  };
+  audio.onerror = () => {
+    if (suppressNextAudioError) {
+      suppressNextAudioError = false;
+      return;
+    }
+
+    const code = audio.error?.code;
+    let msg = 'Ошибка воспроизведения потока';
+    if (code === MediaError.MEDIA_ERR_NETWORK) {
+      msg = 'Потерян сигнал — проблема с сетью';
+    } else if (code === MediaError.MEDIA_ERR_DECODE) {
+      msg = 'Ошибка декодирования аудио';
+    } else if (code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED) {
+      msg = 'Формат аудио не поддерживается браузером';
+    }
+    notifyError(msg);
+    notifyStatus('error');
+  };
+}
+
+function ensureSharedAudio(initialVolume: number): HTMLAudioElement {
+  if (sharedAudio) return sharedAudio;
+
+  const audio = new Audio();
+  audio.preload = 'none';
+  audio.volume = sharedVolume ?? initialVolume;
+  audio.muted = sharedMuted;
+  attachSharedAudioEvents(audio);
+  sharedAudio = audio;
+  return audio;
+}
+
+function startStallDetection(audio: HTMLAudioElement): void {
+  clearStallTimer();
+  lastUpdateTime = Date.now();
+  stallTimer = setInterval(() => {
+    if (audio.readyState >= 2 && !audio.paused && !audio.ended) {
+      const now = Date.now();
+      if (now - lastUpdateTime > 10_000) {
+        notifyError('Поток завис. Попробуйте перезапустить воспроизведение.');
+        notifyStatus('error');
+        clearStallTimer();
+      }
+    }
+  }, 2000);
+}
+
+async function startSharedPlayback(streamUrl: string, autoPlay: boolean, initialVolume: number): Promise<void> {
+  const audio = ensureSharedAudio(initialVolume);
+  sharedError = null;
+  sharedVolume = initialVolume;
+  audio.volume = initialVolume;
+
+  if (sharedStreamUrl === streamUrl && !audio.paused && !audio.ended) {
+    notifyStatus('playing');
+    return;
+  }
+
+  if (sharedStreamUrl !== streamUrl) {
+    audio.pause();
+    audio.src = streamUrl;
+    sharedStreamUrl = streamUrl;
+  }
+
+  if (!autoPlay) {
+    notifyStatus(audio.paused ? 'paused' : 'playing');
+    return;
+  }
+
+  notifyStatus('loading');
+  startStallDetection(audio);
+
+  try {
+    await audio.play();
+    if (!audio.paused && !audio.ended) {
+      notifyStatus('playing');
+    }
+  } catch (err) {
+    if (err instanceof Error && err.name === 'NotAllowedError') {
+      notifyStatus('paused');
+      return;
+    }
+
+    const message = err instanceof Error ? err.message : 'Не удалось запустить воспроизведение';
+    notifyError(`Не удалось запустить воспроизведение: ${message}`);
+    notifyStatus('error');
+  }
+}
+
+export async function primeIcecastPlayback(streamUrl: string, initialVolume = 0.9): Promise<void> {
+  await startSharedPlayback(streamUrl, true, initialVolume);
+}
+
+export function stopIcecastPlayback(): void {
+  if (!sharedAudio) return;
+  clearStallTimer();
+  suppressNextAudioError = true;
+  sharedAudio.pause();
+  sharedAudio.src = '';
+  sharedStreamUrl = null;
+  sharedError = null;
+  notifyStatus('idle');
+}
+
 export function useIcecastPlayer(
   options: IcecastPlayerOptions,
 ): IcecastPlayerState & IcecastPlayerControls {
@@ -44,8 +192,7 @@ export function useIcecastPlayer(
   const [error, setError] = useState<string | null>(null);
   const [volume, setVolume] = useState<number>(initialVolume);
   const [isMuted, setIsMuted] = useState(false);
-
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(sharedAudio);
 
   const updateStatus = useCallback((next: PlayerStatus) => {
     setStatus(next);
@@ -58,115 +205,72 @@ export function useIcecastPlayer(
     onError?.(msg);
   }, [onError, updateStatus]);
 
+  useEffect(() => {
+    const statusListener: StatusListener = (next) => {
+      setStatus(next);
+      onStatusChange?.(next);
+    };
+    const errorListener: ErrorListener = (message) => {
+      setError(message);
+      onError?.(message);
+    };
+
+    statusListeners.add(statusListener);
+    errorListeners.add(errorListener);
+
+    setStatus(sharedStatus);
+    setError(sharedError);
+    setVolume(sharedVolume);
+    setIsMuted(sharedMuted);
+
+    return () => {
+      statusListeners.delete(statusListener);
+      errorListeners.delete(errorListener);
+    };
+  }, [onError, onStatusChange]);
+
   // Инициализация / смена URL потока
   useEffect(() => {
     if (!streamUrl) {
-      // Останавливаем предыдущий поток
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current.src = '';
-        audioRef.current = null;
-      }
       updateStatus('idle');
       return;
     }
-
-    const audio = new Audio();
-    audioRef.current = audio;
-
-    audio.volume = initialVolume;
-    audio.preload = 'none';
-
-    // --- Обработчики событий ---
-
-    audio.onwaiting = () => updateStatus('stalled');
-    audio.onplaying = () => updateStatus('playing');
-    audio.onpause   = () => {
-      if (!audio.ended) updateStatus('paused');
-    };
-    audio.onended   = () => updateStatus('ended');
-
-    audio.onerror = () => {
-      const code = audio.error?.code;
-      let msg = 'Ошибка воспроизведения потока';
-      if (code === MediaError.MEDIA_ERR_NETWORK) {
-        msg = 'Потерян сигнал — проблема с сетью';
-      } else if (code === MediaError.MEDIA_ERR_DECODE) {
-        msg = 'Ошибка декодирования аудио';
-      } else if (code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED) {
-        msg = 'Формат аудио не поддерживается браузером';
-      }
-      reportError(msg);
-    };
-
-    // Stall-детектор: если 10 секунд нет прогресса — ошибка
-    let lastUpdateTime = Date.now();
-    const stallTimer = setInterval(() => {
-      if (audio.readyState >= 2 && !audio.paused && !audio.ended) {
-        const now = Date.now();
-        if (now - lastUpdateTime > 10_000) {
-          reportError('Поток завис. Попробуйте перезапустить воспроизведение.');
-          clearInterval(stallTimer);
-        }
-      }
-    }, 2000);
-
-    audio.ontimeupdate = () => { lastUpdateTime = Date.now(); };
-
-    audio.src = streamUrl;
-
-    if (autoPlay) {
-      updateStatus('loading');
-      audio.play().catch((err) => {
-        // Autoplay blocked (политика браузера)
-        if (err instanceof Error && err.name === 'NotAllowedError') {
-          updateStatus('paused');
-          // Не считаем ошибкой — пользователь просто нажмёт Play
-        } else {
-          reportError(`Не удалось запустить воспроизведение: ${err.message}`);
-        }
-      });
-    }
+    void startSharedPlayback(streamUrl, autoPlay, initialVolume);
+    audioRef.current = ensureSharedAudio(initialVolume);
 
     return () => {
-      clearInterval(stallTimer);
-      audio.pause();
-      audio.src = '';
-      audioRef.current = null;
+      audioRef.current = sharedAudio;
     };
-  }, [streamUrl]); // audioRef и state-сеттеры стабильны
+  }, [autoPlay, initialVolume, reportError, streamUrl, updateStatus]);
 
   // --- Управление ---
 
   const play = useCallback((): void => {
-    if (!audioRef.current) return;
-    updateStatus('loading');
-    audioRef.current.play().catch((err) => {
-      reportError(`Не удалось воспроизвести: ${err.message}`);
-    });
+    if (!streamUrl) return;
+    void startSharedPlayback(streamUrl, true, sharedVolume);
   }, [updateStatus, reportError]);
 
   const pause = useCallback((): void => {
-    audioRef.current?.pause();
+    sharedAudio?.pause();
   }, []);
 
   const stop = useCallback((): void => {
-    if (!audioRef.current) return;
-    audioRef.current.pause();
-    audioRef.current.src = '';
+    stopIcecastPlayback();
     updateStatus('idle');
   }, [updateStatus]);
 
   const handleSetVolume = useCallback((v: number): void => {
     const clamped = Math.max(0, Math.min(1, v));
-    if (audioRef.current) audioRef.current.volume = clamped;
+    sharedVolume = clamped;
+    if (sharedAudio) sharedAudio.volume = clamped;
     setVolume(clamped);
   }, []);
 
   const toggleMute = useCallback((): void => {
     setIsMuted((prev) => {
       const next = !prev;
-      if (audioRef.current) audioRef.current.muted = next;
+      sharedMuted = next;
+      if (sharedAudio) sharedAudio.muted = next;
       return next;
     });
   }, []);

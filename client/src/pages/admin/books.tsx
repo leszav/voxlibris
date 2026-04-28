@@ -798,20 +798,12 @@ export default function AdminBooks() {
                   <SelectItem value="blocked">Заблокированные</SelectItem>
                 </SelectContent>
               </Select>
-              <Select value={filters.genre} onValueChange={handleGenreChange}>
-                <SelectTrigger className="w-48">
-                  <SelectValue placeholder="Жанр" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Все жанры</SelectItem>
-                  <SelectItem value="fiction">Художественная литература</SelectItem>
-                  <SelectItem value="non-fiction">Научная литература</SelectItem>
-                  <SelectItem value="mystery">Детектив</SelectItem>
-                  <SelectItem value="romance">Романтика</SelectItem>
-                  <SelectItem value="science-fiction">Научная фантастика</SelectItem>
-                  <SelectItem value="fantasy">Фэнтези</SelectItem>
-                </SelectContent>
-              </Select>
+              <Input
+                value={filters.genre === 'all' ? '' : filters.genre}
+                onChange={(e) => handleGenreChange(e.target.value || 'all')}
+                placeholder="Фильтр по жанру"
+                className="w-full md:w-48"
+              />
             </div>
           </CardContent>
         </Card>

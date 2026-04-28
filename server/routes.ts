@@ -6,6 +6,7 @@ import { fileStorage } from "./file-storage.js";
 import { emailService } from "./services/email-service.js";
 import personalBooksRouter from "./personal-books-routes.js";
 import clubBooksRouter from "./club-books-routes.js";
+import genresRouter from "./genres-routes.js";
 import accessRouter from "./access-routes.js";
 import clubDiscussionsRouter from "./club-discussions-routes.js";
 import scheduleRouter from "./routes/schedule.js";
@@ -17,6 +18,11 @@ import { jwtAuth, requireActiveUser } from "./jwt-middleware.js";
 import { logger } from "./lib/logger.js";
 import { getPublicBaseUrl } from "./lib/public-base-url.js";
 import { storeOptimizedImageIfNeeded } from "./lib/uploaded-image-storage.js";
+import {
+  clearStudioStreamClosureIntent,
+  setStudioStreamClosureIntent,
+} from "./lib/studio-stream-intent-store.js";
+import { sessionAnalyticsService } from "./services/session-analytics-service.js";
 import { db } from "./db.js";
 import { getIO } from "./lib/socket-registry.js";
 import {
@@ -171,6 +177,7 @@ export async function registerRoutes(
 
   // ===== NEW VOXLIBRIS UPLOAD API (Phase 2) =====
   app.use('/api/v1/user/books', personalBooksRouter);
+  app.use('/api/v1/genres', genresRouter);
   app.use('/api/v1', clubBooksRouter);
   app.use('/api/v1', accessRouter);
   
@@ -593,7 +600,7 @@ export async function registerRoutes(
       const queryLower = query.toLowerCase();
 
       const [clubs, books, users] = await Promise.all([
-        storage.getPublicCatalogClubs(limit, query),
+        storage.getPublicCatalogClubs(limit, undefined, query),
         storage.searchBooks(query),
         storage.searchUsers(query, limit),
       ]);
@@ -997,9 +1004,16 @@ export async function registerRoutes(
         return res.status(403).json({ message: "Только чтец может запустить эту сессию" });
       }
 
+      await clearStudioStreamClosureIntent(sessionId);
+
       const success = await storage.startSession(sessionId);
       if (!success) {
         return res.status(400).json({ message: "Не удалось запустить сессию" });
+      }
+
+      const existingAnalytics = await sessionAnalyticsService.getSessionAnalytics(sessionId);
+      if (!existingAnalytics) {
+        await sessionAnalyticsService.initializeSessionAnalytics(sessionId);
       }
 
       // Уведомляем чтеца и слушателей что сессия официально в эфире.
@@ -1047,9 +1061,16 @@ export async function registerRoutes(
         return res.status(403).json({ message: "Только чтец может завершить эту сессию" });
       }
 
+      await setStudioStreamClosureIntent(sessionId, "end");
+
       const success = await storage.endSession(sessionId);
       if (!success) {
         return res.status(400).json({ message: "Не удалось завершить сессию" });
+      }
+
+      const existingAnalytics = await sessionAnalyticsService.getSessionAnalytics(sessionId);
+      if (existingAnalytics) {
+        await sessionAnalyticsService.finalizeSessionAnalytics(sessionId);
       }
 
       res.json({ message: "Сессия завершена" });

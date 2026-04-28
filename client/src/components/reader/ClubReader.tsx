@@ -1,15 +1,17 @@
 import { useState, useEffect, useRef, useMemo, useCallback, type CSSProperties, type RefObject } from "react";
 import { useParams } from "wouter";
+import { cn } from "@/lib/utils";
 import { useClubBookmarks } from "../../hooks/use-club-reader";
 import { useAnalytics } from "../../hooks/use-analytics";
 import { getMobileAnalyticsContext } from "@/lib/mobile-analytics";
+import { resolveStudioPrepView } from "@/lib/studio-prep-view";
+import { resolveReaderStudioViewState } from "@/lib/reader-studio-view";
 import { ClubContentRenderer } from "./club/ClubContentRenderer";
 import { ClubReaderControls } from "./club/ClubReaderControls";
 import { ClubChapterList } from "./club/ClubNavigation";
 import { BookmarksPanel } from "./BookmarksPanel";
 import { LatestPositionPrompt } from "./LatestPositionPrompt";
 import { LoadingIndicator, ChapterLoadingIndicator, ContentLoadingSkeleton } from "./LoadingIndicator";
-import { ReaderProgressIndicators } from "./ReaderProgressIndicators";
 import { useKeyboardShortcuts, readerShortcuts } from "./useKeyboardShortcuts";
 import { KeyboardHelp } from "./KeyboardHelp";
 import { Button } from "../ui/button";
@@ -38,12 +40,11 @@ import { ChatWidget } from "@/components/chat/ChatWidget";
 import { ReadNowBubble } from "@/components/studio/ReadNowBubble";
 import { LiveReadersBubble, ActiveReadersModal } from "@/components/studio/LiveReadersBubble";
 import { ListenerOverlay } from "@/components/studio/ListenerOverlay";
-import { useLiveReaders, type LiveReader } from "@/hooks/use-live-readers";
+import { useLiveReaders } from "@/hooks/use-live-readers";
+import { useClubLiveListening } from "@/hooks/use-club-live-listening";
 import { useStudioMode } from "@/hooks/use-studio-mode";
 import { useAuth } from "@/hooks/use-auth";
-import { LiveTopBar, type NetworkQuality } from "@/components/studio/LiveTopBar";
-import { ControlBar } from "@/components/studio/ControlBar";
-import { MicrophoneCheckModal } from "@/components/studio/microphone-check-modal";
+import { EmbeddedClubStudioShell } from "@/components/studio/EmbeddedClubStudioShell";
 import type { ReaderSettings } from "@/lib/reader-settings";
 
 interface ClubReaderProps {
@@ -80,27 +81,6 @@ interface PendingScrollRestore {
   positionRaw: string;
 }
 
-function getStudioPrepStatusText(
-  isConnected: boolean,
-  micCheckPassed: boolean,
-  microphoneAvailable: boolean,
-  microphoneError: string | null,
-): string {
-  if (!microphoneAvailable) {
-    return microphoneError ?? 'Микрофон отсутствует/выключен. Подключите или включите микрофон.';
-  }
-
-  if (micCheckPassed) {
-    return isConnected
-      ? 'Микрофон проверен. Готов к эфиру.'
-      : 'Микрофон проверен. Соединение сессии восстанавливается.';
-  }
-
-  return isConnected
-    ? 'Проверьте микрофон перед запуском эфира.'
-    : 'Проверьте микрофон. Соединение сессии восстанавливается.';
-}
-
 function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
   const [currentChapter, setCurrentChapter] = useState<number | null>(null);
   const [tocOpen, setTocOpen] = useState(false);
@@ -110,18 +90,36 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
   const [pendingScrollRestore, setPendingScrollRestore] = useState<PendingScrollRestore | null>(null);
   const chapterScrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const manualRestoreCleanupRef = useRef<(() => void) | null>(null);
+  const programmaticScrollUntilRef = useRef(0);
 
   // ── Авторизация ─────────────────────────────────────────────────────
   const { user } = useAuth();
 
   // ── Live-чтецы ────────────────────────────────────────────────────────
   const [liveModalOpen, setLiveModalOpen] = useState(false);
-  const [listeningTo, setListeningTo] = useState<LiveReader | null>(null);
+  const [hasLocalReadingActivity, setHasLocalReadingActivity] = useState(false);
+  // Последняя полученная позиция чтеца (для диалога после окончания стрима)
+  const lastReaderPositionRef = useRef<{ chapter: number; positionRaw: string } | null>(null);
+  // Предложение перейти к позиции чтеца после окончания стрима
+  const [streamEndedSuggestion, setStreamEndedSuggestion] = useState<{ chapter: number; positionRaw: string } | null>(null);
+
+  const applyReaderPosition = useCallback((chapter: number, positionRaw: string | null | undefined) => {
+    if (!positionRaw) {
+      setCurrentChapter(chapter);
+      return;
+    }
+
+    lastReaderPositionRef.current = { chapter, positionRaw };
+    setPendingScrollRestore({ chapter, positionRaw });
+    setCurrentChapter(chapter);
+  }, []);
 
   // ── Режим студии ─────────────────────────────────────────────────
   const [studioOpen, setStudioOpen] = useState(false);
 
   const handlePositionUpdate = useCallback((update: { chapter: number; positionRaw: string }) => {
+    // Сохраняем последнюю позицию чтеца
+    lastReaderPositionRef.current = { chapter: update.chapter, positionRaw: update.positionRaw };
     // Синхронизируем позицию ридера с чтецом
     if (update.chapter !== currentChapter) {
       setCurrentChapter(update.chapter);
@@ -131,34 +129,13 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
       positionRaw: update.positionRaw,
     });
   }, [currentChapter]);
-
-  const { readers, flashCount, announceLiveStart, announceLiveStop } = useLiveReaders({
-    clubId,
-    bookId,
-    listeningToSessionId: listeningTo?.sessionId ?? null,
-    onPositionUpdate: handlePositionUpdate,
-  });
-
-  const studio = useStudioMode({
-    clubId,
-    bookId,
-    currentChapter: currentChapter ?? 1,
-    readerName: user?.username ?? 'Чтец',
-    userId: user?.id,
-    enabled: studioOpen,
-  });
-
-  const networkQuality: NetworkQuality = 'good';
-
-  // Если чтец, которого слушаем, ушёл — останавливаем плеер
-  useEffect(() => {
-    if (!listeningTo) return;
-    const still = readers.some((r) => r.sessionId === listeningTo.sessionId);
-    if (!still) setListeningTo(null);
-  }, [readers, listeningTo]);
   
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const contentAreaRef = useRef<HTMLDivElement>(null);
+  const markProgrammaticScroll = useCallback((holdMs: number = 400) => {
+    programmaticScrollUntilRef.current = Date.now() + holdMs;
+  }, []);
+  const isProgrammaticScroll = useCallback(() => Date.now() < programmaticScrollUntilRef.current, []);
   const {
     settings,
     updateSettings,
@@ -174,7 +151,7 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
   const {
     progressLoading,
     userProgress,
-    clubProgress,
+    clubProgress: _clubProgress,
     outlineContent,
     chapterContent,
     contentLoading,
@@ -188,14 +165,89 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
     bookId,
     currentChapter,
   });
+  const {
+    listeningState,
+    listeningReader,
+    startListening,
+    stopListening,
+  } = useClubLiveListening({
+    clubId,
+    bookId,
+    bookTitle: bookData.title ?? "",
+    bookAuthor: (bookData as { author?: string }).author,
+    coverUrl: (bookData as { coverUrl?: string }).coverUrl,
+  });
+  const { readers, hasSnapshot, flashCount, announceLiveStart, announceLiveStop, broadcastPosition } = useLiveReaders({
+    clubId,
+    bookId,
+    listeningToSessionId: listeningReader?.sessionId ?? null,
+    onPositionUpdate: handlePositionUpdate,
+  });
+
+  const studio = useStudioMode({
+    clubId,
+    bookId,
+    currentChapter: currentChapter ?? 1,
+    readerName: user?.username ?? 'Чтец',
+    userId: user?.id,
+    enabled: studioOpen,
+  });
+
+  const embeddedStudioView = resolveReaderStudioViewState({
+    state: studio.state,
+    micCheckPassed: studio.micCheckPassed,
+    isStartingBroadcast: studio.isStartingBroadcast,
+    isSessionConnected: studio.session.isConnected,
+    microphoneIssue: studio.microphoneIssue,
+    microphoneLoading: studio.microphoneLoading,
+    microphoneAvailable: studio.microphoneAvailable,
+    microphoneError: studio.microphoneError,
+    clubBookTitle: bookData.title ?? null,
+    chapterTitle: null,
+    currentChapter: currentChapter ?? 1,
+  });
+
+  const embeddedPrepView = resolveStudioPrepView({
+    microphoneAvailable: studio.microphoneAvailable,
+    microphoneError: studio.microphoneError,
+    micCheckPassed: studio.micCheckPassed,
+    isStartingBroadcast: studio.isStartingBroadcast,
+    sessionConnected: studio.session.isConnected,
+    sessionId: studio.session.sessionId ?? null,
+  });
+
+  // Если чтец, которого слушаем, ушёл — останавливаем плеер
+  useEffect(() => {
+    if (!listeningReader) return;
+    if (!hasSnapshot) return;
+    const still = readers.some((reader) => reader.sessionId === listeningReader.sessionId);
+    if (!still) {
+      if (lastReaderPositionRef.current) {
+        setStreamEndedSuggestion(lastReaderPositionRef.current);
+        lastReaderPositionRef.current = null;
+      }
+      stopListening();
+    }
+  }, [hasSnapshot, listeningReader, readers, stopListening]);
+
+  // ── Трансляция позиции чтеца слушателям ───────────────────────────────
+  const broadcastDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!studioOpen || studio.state !== 'live' || !studio.session.sessionId || currentChapter === null) return;
+    broadcastPosition({
+      sessionId: studio.session.sessionId,
+      chapter: currentChapter,
+      positionRaw: serializeReaderPosition({ scrollTop: 0, chapter: currentChapter }),
+    });
+  }, [studioOpen, studio.state, studio.session.sessionId, currentChapter, broadcastPosition]);
   const totalChapters = bookData.totalChapters || chapters.length || 1;
   const {
     rememberLocalProgress,
     saveWithSync,
     isLocalSessionProgress,
-    isSyncing,
-    syncError,
-    lastSyncTime,
+    isSyncing: _isSyncing,
+    syncError: _syncError,
+    lastSyncTime: _lastSyncTime,
   } = useReaderSyncState({ saveProgress });
 
   // Analytics tracking
@@ -274,13 +326,16 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
         rememberLocalProgress(payload);
         saveProgress(payload);
       }
-      
+
+      setHasLocalReadingActivity(true);
+       
       setCurrentChapter(newChapter);
       if (chapterScrollTimeoutRef.current) {
         clearTimeout(chapterScrollTimeoutRef.current);
       }
       chapterScrollTimeoutRef.current = setTimeout(() => {
         if (scrollContainerRef.current) {
+          markProgrammaticScroll(500);
           scrollContainerRef.current.scrollTop = 0;
         }
       }, 100);
@@ -462,6 +517,7 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
     remoteProgress: userProgress ?? null,
     refreshProgress: refetchProgress,
     enabled: currentChapter !== null && !progressLoading && totalChapters > 0,
+    hasLocalReadingActivity,
     isLocalSessionProgress,
   });
   const { scheduleSave: scheduleProgressSave, saveNow: saveProgressNow } = useDebouncedReaderProgressSave({
@@ -477,7 +533,7 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
   // Восстановление сохраненной позиции
   useEffect(() => {
     if (!progressLoading && currentChapter === null) {
-      const savedChapter = userProgress?.currentChapter || 1;
+      const savedChapter = userProgress?.currentChapter ?? 1;
       setCurrentChapter(savedChapter);
     }
   }, [progressLoading, currentChapter, userProgress?.currentChapter]);
@@ -488,6 +544,8 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
     currentChapter,
     currentPositionRaw: userProgress?.currentPosition,
     contentReady: !contentLoading && !!currentChapterContent,
+    onProgrammaticScroll: markProgrammaticScroll,
+    isProgrammaticScroll,
   });
   useSmoothReaderSpaceScroll({
     scrollContainerRef: scrollElementRef,
@@ -511,6 +569,7 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
       contentAreaRef: contentAreaRef as RefObject<HTMLElement | null>,
       currentChapter,
       currentPositionRaw: pendingScrollRestore.positionRaw,
+      onProgrammaticScroll: markProgrammaticScroll,
       delayMs: 120,
       retryAttempts: 5,
       retryDelayMs: 120,
@@ -596,7 +655,7 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
   ]);
 
   return (
-    <div className="h-screen flex flex-col bg-background">
+    <div className="h-screen flex flex-col bg-background text-foreground overflow-hidden">
       {suggestedProgress && (
         <LatestPositionPrompt
           currentChapter={currentChapter}
@@ -606,8 +665,22 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
         />
       )}
 
+      {/* Диалог: чтец завершил стрим — предложить перейти к его позиции */}
+      {streamEndedSuggestion && (
+        <LatestPositionPrompt
+          currentChapter={currentChapter}
+          remoteChapter={streamEndedSuggestion.chapter}
+          onOpenLatest={() => {
+            setPendingScrollRestore(streamEndedSuggestion);
+            setCurrentChapter(streamEndedSuggestion.chapter);
+            setStreamEndedSuggestion(null);
+          }}
+          onDismiss={() => setStreamEndedSuggestion(null)}
+        />
+      )}
+
       {/* Верхняя панель */}
-      <section className="border-b bg-card p-2 sm:p-4 shrink-0">
+      <section className="border-b bg-background relative z-50 p-2 sm:p-4 shrink-0">
         <div className="flex items-center justify-between gap-2 min-w-0">
           <div className="flex items-center gap-2 min-w-0">
             <Button variant="outline" size="sm" onClick={() => globalThis.history.back()}>
@@ -771,172 +844,127 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
         </div>
       )}
 
-      {/* ── Студия: inline топ-бар (не fixed) — сдвигает контент вниз ────────────── */}
-      {studioOpen && (
-        <LiveTopBar
-          bookTitle={bookData.title ?? 'Книга'}
-          chapterTitle={`Глава ${currentChapter ?? 1}`}
-          isLive={studio.state === 'live'}
-          isRecording={false}
-          recordingTime={studio.elapsedTime}
-          networkQuality={networkQuality}
-          onBookmark={() => setBookmarksOpen(true)}
-          onTextSettings={() => setSettingsOpen(true)}
-        />
-      )}
-
-      {/* Студия: проверка микрофона */}
-      {studioOpen && studio.showMicCheck && !studio.micCheckPassed && (
-        <MicrophoneCheckModal
-          microphoneAvailable={studio.microphoneAvailable}
-          microphoneLoading={studio.microphoneLoading}
-          microphoneError={studio.microphoneError}
-          onComplete={() => {
-            studio.setMicCheckPassed(true);
-            studio.setShowMicCheck(false);
-            sessionStorage.setItem('mic_check_passed', Date.now().toString());
-          }}
-          onSkip={() => {
-            studio.setMicCheckPassed(false);
-            studio.setShowMicCheck(false);
-            sessionStorage.removeItem('mic_check_passed');
-          }}
-        />
-      )}
-
-      {/* Студия: prep-панель — кнопка «Начать эфир» + закрытие студии */}
-      {studioOpen && studio.state === 'prep' && (
-        <div className="shrink-0 flex items-center justify-between gap-3 px-4 py-2 bg-amber-50 dark:bg-amber-950/30 border-b border-amber-200 dark:border-amber-800">
-          <div className="flex items-center gap-2">
-            {studio.streamStartError && (
-              <span className="text-xs text-destructive">{studio.streamStartError}</span>
-            )}
-            {studio.streamStartError === null && (
-              <span className="text-xs text-muted-foreground">
-                {getStudioPrepStatusText(
-                  studio.session.isConnected,
-                  studio.micCheckPassed,
-                  studio.microphoneAvailable,
-                  studio.microphoneError,
-                )}
-              </span>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            <Button
-              size="sm"
-              className="bg-amber-500 hover:bg-amber-600 text-white border-none text-xs h-8"
-              disabled={!studio.micCheckPassed || studio.isStartingBroadcast}
-              onClick={() =>
-                studio.handleStartBroadcast((sessionId) => {
-                  announceLiveStart({
-                    sessionId,
-                    chapter: currentChapter ?? 1,
-                    readerName: user?.username ?? 'Чтец',
-                    streamUrl: `${import.meta.env.VITE_ICECAST_PUBLIC_URL ?? ''}/live/${sessionId}`,
-                  });
-                })
-              }
+      <EmbeddedClubStudioShell
+        isOpen={studioOpen}
+        state={studio.state}
+        sessionId={studio.session.sessionId}
+        bookTitle={embeddedStudioView.bookTitle}
+        chapterTitle={embeddedStudioView.chapterTitle}
+        networkQuality={embeddedStudioView.networkQuality}
+        elapsedTime={studio.elapsedTime}
+        listenerCount={studio.listenerCount}
+        micMuted={studio.micMuted}
+        micLevel={studio.micLevel}
+        micBars={studio.micBars}
+        sessionConnected={studio.session.isConnected}
+        streamStartError={studio.streamStartError}
+        micCheckPassed={studio.micCheckPassed}
+        showMicCheck={studio.showMicCheck}
+        microphoneAvailable={studio.microphoneAvailable}
+        microphoneLoading={studio.microphoneLoading}
+        microphoneError={studio.microphoneError}
+        runtimeMicrophoneWarning={embeddedStudioView.runtimeMicrophoneWarning}
+        prepStatusText={embeddedPrepView.prepStatusText}
+        compactStartButtonLabel={embeddedPrepView.compactStartButtonLabel}
+        startDisabled={embeddedPrepView.startDisabled}
+        onBookmark={() => setBookmarksOpen(true)}
+        onTextSettings={() => setSettingsOpen(true)}
+        onMicToggle={() => studio.setMicMuted(!studio.micMuted)}
+        onPause={studio.handlePause}
+        onResume={studio.handleResume}
+        onRequestEnd={studio.requestEnd}
+        onConfirmEnd={() =>
+          studio.handleEnd((sessionId) => {
+            announceLiveStop(sessionId);
+            setStudioOpen(false);
+          })
+        }
+        onCancelEnd={studio.cancelEnd}
+        phase={studio.phase}
+        onCloseSummary={studio.closeSummary}
+        onMicCheckComplete={studio.completeMicCheck}
+        onMicCheckSkip={studio.skipMicCheck}
+        onRetryDetection={studio.retryDetection}
+        onStartBroadcast={() => {
+          void studio.handleStartBroadcast((sessionId) => {
+            announceLiveStart({
+              sessionId,
+              chapter: currentChapter ?? 1,
+              readerName: user?.username ?? 'Чтец',
+            });
+          });
+        }}
+        onOpenMicCheck={studio.openMicCheck}
+        onCloseStudio={() => setStudioOpen(false)}
+      >
+        {/* Основная область с боковыми панелями */}
+        <div className="flex-1 min-h-0 flex relative overflow-hidden">
+          {/* Основной контент */}
+          <main className={cn("flex-1 min-h-0 flex flex-col relative transition-[filter] duration-300", listeningReader && "blur-sm pointer-events-none select-none")}>
+            <div
+              ref={scrollContainerRef}
+              className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain"
+              onScroll={() => {
+                if (isProgrammaticScroll()) {
+                  return;
+                }
+                if (!hasLocalReadingActivity) {
+                  setHasLocalReadingActivity(true);
+                }
+                scheduleProgressSave();
+                // Транслируем позицию слушателям (debounce 2s)
+                if (studioOpen && studio.state === 'live' && studio.session.sessionId && scrollContainerRef.current && currentChapter !== null) {
+                  if (broadcastDebounceRef.current) clearTimeout(broadcastDebounceRef.current);
+                  broadcastDebounceRef.current = setTimeout(() => {
+                    if (!scrollContainerRef.current || currentChapter === null) return;
+                    broadcastPosition({
+                      sessionId: studio.session.sessionId!,
+                      chapter: currentChapter,
+                      positionRaw: serializeReaderPosition({ scrollTop: scrollContainerRef.current.scrollTop, chapter: currentChapter }),
+                    });
+                  }, 2000);
+                }
+              }}
             >
-              {studio.isStartingBroadcast ? 'Запуск...' : '🔴 В эфир'}
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              className="text-xs h-8"
-              onClick={studio.openMicCheck}
-              title="Проверить микрофон"
-            >
-              🎤
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="text-xs h-8"
-              onClick={() => setStudioOpen(false)}
-            >
-              Выйти
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {/* Основная область с боковыми панелями */}
-      <div className="flex-1 flex relative overflow-hidden">
-        {/* Основной контент */}
-        <main className="flex-1 flex flex-col relative">
-          <div
-            ref={scrollContainerRef}
-            className={`flex-1 overflow-y-auto${studioOpen ? ' pb-24' : ''}`}
-            onScroll={scheduleProgressSave}
-          >
-            <div 
-              ref={contentAreaRef}
-              className="p-4 sm:p-6 md:p-8"
-              style={{
-                fontFamily: 'var(--club-reader-font-family, inherit)',
-                fontSize: 'var(--club-reader-font-size, 18px)',
-                lineHeight: 'var(--club-reader-line-height, 1.6)',
-                textAlign: 'var(--club-reader-text-align, justify)' as CSSProperties['textAlign'],
-                width: 'var(--club-reader-content-width, 90%)',
-                margin: '0 auto'
-              } as CSSProperties}
-            >
-              {mainContent}
+              <div 
+                ref={contentAreaRef}
+                className="club-reader-content p-4 sm:p-6 md:p-8"
+                style={{
+                  fontFamily: 'var(--club-reader-font-family, inherit)',
+                  fontSize: 'var(--club-reader-font-size, 18px)',
+                  lineHeight: 'var(--club-reader-line-height, 1.6)',
+                  textAlign: 'var(--club-reader-text-align, justify)' as CSSProperties['textAlign'],
+                  width: 'var(--club-reader-content-width, 90%)',
+                  margin: '0 auto',
+                } as CSSProperties}
+              >
+                {mainContent}
+              </div>
             </div>
-          </div>
-        </main>
-      </div>
-
-      <ReaderProgressIndicators
-        isSyncing={isSyncing}
-        lastSyncTime={lastSyncTime}
-        error={syncError}
-        userProgress={userProgress}
-        groupProgress={clubProgress}
-        groupLabel="Клуб"
-        panelAriaLabel="Панель прогресса клуба"
-      />
+          </main>
+        </div>
+      </EmbeddedClubStudioShell>
 
       {/* Справка по горячим клавишам */}
       <KeyboardHelp isOpen={helpOpen} onClose={() => setHelpOpen(false)} />
 
-      {/* ── Студия: ControlBar (появляется fixed снизу, scroll-ареа уже имеет pb-24) ───────── */}
-      {studioOpen && (
-        <ControlBar
-          state={studio.state}
-          isOnline={studio.session.isConnected}
-          micMuted={studio.micMuted}
-          onMicToggle={() => studio.setMicMuted(!studio.micMuted)}
-          elapsedTime={studio.elapsedTime}
-          listenerCount={studio.listenerCount}
-          micLevel={studio.micLevel}
-          micBars={studio.micBars}
-          onPause={studio.handlePause}
-          onResume={studio.handleResume}
-          onEnd={() =>
-            studio.handleEnd((sessionId) => {
-              announceLiveStop(sessionId);
-              setStudioOpen(false);
-            })
-          }
-          onOpenChat={() => {}}
-          onSettings={() => setSettingsOpen(true)}
-        />
-      )}
-
       {/* Пузыри над чатом: живые чтецы + кнопка читать вслух */}
       {!studioOpen && (
-        <div className="fixed bottom-20 right-4 z-30 flex flex-col items-end gap-2">
-          <LiveReadersBubble
-            readers={readers}
-            flashCount={flashCount}
-            onOpenModal={() => setLiveModalOpen(true)}
-          />
-          <ReadNowBubble
-            onClick={() => setStudioOpen(true)}
-          />
-        </div>
+        <>
+          <div className="fixed bottom-36 right-0 z-30 translate-x-[calc(100%-4rem)] pr-4 transition-transform duration-300 ease-out hover:translate-x-0 focus-within:translate-x-0">
+            <LiveReadersBubble
+              readers={readers}
+              flashCount={flashCount}
+              onOpenModal={() => setLiveModalOpen(true)}
+            />
+          </div>
+
+          <div className="fixed bottom-20 right-0 z-30 translate-x-[calc(100%-4rem)] pr-4 transition-transform duration-300 ease-out hover:translate-x-0 focus-within:translate-x-0">
+            <ReadNowBubble
+              onClick={() => setStudioOpen(true)}
+            />
+          </div>
+        </>
       )}
 
       {/* Чат клуба */}
@@ -947,20 +975,42 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
         open={liveModalOpen}
         onClose={() => setLiveModalOpen(false)}
         readers={readers}
-        listeningToSessionId={listeningTo?.sessionId ?? null}
-        onPlay={(reader) => setListeningTo(reader)}
-        onStop={() => setListeningTo(null)}
+        listeningToSessionId={listeningReader?.sessionId ?? null}
+        onPlay={async (reader) => {
+          const activeListening = await startListening(reader);
+          if (activeListening.reader.positionRaw) {
+            applyReaderPosition(activeListening.reader.chapter, activeListening.reader.positionRaw);
+            return;
+          }
+
+          if (activeListening.reader.chapter !== currentChapter) {
+            setCurrentChapter(activeListening.reader.chapter);
+          }
+        }}
+        onStop={async () => {
+          stopListening();
+        }}
       />
 
       {/* Оверлей плеера слушателя */}
-      {listeningTo && (
+      {listeningState && (
         <ListenerOverlay
-          reader={listeningTo}
-          bookTitle={bookData.title ?? ''}
-          bookAuthor={(bookData as { author?: string }).author}
-          coverUrl={(bookData as { coverUrl?: string }).coverUrl}
-          onStop={() => setListeningTo(null)}
-          onStreamEnded={() => setListeningTo(null)}
+          reader={listeningState.reader}
+          bookTitle={listeningState.bookTitle}
+          bookAuthor={listeningState.bookAuthor}
+          coverUrl={listeningState.coverUrl}
+          isPaused={Boolean(listeningState.reader.isPaused)}
+          onStop={() => {
+            lastReaderPositionRef.current = null;
+            stopListening();
+          }}
+          onStreamEnded={() => {
+            if (lastReaderPositionRef.current) {
+              setStreamEndedSuggestion(lastReaderPositionRef.current);
+              lastReaderPositionRef.current = null;
+            }
+            stopListening({ stopPlayback: false });
+          }}
         />
       )}
     </div>

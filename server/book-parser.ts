@@ -38,6 +38,8 @@ export interface BookMetadata {
   author: string;
   description?: string;
   isbn?: string;
+  genre?: string;
+  genres?: string[];
   language?: string;
   publisher?: string;
   publishDate?: string;
@@ -297,6 +299,7 @@ export class EPUBParser extends BaseBookParser {
     const author = this.extractMetaValue(metadata['dc:creator'] ?? metadata.creator);
     const description = this.extractMetaValue(metadata['dc:description'] ?? metadata.description);
     const isbn = this.extractMetaValue(metadata['dc:identifier'] ?? metadata.identifier);
+    const genres = this.extractMetaValues(metadata['dc:subject'] ?? metadata.subject);
     const language = this.extractMetaValue(metadata['dc:language'] ?? metadata.language);
     const publisher = this.extractMetaValue(metadata['dc:publisher'] ?? metadata.publisher);
     const publishDate = this.extractMetaValue(metadata['dc:date'] ?? metadata.date);
@@ -320,6 +323,8 @@ export class EPUBParser extends BaseBookParser {
       author: author || 'Unknown Author',
       description,
       isbn,
+      genre: genres[0],
+      genres,
       language,
       publisher,
       publishDate,
@@ -350,6 +355,31 @@ export class EPUBParser extends BaseBookParser {
     }
 
     return undefined;
+  }
+
+  private extractMetaValues(metaValue: unknown): string[] {
+    if (!metaValue) return [];
+
+    const values: string[] = [];
+    const source = Array.isArray(metaValue) ? metaValue : [metaValue];
+
+    for (const item of source) {
+      if (typeof item === 'string') {
+        const normalized = item.trim();
+        if (normalized) values.push(normalized);
+        continue;
+      }
+
+      if (typeof item === 'object' && item !== null && '_' in item) {
+        const text = (item as { _: unknown })._;
+        if (typeof text === 'string') {
+          const normalized = text.trim();
+          if (normalized) values.push(normalized);
+        }
+      }
+    }
+
+    return Array.from(new Set(values));
   }
 
   private async findCoverImage(
@@ -963,6 +993,7 @@ export class FB2Parser extends BaseBookParser {
     const author = this.extractAuthorName(titleInfo?.author);
     const description_text = this.extractFB2Text(titleInfo?.annotation);
     const isbn = this.extractFB2Text(publishInfo?.isbn);
+    const genres = this.extractFB2Values(titleInfo?.genre);
     const language = (titleInfo?.lang as string[] | undefined)?.[0]
       || (titleInfo?.['src-lang'] as string[] | undefined)?.[0];
     const publisher = this.extractFB2Text(publishInfo?.publisher);
@@ -997,6 +1028,8 @@ export class FB2Parser extends BaseBookParser {
       author: author || 'Unknown Author',
       description: description_text,
       isbn,
+      genre: genres[0],
+      genres,
       language,
       publisher,
       publishDate,
@@ -1016,6 +1049,27 @@ export class FB2Parser extends BaseBookParser {
     }
 
     return undefined;
+  }
+
+  private extractFB2Values(element: unknown): string[] {
+    if (!Array.isArray(element)) return [];
+
+    const values: string[] = [];
+
+    for (const item of element) {
+      if (typeof item === 'string') {
+        const normalized = item.trim();
+        if (normalized) values.push(normalized);
+        continue;
+      }
+
+      if (typeof item === 'object' && item !== null) {
+        const text = this.extractTextFromFB2Element(item).trim();
+        if (text) values.push(text);
+      }
+    }
+
+    return Array.from(new Set(values));
   }
 
   private extractTextFromFB2Element(element: unknown): string {

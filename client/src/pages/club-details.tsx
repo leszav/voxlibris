@@ -15,9 +15,11 @@ import {
   Star,
   Trash2,
   Users,
+  Layers,
 } from "lucide-react";
 import { Link, useLocation, useRoute } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
+import { cn } from "@/lib/utils";
 import { ClubSettingsModal } from "@/components/club/club-settings-modal";
 import { EditClubBookDialog } from "@/components/club/EditClubBookDialog";
 import { InvitationsList } from "@/components/club/invitations-list";
@@ -28,6 +30,10 @@ import { BookDescriptionDialog } from "@/components/club/BookDescriptionDialog";
 import { TransferOwnershipDialog } from "@/components/club/TransferOwnershipDialog";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { ChatWidget } from "@/components/chat/ChatWidget";
+import { LiveReadersBubble, ActiveReadersModal } from "@/components/studio/LiveReadersBubble";
+import { ListenerOverlay } from "@/components/studio/ListenerOverlay";
+import { useLiveReaders } from "@/hooks/use-live-readers";
+import { useClubLiveListening } from "@/hooks/use-club-live-listening";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -38,6 +44,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { VoxLibrisUpload } from "@/components/ui/voxlibris-upload";
@@ -745,9 +753,69 @@ interface ClubLibraryTabProps {
 
 function ClubLibraryTab({ clubId, activeBookId, isOwner, isMember, setLocation }: ClubLibraryTabProps) {
   const { data: books = [], isLoading } = useClubBooks(clubId);
+  const [search, setSearch] = useState("");
+  const [genreFilter, setGenreFilter] = useState<string>("all");
+  const [sort, setSort] = useState<"title_asc" | "title_desc" | "author_asc" | "created_desc" | "genre_asc">("created_desc");
+  const [groupByGenre, setGroupByGenre] = useState<"none" | "primary_genre">("none");
   const setActiveBook = useSetActiveBook(clubId);
   const deleteBookMutation = useDeleteClubBook(clubId);
   const { toast } = useToast();
+
+  const genreOptions = Array.from(
+    new Map(
+      books
+        .filter((book) => book.primaryGenre)
+        .map((book) => [book.primaryGenre!.code, book.primaryGenre!.label]),
+    ).entries(),
+  ).sort((a, b) => a[1].localeCompare(b[1], "ru"));
+
+  const formatBookGenres = (book: ClubBook) => {
+    const labels = (book.genres || []).map((genre) => genre.label).filter(Boolean);
+    if (labels.length > 0) {
+      return labels.join(", ");
+    }
+
+    return book.primaryGenre?.label || book.genre || "";
+  };
+
+  const filteredBooks = books
+    .filter((book) => {
+      const q = search.trim().toLowerCase();
+      if (!q) return true;
+      const title = book.title.toLowerCase();
+      const author = book.author.toLowerCase();
+      const genre = formatBookGenres(book).toLowerCase();
+      return title.includes(q) || author.includes(q) || genre.includes(q);
+    })
+    .filter((book) => {
+      if (genreFilter === "all") return true;
+      if (genreFilter === "none") return !book.primaryGenre;
+      return book.primaryGenre?.code === genreFilter || (book.genres || []).some((genre) => genre.code === genreFilter);
+    })
+    .sort((left, right) => {
+      if (sort === "created_desc") {
+        return new Date(right.uploadedAt).getTime() - new Date(left.uploadedAt).getTime();
+      }
+      if (sort === "title_asc") return left.title.localeCompare(right.title, "ru");
+      if (sort === "title_desc") return right.title.localeCompare(left.title, "ru");
+      if (sort === "author_asc") return left.author.localeCompare(right.author, "ru");
+      const leftGenre = formatBookGenres(left);
+      const rightGenre = formatBookGenres(right);
+      return leftGenre.localeCompare(rightGenre, "ru");
+    });
+
+  const groupedBooks = groupByGenre === "primary_genre"
+    ? Array.from(
+        filteredBooks.reduce((acc, book) => {
+          const key = book.primaryGenre?.code || "none";
+          const label = book.primaryGenre?.label || "Без жанра";
+          const existing = acc.get(key) || { label, items: [] as ClubBook[] };
+          existing.items.push(book);
+          acc.set(key, existing);
+          return acc;
+        }, new Map<string, { label: string; items: ClubBook[] }>()),
+      ).map(([key, value]) => ({ key, label: value.label, books: value.items }))
+    : [{ key: "all", label: "Все книги", books: filteredBooks }];
 
   const handleSetActive = async (bookId: string) => {
     setActiveBook.mutate(bookId, {
@@ -779,7 +847,57 @@ function ClubLibraryTab({ clubId, activeBookId, isOwner, isMember, setLocation }
 
   return (
     <div className="space-y-3">
-      {books.map((book) => {
+      <Card>
+        <CardContent className="p-4 space-y-3">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <Input
+              placeholder="Поиск: название, автор, жанр"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+
+            <Select value={genreFilter} onValueChange={setGenreFilter}>
+              <SelectTrigger><SelectValue placeholder="Жанр" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Все жанры</SelectItem>
+                <SelectItem value="none">Без жанра</SelectItem>
+                {genreOptions.map(([code, label]) => (
+                  <SelectItem key={code} value={code}>{label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Select value={sort} onValueChange={(value) => setSort(value as typeof sort)}>
+              <SelectTrigger><SelectValue placeholder="Сортировка" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="created_desc">Сначала новые</SelectItem>
+                <SelectItem value="title_asc">Название: А-Я</SelectItem>
+                <SelectItem value="title_desc">Название: Я-А</SelectItem>
+                <SelectItem value="author_asc">Автор: А-Я</SelectItem>
+                <SelectItem value="genre_asc">По жанру</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Select value={groupByGenre} onValueChange={(value) => setGroupByGenre(value as typeof groupByGenre)}>
+              <SelectTrigger><SelectValue placeholder="Группировка" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">Без группировки</SelectItem>
+                <SelectItem value="primary_genre">По основному жанру</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </CardContent>
+      </Card>
+
+      {groupedBooks.map((group) => (
+      <div key={group.key} className="space-y-2">
+        {groupByGenre === "primary_genre" && (
+          <div className="flex items-center gap-2">
+            <Layers className="w-4 h-4 text-muted-foreground" />
+            <h4 className="font-semibold">{group.label}</h4>
+          </div>
+        )}
+      {group.books.map((book) => {
         const isActive = book.id === activeBookId;
         return (
           <div key={book.id} className={`flex gap-3 rounded-lg border p-3 ${isActive ? "border-primary/40 bg-primary/5" : "bg-card"}`}>
@@ -797,6 +915,9 @@ function ClubLibraryTab({ clubId, activeBookId, isOwner, isMember, setLocation }
                 <div className="min-w-0">
                   <p className="font-medium text-sm leading-tight truncate">{book.title}</p>
                   <p className="text-xs text-muted-foreground truncate">{book.author}</p>
+                  {formatBookGenres(book) && (
+                    <p className="text-xs text-muted-foreground mt-1">Жанры: {formatBookGenres(book)}</p>
+                  )}
                 </div>
                 {isActive && <Badge variant="outline" className="text-xs shrink-0 border-primary/40 text-primary">Активная</Badge>}
               </div>
@@ -824,6 +945,8 @@ function ClubLibraryTab({ clubId, activeBookId, isOwner, isMember, setLocation }
           </div>
         );
       })}
+      </div>
+      ))}
     </div>
   );
 }
@@ -1019,6 +1142,7 @@ export default function ClubDetails() {
   const clubId = params?.id || "";
   const [, setLocation] = useLocation();
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
+  const [liveModalOpen, setLiveModalOpen] = useState(false);
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const canLoadClubData = !!clubId && !authLoading;
@@ -1046,6 +1170,26 @@ export default function ClubDetails() {
     setLocation,
     removeMemberMutation,
     deleteBookMutation
+  });
+
+  // Live-чтецы (хук вызывается безусловно, bookId может быть пустым)
+  const activeBookId = clubData?.bookId ?? "";
+  const { readers, flashCount } = useLiveReaders({
+    clubId,
+    bookId: activeBookId,
+    listeningToSessionId: null,
+  });
+  const {
+    listeningState,
+    listeningReader,
+    startListening,
+    stopListening,
+  } = useClubLiveListening({
+    clubId,
+    bookId: activeBookId,
+    bookTitle: clubData?.book?.title ?? "",
+    bookAuthor: clubData?.book?.author ?? undefined,
+    coverUrl: clubData?.book?.coverUrl ?? null,
   });
 
   // Теперь обрабатываем условия после всех хуков
@@ -1081,73 +1225,112 @@ export default function ClubDetails() {
 
   return (
     <MainLayout>
-      <ClubHeader 
-        club={club}
-        members={members}
-        isOwner={isOwner}
-        isMember={isMember}
-        removeMemberMutation={removeMemberMutation}
-        handleLeaveClub={handleLeaveClub}
-        setLocation={setLocation}
-        user={user}
-        onOwnershipTransferred={() => {
-          queryClient.invalidateQueries({ queryKey: ["/api/clubs", clubId] });
-          queryClient.invalidateQueries({ queryKey: ["/api/clubs", clubId, "members"] });
-          globalThis.location.reload();
-        }}
-      />
+      <div className={cn("transition-[filter] duration-300", listeningState && "blur-sm pointer-events-none select-none")}>
+        <ClubHeader 
+          club={club}
+          members={members}
+          isOwner={isOwner}
+          isMember={isMember}
+          removeMemberMutation={removeMemberMutation}
+          handleLeaveClub={handleLeaveClub}
+          setLocation={setLocation}
+          user={user}
+          onOwnershipTransferred={() => {
+            queryClient.invalidateQueries({ queryKey: ["/api/clubs", clubId] });
+            queryClient.invalidateQueries({ queryKey: ["/api/clubs", clubId, "members"] });
+            globalThis.location.reload();
+          }}
+        />
 
-      <div className="container grid grid-cols-1 gap-4 px-4 py-6 sm:gap-6 sm:px-6 md:px-12 md:py-8 lg:grid-cols-3 lg:gap-8 xl:gap-12">
-        <div className="order-1 space-y-6 lg:col-span-1 lg:space-y-8">
-          <CurrentBookCard
-            club={club}
-            clubId={clubId}
-            isOwner={isOwner}
-            isMember={isMember}
-            handleDeleteBook={handleDeleteBook}
-            deleteBookMutation={deleteBookMutation}
-            setLocation={setLocation}
-          />
+        <div className="container grid grid-cols-1 gap-4 px-4 py-6 sm:gap-6 sm:px-6 md:px-12 md:py-8 lg:grid-cols-3 lg:gap-8 xl:gap-12">
+          <div className="order-1 space-y-6 lg:col-span-1 lg:space-y-8">
+            <CurrentBookCard
+              club={club}
+              clubId={clubId}
+              isOwner={isOwner}
+              isMember={isMember}
+              handleDeleteBook={handleDeleteBook}
+              deleteBookMutation={deleteBookMutation}
+              setLocation={setLocation}
+            />
 
-          <MembersListCard
-            clubId={clubId}
-            clubTitle={club.title}
-            members={members}
-            memberCount={club.memberCount || members.length}
-            membersLoading={membersLoading}
-            canViewMembers={canViewMembers}
-            isOwner={isOwner}
-            isModerator={isModerator}
-            canRemove={canRemove}
-            handleRemoveMember={handleRemoveMember}
-          />
+            <MembersListCard
+              clubId={clubId}
+              clubTitle={club.title}
+              members={members}
+              memberCount={club.memberCount || members.length}
+              membersLoading={membersLoading}
+              canViewMembers={canViewMembers}
+              isOwner={isOwner}
+              isModerator={isModerator}
+              canRemove={canRemove}
+              handleRemoveMember={handleRemoveMember}
+            />
 
-          {(isOwner || isModerator) && (
-            <div className="space-y-3">
-              <InvitationsList clubId={clubId} isOwner={isOwner} />
-            </div>
-          )}
+            {(isOwner || isModerator) && (
+              <div className="space-y-3">
+                <InvitationsList clubId={clubId} isOwner={isOwner} />
+              </div>
+            )}
+          </div>
+
+          <div className="order-2 lg:col-span-2">
+            <ClubContentTabs
+              clubId={clubId}
+              isMember={isMember}
+              isOwner={isOwner}
+              currentUserId={user?.id || ''}
+              settings={settings}
+              scheduleItems={scheduleItems}
+              activeBookId={club.bookId}
+              setLocation={setLocation}
+            />
+          </div>
         </div>
 
-        <div className="order-2 lg:col-span-2">
-          <ClubContentTabs
-            clubId={clubId}
-            isMember={isMember}
-            isOwner={isOwner}
-            currentUserId={user?.id || ''}
-            settings={settings}
-            scheduleItems={scheduleItems}
-            activeBookId={club.bookId}
-            setLocation={setLocation}
+        {isAuthenticated && isMember && (
+          <ChatWidget 
+            clubId={club.id} 
+            onCleanupDeleted={() => handleCleanupChat(0)}
+            canCleanup={isOwner}
           />
-        </div>
+        )}
+
+        {isAuthenticated && isMember && activeBookId && (
+          <div className="fixed bottom-20 right-0 z-30 translate-x-[calc(100%-4rem)] pr-4 transition-transform duration-300 ease-out hover:translate-x-0 focus-within:translate-x-0">
+            <LiveReadersBubble
+              readers={readers}
+              flashCount={flashCount}
+              onOpenModal={() => setLiveModalOpen(true)}
+            />
+          </div>
+        )}
       </div>
 
-      {isAuthenticated && isMember && (
-        <ChatWidget 
-          clubId={club.id} 
-          onCleanupDeleted={() => handleCleanupChat(0)}
-          canCleanup={isOwner}
+      {isAuthenticated && isMember && activeBookId && (
+        <ActiveReadersModal
+          open={liveModalOpen}
+          onClose={() => setLiveModalOpen(false)}
+          readers={readers}
+          listeningToSessionId={listeningReader?.sessionId ?? null}
+          onPlay={async (reader) => {
+            await startListening(reader);
+          }}
+          onStop={async () => {
+            stopListening();
+          }}
+        />
+      )}
+
+      {listeningState && (
+        <ListenerOverlay
+          reader={listeningState.reader}
+          bookTitle={listeningState.bookTitle}
+          bookAuthor={listeningState.bookAuthor}
+          coverUrl={listeningState.coverUrl}
+          isPaused={Boolean(listeningState.reader.isPaused)}
+          onStop={() => stopListening()}
+          onStreamEnded={() => stopListening({ stopPlayback: false })}
         />
       )}
     </MainLayout>

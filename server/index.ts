@@ -53,6 +53,11 @@ export const app = express();
 app.set('trust proxy', 1);
 const httpServer = createServer(app);
 
+// Studio ingest использует long-lived streaming POST, который не завершает body
+// до ручной остановки эфира. У Node.js по умолчанию requestTimeout = 300s,
+// из-за чего такие запросы обрываются примерно через 5 минут.
+httpServer.requestTimeout = 0;
+
 // CORS: allowed origins (used by Express, Socket.IO, and WebSocket servers)
 const allowedOrigins = process.env.ALLOWED_ORIGINS
 	? process.env.ALLOWED_ORIGINS.split(",")

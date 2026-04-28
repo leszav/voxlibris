@@ -18,6 +18,7 @@ interface UseReaderLatestProgressOptions {
   remoteProgress?: RemoteReadingProgress | null;
   refreshProgress: () => Promise<unknown>;
   enabled?: boolean;
+  hasLocalReadingActivity?: boolean;
   isLocalSessionProgress?: (progress: RemoteReadingProgress) => boolean;
 }
 
@@ -82,6 +83,7 @@ export function useReaderLatestProgress({
   remoteProgress,
   refreshProgress,
   enabled = true,
+  hasLocalReadingActivity = true,
   isLocalSessionProgress,
 }: UseReaderLatestProgressOptions) {
   const [suggestedProgress, setSuggestedProgress] = useState<RemoteReadingProgress | null>(null);
@@ -102,7 +104,7 @@ export function useReaderLatestProgress({
   }, [remoteProgress]);
 
   useEffect(() => {
-    if (!enabled || !remoteProgress || currentChapter === null || totalChapters <= 0) {
+    if (!enabled || !remoteProgress || currentChapter === null || totalChapters <= 0 || !hasLocalReadingActivity) {
       setSuggestedProgress(null);
       return;
     }
@@ -136,6 +138,7 @@ export function useReaderLatestProgress({
   }, [
     currentChapter,
     enabled,
+    hasLocalReadingActivity,
     isLocalSessionProgress,
     remoteProgress,
     remoteSignature,
@@ -144,7 +147,10 @@ export function useReaderLatestProgress({
   ]);
 
   useEffect(() => {
-    if (!enabled || !suggestedProgress || currentChapter === null || totalChapters <= 0) {
+    if (!enabled || !suggestedProgress || currentChapter === null || totalChapters <= 0 || !hasLocalReadingActivity) {
+      if (!hasLocalReadingActivity) {
+        setSuggestedProgress(null);
+      }
       return;
     }
 
@@ -159,6 +165,7 @@ export function useReaderLatestProgress({
   }, [
     currentChapter,
     enabled,
+    hasLocalReadingActivity,
     isLocalSessionProgress,
     scrollContainerRef,
     suggestedProgress,

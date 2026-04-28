@@ -2,6 +2,7 @@ import { Link, useLocation } from "wouter";
 import {
   Users,
   BookOpen,
+  Tags,
   Users2,
   BarChart3,
   Settings,
@@ -35,6 +36,7 @@ const navigation = [
   { name: "Панель управления", href: "/admin", icon: BarChart3 },
   { name: "Пользователи", href: "/admin/users", icon: Users },
   { name: "Книги", href: "/admin/books", icon: BookOpen },
+  { name: "Жанры", href: "/admin/genres", icon: Tags },
   { name: "Клубы", href: "/admin/clubs", icon: Users2 },
   { name: "Отчёты", href: "/admin/reports", icon: FileText },
   { name: "Аналитика", href: "/admin/analytics", icon: TrendingUp },

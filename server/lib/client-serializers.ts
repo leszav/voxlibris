@@ -25,6 +25,12 @@ export interface ClientPublicCatalogClub {
   bookTitle: string | null;
   author: string | null;
   bookCoverUrl: string | null;
+  type: string;
+  isPrivate: boolean;
+  isLive: boolean;
+  memberCount: number;
+  maxMembers: number;
+  tags: string[];
 }
 
 export type ClientAuthUser = {
@@ -119,6 +125,12 @@ export function serializePublicCatalogClubList(clubs: ClubWithDetails[]): Client
     bookTitle: club.book?.title ?? null,
     author: club.book?.author ?? null,
     bookCoverUrl: club.book?.coverUrl ?? null,
+    type: club.type,
+    isPrivate: club.isPrivate,
+    isLive: club.isLive,
+    memberCount: club.memberCount ?? 0,
+    maxMembers: club.maxMembers,
+    tags: club.tags ?? [],
   }));
 }
 

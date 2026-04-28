@@ -12,6 +12,7 @@ import { duplicateDetectionService } from './duplicate-detection-service.js';
 import { logger } from './lib/logger.js';
 import { optimizeImage } from './image-optimizer.js';
 import { storeOptimizedImageIfNeeded } from './lib/uploaded-image-storage.js';
+import { genreService } from './services/genre-service.js';
 
 const router = Router();
 
@@ -78,6 +79,26 @@ function normalizeUploadMetadata(metadata: UploadMetadata): UploadMetadata {
     }
 
     return normalized;
+}
+
+async function enrichUploadMetadataWithGenreLabels(metadata: UploadMetadata): Promise<UploadMetadata> {
+    const genreInput = [metadata.genre, ...(Array.isArray(metadata.genres) ? metadata.genres : [])]
+        .filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
+
+    if (genreInput.length === 0) {
+        return metadata;
+    }
+
+    const presentation = await genreService.buildUploadGenrePresentation(genreInput);
+    if (!presentation) {
+        return metadata;
+    }
+
+    return {
+        ...metadata,
+        genre: presentation.genre,
+        genres: presentation.genres,
+    };
 }
 
 const uploadSessions = new Map<string, UploadSession>();
@@ -243,6 +264,7 @@ router.post('/clubs/:clubId/books/upload', jwtAuth, requireActiveUser, upload.si
         }
 
         metadata = normalizeUploadMetadata(metadata);
+        metadata = await enrichUploadMetadataWithGenreLabels(metadata);
 
         // Проверка дубликатов в клубной библиотеке
         const title = metadata.title || req.file.originalname;
@@ -396,6 +418,15 @@ router.post('/clubs/:clubId/books/upload/:sessionId/confirm', jwtAuth, requireAc
         });
 
         const book = await storage.createClubBook(bookData);
+        const genreInput = [metadata.genre, ...(Array.isArray(metadata.genres) ? metadata.genres : [])]
+            .filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
+
+        const persistedGenres = await genreService.persistBookGenres('club', book.id, genreInput, 'metadata');
+        const bookWithGenres = await storage.updateClubBook(book.id, {
+            primaryGenreId: persistedGenres.primaryGenreId ?? undefined,
+            genre: persistedGenres.legacyGenre ?? undefined,
+        });
+
         await storage.updateClub(clubId, { bookId: book.id });
 
         try {
@@ -405,7 +436,16 @@ router.post('/clubs/:clubId/books/upload/:sessionId/confirm', jwtAuth, requireAc
         }
 
         uploadSessions.delete(sessionId);
-        res.json(book);
+        if (!bookWithGenres) {
+            return res.status(500).json({ error: 'Failed to persist genres for uploaded book' });
+        }
+
+        const genresPayload = await genreService.getBookGenresPayload('club', book.id);
+        res.json({
+            ...bookWithGenres,
+            primaryGenre: genresPayload.primaryGenre,
+            genres: genresPayload.genres,
+        });
     } catch (error) {
         console.error('Club confirm upload error:', error);
         res.status(500).json({ error: 'Internal server error' });
@@ -466,7 +506,17 @@ router.get('/clubs/:clubId/books', jwtAuth, async (req, res) => {
     const { clubId } = req.params;
 
     const books = await storage.getClubBooksByClub(clubId);
-    res.json(books);
+    const booksWithGenres = await Promise.all(
+        books.map(async (book) => {
+            const genresPayload = await genreService.getBookGenresPayload('club', book.id);
+            return {
+                ...book,
+                primaryGenre: genresPayload.primaryGenre,
+                genres: genresPayload.genres,
+            };
+        }),
+    );
+    res.json(booksWithGenres);
 });
 
 // Get Club Book
@@ -478,7 +528,12 @@ router.get('/clubs/:clubId/books/:bookId', jwtAuth, async (req, res) => {
     if (!book) return res.status(404).json({ error: 'Book not found' });
     if (book.clubId !== clubId) return res.status(404).json({ error: 'Book not found in this club' });
 
-    res.json(book);
+    const genresPayload = await genreService.getBookGenresPayload('club', book.id);
+    res.json({
+        ...book,
+        primaryGenre: genresPayload.primaryGenre,
+        genres: genresPayload.genres,
+    });
 });
 
 // Delete Club Book
@@ -549,8 +604,26 @@ router.patch('/clubs/:clubId/books/:bookId', jwtAuth, requireActiveUser, async (
         });
 
         const updatedBook = await storage.updateClubBook(bookId, updatePayload);
+        if (!updatedBook) return res.status(404).json({ error: 'Book not found' });
 
-        res.json(updatedBook);
+        const genreInput = [req.body.genre, ...(Array.isArray(req.body.genres) ? req.body.genres : [])]
+            .filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
+
+        const persistedGenres = await genreService.persistBookGenres('club', bookId, genreInput, 'manual');
+        const enrichedBook = await storage.updateClubBook(bookId, {
+            primaryGenreId: persistedGenres.primaryGenreId ?? undefined,
+            genre: persistedGenres.legacyGenre ?? undefined,
+        });
+
+        if (!enrichedBook) return res.status(404).json({ error: 'Book not found' });
+
+        const genresPayload = await genreService.getBookGenresPayload('club', bookId);
+
+        res.json({
+            ...enrichedBook,
+            primaryGenre: genresPayload.primaryGenre,
+            genres: genresPayload.genres,
+        });
     } catch (error) {
         console.error('Update club book error:', error);
         res.status(500).json({ error: 'Internal server error' });

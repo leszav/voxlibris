@@ -6,11 +6,16 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { apiRequest } from '@/lib/queryClient';
 import { useReadingSession } from './use-reading-session';
 import { useAudioSession } from './use-audio-session';
 import { useAudioStream } from './use-audio-stream';
 import { useRealVUMeter } from './use-real-vu-meter';
 import { useMicrophoneDetection } from './use-microphone-detection';
+import { clearStudioMicCheckPassed, hasRecentStudioMicCheck, markStudioMicCheckPassed } from '@/lib/studio-mic-check-cache';
+import { resolveStudioMicCheckState, resolveStudioStartGuard } from '@/lib/studio-mic-check-state';
+import { resolveStudioModeState } from '@/lib/studio-mode-state';
+import { resolveStudioSessionPhase, type StudioSessionPhase } from '@/lib/studio-session-phase';
 
 interface UseStudioModeOptions {
   clubId: string;
@@ -24,6 +29,7 @@ interface UseStudioModeOptions {
 
 export interface StudioModeState {
   state: 'prep' | 'live' | 'paused';
+  phase: StudioSessionPhase;
   session: ReturnType<typeof useReadingSession>['session'];
   micMuted: boolean;
   setMicMuted: (v: boolean) => void;
@@ -31,9 +37,7 @@ export interface StudioModeState {
   streamStartError: string | null;
   microphoneIssue: string | null;
   micCheckPassed: boolean;
-  setMicCheckPassed: (v: boolean) => void;
   showMicCheck: boolean;
-  setShowMicCheck: (v: boolean) => void;
   microphoneAvailable: boolean;
   microphoneLoading: boolean;
   microphoneError: string | null;
@@ -42,10 +46,15 @@ export interface StudioModeState {
   micBars: ReadonlyArray<number>;
   listenerCount: number;
   elapsedTime: number;
+  completeMicCheck: () => void;
+  skipMicCheck: () => void;
   handleStartBroadcast: (onAnnounce: (sessionId: string) => void) => Promise<void>;
   handlePause: () => void;
   handleResume: () => void;
   handleEnd: (onAnnounceEnd: (sessionId: string) => void) => void;
+  requestEnd: () => void;
+  cancelEnd: () => void;
+  closeSummary: () => void;
   openMicCheck: () => void;
 }
 
@@ -63,6 +72,8 @@ export function useStudioMode({
   const [microphoneIssue, setMicrophoneIssue] = useState<string | null>(null);
   const [micCheckPassed, setMicCheckPassed] = useState(false);
   const [showMicCheck, setShowMicCheck] = useState(true);
+  const [showEndConfirm, setShowEndConfirm] = useState(false);
+  const [showSummary, setShowSummary] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
   const initRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const startLockRef = useRef(false);
@@ -122,25 +133,17 @@ export function useStudioMode({
   useEffect(() => {
     if (!enabled) return;
 
-    if (!microphoneAvailable) {
-      setMicCheckPassed(false);
-      setShowMicCheck(true);
-      sessionStorage.removeItem('mic_check_passed');
-      return;
-    }
+    const nextMicCheckState = resolveStudioMicCheckState({
+      microphoneAvailable,
+      hasRecentMicCheck: hasRecentStudioMicCheck(),
+    });
 
-    const cached = sessionStorage.getItem('mic_check_passed');
-    if (cached) {
-      const ts = Number.parseInt(cached, 10);
-      if (Date.now() - ts < 10 * 60 * 1000) {
-        setMicCheckPassed(true);
-        setShowMicCheck(false);
-        return;
-      }
-    }
+    setMicCheckPassed(nextMicCheckState.micCheckPassed);
+    setShowMicCheck(nextMicCheckState.showMicCheck);
 
-    setMicCheckPassed(false);
-    setShowMicCheck(true);
+    if (nextMicCheckState.shouldClearCache) {
+      clearStudioMicCheckPassed();
+    }
   }, [enabled, microphoneAvailable]);
 
   // ── Синхронизация mute ─────────────────────────────────────────────────
@@ -163,7 +166,7 @@ export function useStudioMode({
     if (!microphoneIssue) return;
     setMicCheckPassed(false);
     setShowMicCheck(true);
-    sessionStorage.removeItem('mic_check_passed');
+    clearStudioMicCheckPassed();
   }, [microphoneIssue]);
 
   // Если микрофон отключился/исчез в процессе — блокируем студию до повторной проверки
@@ -174,7 +177,7 @@ export function useStudioMode({
 
     setMicCheckPassed(false);
     setShowMicCheck(true);
-    sessionStorage.removeItem('mic_check_passed');
+    clearStudioMicCheckPassed();
   }, [enabled, microphoneAvailable, microphoneLoading]);
 
   // ── Инициализация сессии при открытии студии ───────────────────────────
@@ -207,31 +210,50 @@ export function useStudioMode({
   }, [enabled]);
 
   // ── Derived state ──────────────────────────────────────────────────────
-  const listenerCount = sessionListenerCount || session.listenerCount;
-
-  let state: 'prep' | 'live' | 'paused';
-  if (!session.isLive) state = 'prep';
-  else if (session.isPaused) state = 'paused';
-  else state = 'live';
+  const { state, listenerCount } = resolveStudioModeState({
+    sessionIsLive: session.isLive,
+    sessionIsPaused: session.isPaused,
+    sessionListenerCount,
+    fallbackListenerCount: session.listenerCount,
+  });
+  const phase = resolveStudioSessionPhase({
+    state,
+    showEndConfirm,
+    showSummary,
+  });
 
   // ── Handlers ───────────────────────────────────────────────────────────
 
   const handleStartBroadcast = useCallback(
     async (onAnnounce: (sessionId: string) => void) => {
       if (startLockRef.current) return;
-      if (!userId) { setStreamStartError('Пользователь не авторизован'); return; }
-      if (!session.sessionId) { setStreamStartError('Сессия ещё не создана. Подождите.'); return; }
 
       const availableNow = await retryDetection();
-      if (!availableNow) {
-        setMicCheckPassed(false);
-        setShowMicCheck(true);
-        setStreamStartError(microphoneError ?? 'Микрофон недоступен. Подключите или включите микрофон.');
+
+      const startGuard = resolveStudioStartGuard({
+        userId,
+        sessionId: session.sessionId ?? null,
+        availableNow,
+        microphoneError,
+        micCheckPassed,
+      });
+
+      if (!startGuard.canStart) {
+        if (startGuard.shouldResetMicCheck) {
+          setMicCheckPassed(false);
+        }
+        if (startGuard.shouldShowMicCheck) {
+          setShowMicCheck(true);
+        }
+        if (startGuard.errorMessage) {
+          setStreamStartError(startGuard.errorMessage);
+        }
         return;
       }
-      if (!micCheckPassed) {
-        setShowMicCheck(true);
-        setStreamStartError('Сначала пройдите проверку микрофона');
+
+      const sessionId = session.sessionId;
+      if (!sessionId) {
+        setStreamStartError('Сессия ещё не создана. Подождите.');
         return;
       }
 
@@ -242,10 +264,12 @@ export function useStudioMode({
 
       try {
         await startAudioStream();
-        notifyBroadcastStarted(session.sessionId);
-        onAnnounce(session.sessionId);
+        notifyBroadcastStarted(sessionId);
+        onAnnounce(sessionId);
         await startReading();
         setMicMuted(false);
+        setShowSummary(false);
+        setShowEndConfirm(false);
       } catch (err) {
         setStreamStartError(err instanceof Error ? err.message : 'Не удалось начать эфир');
       } finally {
@@ -268,12 +292,31 @@ export function useStudioMode({
   const handlePause = useCallback(() => {
     pauseAudioStream();
     if (session.sessionId) notifyBroadcastPaused(session.sessionId);
+    if (session.sessionId) {
+      void apiRequest(`/api/reading-sessions/${session.sessionId}/status`, {
+        method: 'PUT',
+        body: JSON.stringify({ status: 'paused' }),
+      }).catch(() => {
+        // Локальное paused-состояние уже применено; статус дотянем при следующем действии.
+      });
+    }
     pauseReading();
   }, [pauseAudioStream, session.sessionId, notifyBroadcastPaused, pauseReading]);
 
   const handleResume = useCallback(() => {
+    if (!session.sessionId) {
+      return;
+    }
+
     resumeAudioStream();
     if (session.sessionId) notifyBroadcastResumed(session.sessionId);
+    if (session.sessionId) {
+      void apiRequest(`/api/sessions/${session.sessionId}/start`, {
+        method: 'PUT',
+      }).catch(() => {
+        // UI уже вернулся в live; серверный статус переподтянется следующими обновлениями.
+      });
+    }
     resumeReading();
   }, [resumeAudioStream, session.sessionId, notifyBroadcastResumed, resumeReading]);
 
@@ -285,9 +328,37 @@ export function useStudioMode({
         onAnnounceEnd(session.sessionId);
       }
       endReading();
+      setShowEndConfirm(false);
+      setShowSummary(true);
     },
     [stopAudioStream, session.sessionId, notifyBroadcastEnded, endReading],
   );
+
+  const requestEnd = useCallback(() => {
+    setShowEndConfirm(true);
+  }, []);
+
+  const cancelEnd = useCallback(() => {
+    setShowEndConfirm(false);
+  }, []);
+
+  const closeSummary = useCallback(() => {
+    setShowSummary(false);
+  }, []);
+
+  const completeMicCheck = useCallback(() => {
+    setMicCheckPassed(true);
+    setShowMicCheck(false);
+    setMicrophoneIssue(null);
+    clearStudioMicCheckPassed();
+    markStudioMicCheckPassed();
+  }, []);
+
+  const skipMicCheck = useCallback(() => {
+    setMicCheckPassed(false);
+    setShowMicCheck(false);
+    clearStudioMicCheckPassed();
+  }, []);
 
   const openMicCheck = useCallback(() => {
     setShowMicCheck(true);
@@ -296,6 +367,7 @@ export function useStudioMode({
 
   return {
     state,
+    phase,
     session,
     micMuted,
     setMicMuted,
@@ -303,9 +375,7 @@ export function useStudioMode({
     streamStartError,
     microphoneIssue,
     micCheckPassed,
-    setMicCheckPassed,
     showMicCheck,
-    setShowMicCheck,
     microphoneAvailable,
     microphoneLoading,
     microphoneError,
@@ -314,10 +384,15 @@ export function useStudioMode({
     micBars,
     listenerCount,
     elapsedTime: session.elapsedTime,
+    completeMicCheck,
+    skipMicCheck,
     handleStartBroadcast,
     handlePause,
     handleResume,
     handleEnd,
+    requestEnd,
+    cancelEnd,
+    closeSummary,
     openMicCheck,
   };
 }

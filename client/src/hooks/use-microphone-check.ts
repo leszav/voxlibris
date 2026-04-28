@@ -414,7 +414,7 @@ export function useMicrophoneCheck() {
 
   const stopRecording = useCallback(() => {
     const recorder = mediaRecorderRef.current;
-    if (!recorder || recorder.state !== 'recording') {
+    if (recorder?.state !== 'recording') {
       return;
     }
 

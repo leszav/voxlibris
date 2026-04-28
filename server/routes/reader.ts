@@ -457,6 +457,59 @@ router.get("/:id/content", async (req: Request, res: Response) => {
  * PUT /api/v1/books/:id/progress
  * Обновление прогресса чтения (debounced на клиенте)
  */
+interface UpsertProgressParams {
+  userId: string;
+  bookId: string;
+  clubId: string | null;
+  currentChapter: number;
+  currentPosition: string;
+  progress: number;
+}
+
+async function upsertReadingProgress(params: UpsertProgressParams): Promise<void> {
+  const { userId, bookId, clubId, currentChapter, currentPosition, progress } = params;
+
+  const clubFilter = clubId ? eq(readingProgress.clubId, clubId) : isNull(readingProgress.clubId);
+  const progressFields = {
+    currentChapter,
+    currentPosition,
+    progress,
+    clubId,
+    lastReadAt: new Date(),
+    updatedAt: new Date(),
+  };
+
+  const [existing] = await db
+    .select({ id: readingProgress.id, currentPosition: readingProgress.currentPosition })
+    .from(readingProgress)
+    .where(and(eq(readingProgress.userId, userId), eq(readingProgress.bookId, bookId), clubFilter))
+    .orderBy(desc(readingProgress.updatedAt), desc(readingProgress.lastReadAt))
+    .limit(1);
+
+  if (existing) {
+    if (!isStaleProgressUpdate(existing.currentPosition, currentPosition)) {
+      await db.update(readingProgress).set(progressFields).where(eq(readingProgress.id, existing.id));
+    }
+    return;
+  }
+
+  try {
+    await db.insert(readingProgress).values({ userId, bookId, ...progressFields });
+  } catch (error) {
+    if (!isUniqueViolation(error)) throw error;
+    // Гонка вставки — повторяем UPDATE
+    const [race] = await db
+      .select({ id: readingProgress.id, currentPosition: readingProgress.currentPosition })
+      .from(readingProgress)
+      .where(and(eq(readingProgress.userId, userId), eq(readingProgress.bookId, bookId), clubFilter))
+      .orderBy(desc(readingProgress.updatedAt), desc(readingProgress.lastReadAt))
+      .limit(1);
+    if (race && !isStaleProgressUpdate(race.currentPosition, currentPosition)) {
+      await db.update(readingProgress).set(progressFields).where(eq(readingProgress.id, race.id));
+    }
+  }
+}
+
 router.put("/:id/progress", async (req: Request, res: Response) => {
   try {
     const { id: bookId } = req.params;
@@ -483,11 +536,8 @@ router.put("/:id/progress", async (req: Request, res: Response) => {
       return res.status(401).json({ error: "Unauthorized" });
     }
 
-    const [existingProgress] = await db
-      .select({
-        id: readingProgress.id,
-        currentPosition: readingProgress.currentPosition,
-      })
+    const existingCheck = await db
+      .select({ id: readingProgress.id, currentPosition: readingProgress.currentPosition })
       .from(readingProgress)
       .where(and(
         eq(readingProgress.userId, userId),
@@ -497,75 +547,20 @@ router.put("/:id/progress", async (req: Request, res: Response) => {
       .orderBy(desc(readingProgress.updatedAt), desc(readingProgress.lastReadAt))
       .limit(1);
 
-    if (existingProgress) {
-      if (isStaleProgressUpdate(existingProgress.currentPosition, normalizedCurrentPosition)) {
-        logger.warn({
-          bookId,
-          userId,
-          clubId: normalizedClubId,
-        }, "[Reader API] Ignoring stale progress update");
-        return res.json({ success: true, ignored: true, reason: "stale_progress_update" });
-      }
-
-      await db
-        .update(readingProgress)
-        .set({
-          currentChapter: normalizedCurrentChapter,
-          currentPosition: normalizedCurrentPosition,
-          progress: normalizedProgress,
-          clubId: normalizedClubId,
-          lastReadAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .where(eq(readingProgress.id, existingProgress.id));
-    } else {
-      try {
-        await db
-          .insert(readingProgress)
-          .values({
-            userId,
-            bookId,
-            clubId: normalizedClubId,
-            currentChapter: normalizedCurrentChapter,
-            currentPosition: normalizedCurrentPosition,
-            progress: normalizedProgress,
-            lastReadAt: new Date(),
-            updatedAt: new Date(),
-          });
-      } catch (error) {
-        if (!isUniqueViolation(error)) {
-          throw error;
-        }
-
-        const [currentProgress] = await db
-          .select({
-            id: readingProgress.id,
-            currentPosition: readingProgress.currentPosition,
-          })
-          .from(readingProgress)
-          .where(and(
-            eq(readingProgress.userId, userId),
-            eq(readingProgress.bookId, bookId),
-            normalizedClubId ? eq(readingProgress.clubId, normalizedClubId) : isNull(readingProgress.clubId),
-          ))
-          .orderBy(desc(readingProgress.updatedAt), desc(readingProgress.lastReadAt))
-          .limit(1);
-
-        if (currentProgress && !isStaleProgressUpdate(currentProgress.currentPosition, normalizedCurrentPosition)) {
-          await db
-            .update(readingProgress)
-            .set({
-              currentChapter: normalizedCurrentChapter,
-              currentPosition: normalizedCurrentPosition,
-              progress: normalizedProgress,
-              clubId: normalizedClubId,
-              lastReadAt: new Date(),
-              updatedAt: new Date(),
-            })
-            .where(eq(readingProgress.id, currentProgress.id));
-        }
-      }
+    const existingProgress = existingCheck[0];
+    if (existingProgress && isStaleProgressUpdate(existingProgress.currentPosition, normalizedCurrentPosition)) {
+      logger.warn({ bookId, userId, clubId: normalizedClubId }, "[Reader API] Ignoring stale progress update");
+      return res.json({ success: true, ignored: true, reason: "stale_progress_update" });
     }
+
+    await upsertReadingProgress({
+      userId,
+      bookId,
+      clubId: normalizedClubId,
+      currentChapter: normalizedCurrentChapter,
+      currentPosition: normalizedCurrentPosition,
+      progress: normalizedProgress,
+    });
 
     await updateBookReadingStatus(userId, bookId, normalizedProgress, normalizedClubId);
 

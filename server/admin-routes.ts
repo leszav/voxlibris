@@ -10,6 +10,7 @@ import { authService } from './auth-service.js';
 import { emailService } from './services/email-service.js';
 import { fileStorage } from './file-storage.js';
 import { CryptoService } from './crypto-service.js';
+import { z } from 'zod';
 import type { UserRole, UserStatus, AdminActionType, AdminActionTargetType } from '../shared/schema.js';
 import { db } from './db.js';
 import postgres from 'postgres';
@@ -17,6 +18,7 @@ import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { SQL } from 'drizzle-orm';
 import { books, personalBooks, clubBooks, users, clubs, clubMembers, readingSessions } from '../shared/schema.js';
 import { logger } from './lib/logger.js';
+import { getStudioRecordingsDir } from './lib/studio-recording-storage.js';
 import {
   getPublicBaseUrl,
   invalidatePublicBaseUrlCache,
@@ -24,6 +26,19 @@ import {
   platformBaseUrlSettingKey,
 } from './lib/public-base-url.js';
 const PostgresError = postgres.PostgresError;
+
+const adminGenreUpsertSchema = z.object({
+  code: z.string().trim().min(1).max(120),
+  labelRu: z.string().trim().min(1),
+  labelEn: z.string().trim().max(255).optional().nullable(),
+  groupKey: z.string().trim().max(80).optional().nullable(),
+  description: z.string().trim().optional().nullable(),
+  aliases: z.array(z.string().trim().min(1)).optional(),
+  sortOrder: z.number().int().optional(),
+  isActive: z.boolean().optional(),
+});
+
+const adminGenreUpdateSchema = adminGenreUpsertSchema.omit({ code: true }).partial();
 
 const router = express.Router();
 
@@ -94,9 +109,8 @@ const logAction = (
 
 const DEFAULT_ADMIN_PAGE_LIMIT = 20;
 const MAX_ADMIN_PAGE_LIMIT = 100;
-const STUDIO_RECORDINGS_DIR = process.env.STUDIO_RECORDINGS_DIR
-  || path.resolve(process.cwd(), 'uploads', 'recordings');
-const STUDIO_RECORDING_FILE_RE = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})-(.+)\.mp3$/i;
+const STUDIO_RECORDINGS_DIR = getStudioRecordingsDir();
+const STUDIO_RECORDING_FILE_RE = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:-(.+))?\.mp3$/i;
 const execFileAsync = promisify(execFile);
 const ADMIN_CLUB_STATUSES = ['pending', 'recruiting', 'active', 'completed', 'archived'] as const;
 type AdminClubStatus = (typeof ADMIN_CLUB_STATUSES)[number];
@@ -277,6 +291,13 @@ function parseStudioRecordingFileName(fileName: string): { sessionId: string; re
 
   const sessionId = match[1];
   const rawTimestamp = match[2]?.replace(/\.mp3$/i, '') ?? '';
+  if (!rawTimestamp) {
+    return {
+      sessionId,
+      recordedAt: null,
+    };
+  }
+
   const isoTimestamp = rawTimestamp.replace(/-(\d{3})Z$/, '.$1Z');
   const parsedTime = new Date(isoTimestamp);
 
@@ -1004,6 +1025,7 @@ function _formatClubBookForAdmin(book: { source: 'club_books' } & typeof clubBoo
 interface BookFilters {
   search: string;
   status?: string;
+  genre?: string;
 }
 
 interface BookConditions {
@@ -1013,8 +1035,9 @@ interface BookConditions {
 }
 
 function buildBookConditions(filters: BookFilters): BookConditions {
-  const { search, status } = filters;
+  const { search, status, genre } = filters;
   const searchPattern = search ? `%${search}%` : null;
+  const genrePattern = genre ? `%${genre}%` : null;
 
   const sourceWhere = (conditions: SQL<unknown>[]): SQL<unknown> | undefined => {
     if (conditions.length === 0) return undefined;
@@ -1035,6 +1058,9 @@ function buildBookConditions(filters: BookFilters): BookConditions {
   } else if (status === 'pending') {
     booksConditions.push(sql`${books.status} NOT IN ('active', 'blocked')`);
   }
+  if (genrePattern) {
+    booksConditions.push(sql`false`);
+  }
 
   const personalConditions: SQL<unknown>[] = [];
   if (searchPattern) {
@@ -1049,6 +1075,9 @@ function buildBookConditions(filters: BookFilters): BookConditions {
   } else if (status === 'pending') {
     personalConditions.push(sql`false`);
   }
+  if (genrePattern) {
+    personalConditions.push(sql`LOWER(COALESCE(${personalBooks.genre}, '')) LIKE ${genrePattern}`);
+  }
 
   const clubConditions: SQL<unknown>[] = [];
   if (searchPattern) {
@@ -1062,6 +1091,9 @@ function buildBookConditions(filters: BookFilters): BookConditions {
     clubConditions.push(eq(clubBooks.isDeleted, true));
   } else if (status === 'pending') {
     clubConditions.push(sql`false`);
+  }
+  if (genrePattern) {
+    clubConditions.push(sql`LOWER(COALESCE(${clubBooks.genre}, '')) LIKE ${genrePattern}`);
   }
 
   return {
@@ -1346,6 +1378,7 @@ router.get('/books', jwtAuth, requireAdmin, async (req, res) => {
   try {
     const search = typeof req.query.search === 'string' ? req.query.search.trim().toLowerCase() : '';
     const status = typeof req.query.status === 'string' ? req.query.status : undefined;
+    const genre = typeof req.query.genre === 'string' ? req.query.genre.trim().toLowerCase() : undefined;
     const { page, limit, offset } = parseAdminPagination(req.query.page, req.query.limit);
 
     if (status && !['active', 'blocked', 'pending'].includes(status)) {
@@ -1355,7 +1388,7 @@ router.get('/books', jwtAuth, requireAdmin, async (req, res) => {
       });
     }
 
-    const conditions = buildBookConditions({ search, status });
+    const conditions = buildBookConditions({ search, status, genre });
     const counts = await fetchBookCounts(conditions);
     const total = counts.booksCount + counts.personalCount + counts.clubCount;
     const windows = calculateBookWindows(counts, offset, limit);
@@ -1375,6 +1408,68 @@ router.get('/books', jwtAuth, requireAdmin, async (req, res) => {
     console.error('Error fetching books:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
+});
+
+router.get('/genres', jwtAuth, requireAdmin, async (req, res) => {
+  const search = typeof req.query.search === 'string' ? req.query.search.trim() : undefined;
+  const genres = await storage.getGenresAdmin(search);
+  res.json(genres.map((genre) => ({
+    id: genre.id,
+    code: genre.code,
+    labelRu: genre.labelRu,
+    labelEn: genre.labelEn,
+    groupKey: genre.groupKey,
+    description: genre.description,
+    aliases: genre.aliasesJson ? JSON.parse(genre.aliasesJson) : [],
+    sortOrder: genre.sortOrder,
+    isActive: genre.isActive,
+    createdAt: genre.createdAt,
+    updatedAt: genre.updatedAt,
+  })));
+});
+
+router.post('/genres', jwtAuth, requireFullAdmin, async (req, res) => {
+  const parsed = adminGenreUpsertSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: 'Invalid genre payload' });
+  }
+
+  const payload = parsed.data;
+  const genre = await storage.createGenre({
+    code: payload.code,
+    labelRu: payload.labelRu,
+    labelEn: payload.labelEn ?? null,
+    groupKey: payload.groupKey ?? null,
+    description: payload.description ?? null,
+    aliasesJson: JSON.stringify(payload.aliases ?? []),
+    sortOrder: payload.sortOrder ?? 0,
+    isActive: payload.isActive ?? true,
+  });
+
+  res.json(genre);
+});
+
+router.put('/genres/:code', jwtAuth, requireFullAdmin, async (req, res) => {
+  const parsed = adminGenreUpdateSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: 'Invalid genre payload' });
+  }
+
+  const updated = await storage.updateGenre(req.params.code, {
+    ...(parsed.data.labelRu !== undefined ? { labelRu: parsed.data.labelRu } : {}),
+    ...(parsed.data.labelEn !== undefined ? { labelEn: parsed.data.labelEn } : {}),
+    ...(parsed.data.groupKey !== undefined ? { groupKey: parsed.data.groupKey } : {}),
+    ...(parsed.data.description !== undefined ? { description: parsed.data.description } : {}),
+    ...(parsed.data.aliases !== undefined ? { aliasesJson: JSON.stringify(parsed.data.aliases) } : {}),
+    ...(parsed.data.sortOrder !== undefined ? { sortOrder: parsed.data.sortOrder } : {}),
+    ...(parsed.data.isActive !== undefined ? { isActive: parsed.data.isActive } : {}),
+  });
+
+  if (!updated) {
+    return res.status(404).json({ error: 'Genre not found' });
+  }
+
+  res.json(updated);
 });
 
 async function buildPersonalBookDownloadPayload(
@@ -3514,6 +3609,48 @@ router.delete('/recordings/:id', jwtAuth, requireAdmin, async (req, res) => {
 
     logger.error({ error }, 'Failed to delete admin studio recording');
     res.status(500).json({ message: 'Не удалось удалить запись эфира' });
+  }
+});
+
+// Массовое удаление записей
+router.delete('/recordings', jwtAuth, requireAdmin, async (req, res) => {
+  try {
+    const ids = req.body?.ids;
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ message: 'Необходимо передать массив идентификаторов ids' });
+    }
+
+    const MAX_BATCH = 200;
+    if (ids.length > MAX_BATCH) {
+      return res.status(400).json({ message: `За один запрос можно удалить не более ${MAX_BATCH} записей` });
+    }
+
+    let deleted = 0;
+    let notFound = 0;
+
+    await Promise.all(
+      ids.map(async (id: unknown) => {
+        if (typeof id !== 'string') return;
+        const filePath = resolveStudioRecordingPath(id);
+        if (!filePath) return;
+        try {
+          await fs.unlink(filePath);
+          deleted++;
+        } catch (err) {
+          const code = (err as NodeJS.ErrnoException | undefined)?.code;
+          if (code === 'ENOENT') {
+            notFound++;
+          } else {
+            logger.warn({ error: err, id }, 'Failed to delete admin studio recording in batch');
+          }
+        }
+      }),
+    );
+
+    res.json({ success: true, deleted, notFound });
+  } catch (error) {
+    logger.error({ error }, 'Failed to batch delete admin studio recordings');
+    res.status(500).json({ message: 'Не удалось удалить записи эфиров' });
   }
 });
 

@@ -2,7 +2,7 @@ import { Server as HttpServer } from "node:http";
 import { Server, Socket } from "socket.io";
 import jwt, { JwtPayload } from "jsonwebtoken";
 import { db } from "./db.js";
-import { users, readingProgress, bookmarks, notes, books, clubMembers } from "../shared/schema.js";
+import { users, readingProgress, bookmarks, notes, books, clubBooks, clubMembers } from "../shared/schema.js";
 import { eq, and, desc, isNull } from "drizzle-orm";
 import type {
   ReaderProgressUpdate,
@@ -10,7 +10,9 @@ import type {
   NoteUpdate,
 } from "../shared/schema.js";
 import { logger } from "./lib/logger.js";
+import { getIcecastStreamUrl } from "./lib/icecast-public-url.js";
 import { syncBookReadingStatus } from "./lib/sync-reading-status.js";
+import { liveSessionsStore, type LiveReaderEntry } from "./lib/live-sessions-store.js";
 
 interface AuthenticatedSocket extends Socket {
   userId: string;
@@ -210,7 +212,19 @@ async function handleProgressUpdate(
 // Улучшенная аутентификация через JWT с проверкой пользователя в БД
 async function authenticateSocket(socket: Socket, next: (err?: Error) => void) {
   try {
-    const token = socket.handshake.auth.token || socket.handshake.headers.authorization?.replace("Bearer ", "");
+    const cookieHeader = socket.handshake.headers.cookie;
+    const cookieTokenRaw = typeof cookieHeader === 'string'
+      ? cookieHeader
+          .split(';')
+          .map((part) => part.trim())
+          .find((part) => part.startsWith('accessToken='))
+          ?.split('=')[1]
+      : undefined;
+    const cookieToken = cookieTokenRaw ? decodeURIComponent(cookieTokenRaw) : undefined;
+
+    const token = socket.handshake.auth.token
+      || socket.handshake.headers.authorization?.replace("Bearer ", "")
+      || cookieToken;
     
     if (!token) {
       return next(new Error('Authentication token required'));
@@ -289,6 +303,16 @@ export function initializeReaderWebSocket(httpServer: HttpServer) {
         });
 
         socket.emit("joined_book", { bookId, clubId, roomName });
+
+        // Отправляем подключившемуся текущих активных чтецов этой книги
+        if (clubId) {
+          const currentReaders = (await liveSessionsStore.getByClub(clubId)).filter(
+            (r) => r.bookId === bookId
+          );
+          for (const reader of currentReaders) {
+            socket.emit('live_reader:started', reader);
+          }
+        }
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         logger.error({ error: errorMessage }, "[WS Reader] Error joining book");
@@ -359,6 +383,22 @@ export function initializeReaderWebSocket(httpServer: HttpServer) {
 
     socket.on("disconnect", () => {
       logger.info(`[WS Reader] User ${authSocket.username} (${authSocket.userId}) disconnected`);
+      void (async () => {
+        const currentClubRooms = socket.rooms;
+        for (const room of currentClubRooms) {
+          if (!room.startsWith('club:')) continue;
+          const clubId = room.replace('club:', '');
+          const readers = await liveSessionsStore.getByClub(clubId);
+          for (const entry of readers) {
+            if (entry.readerId !== authSocket.userId) continue;
+            await liveSessionsStore.remove(entry.sessionId, entry.clubId);
+            const roomName = `club:${entry.clubId}:book:${entry.bookId}`;
+            const clubRoom = `club:${entry.clubId}`;
+            io.to(roomName).emit('live_reader:ended', { sessionId: entry.sessionId, readerId: authSocket.userId });
+            io.to(clubRoom).emit('live_reader:ended', { sessionId: entry.sessionId, readerId: authSocket.userId });
+          }
+        }
+      })();
     });
 
     // ── Live-чтецы: события для клубной комнаты ──────────────────────────
@@ -373,9 +413,9 @@ export function initializeReaderWebSocket(httpServer: HttpServer) {
       sessionId: string;
       chapter: number;
       readerName: string;
-      streamUrl: string;
     }) => {
-      const { clubId, bookId, sessionId, chapter, readerName, streamUrl } = data;
+      const { clubId, bookId, sessionId, chapter, readerName } = data;
+      logger.info({ clubId, bookId, sessionId, readerId: authSocket.userId }, '[WS Reader] live_reader:start received');
       const roomName = `club:${clubId}:book:${bookId}`;
       const clubRoom = `club:${clubId}`;
 
@@ -389,24 +429,22 @@ export function initializeReaderWebSocket(httpServer: HttpServer) {
       // Присоединяемся к клубной комнате если ещё нет
       socket.join(clubRoom);
 
+      const readerEntry: LiveReaderEntry = {
+        sessionId,
+        readerId: authSocket.userId,
+        readerName,
+        chapter,
+        streamUrl: getIcecastStreamUrl(sessionId),
+        startedAt: new Date().toISOString(),
+        clubId,
+        bookId,
+      };
+      await liveSessionsStore.upsert(readerEntry);
+
       // Уведомляем всех в комнате книги
-      socket.to(roomName).emit('live_reader:started', {
-        sessionId,
-        readerId: authSocket.userId,
-        readerName,
-        chapter,
-        streamUrl,
-        startedAt: new Date().toISOString(),
-      });
+      socket.to(roomName).emit('live_reader:started', readerEntry);
       // И всех в клубной комнате (кто не открыл книгу)
-      socket.to(clubRoom).emit('live_reader:started', {
-        sessionId,
-        readerId: authSocket.userId,
-        readerName,
-        chapter,
-        streamUrl,
-        startedAt: new Date().toISOString(),
-      });
+      socket.to(clubRoom).emit('live_reader:started', readerEntry);
 
       logger.info(`[WS Reader] ${readerName} started live reading in club ${clubId}`);
     });
@@ -414,10 +452,12 @@ export function initializeReaderWebSocket(httpServer: HttpServer) {
     /**
      * Чтец закончил читать.
      */
-    socket.on("live_reader:stop", (data: { clubId: string; bookId: string; sessionId: string }) => {
+    socket.on("live_reader:stop", async (data: { clubId: string; bookId: string; sessionId: string }) => {
       const { clubId, bookId, sessionId } = data;
       const roomName = `club:${clubId}:book:${bookId}`;
       const clubRoom = `club:${clubId}`;
+
+      await liveSessionsStore.remove(sessionId, clubId);
 
       socket.to(roomName).emit('live_reader:ended', {
         sessionId,
@@ -436,7 +476,7 @@ export function initializeReaderWebSocket(httpServer: HttpServer) {
     /**
      * Синхронизация позиции чтения для слушателей.
      */
-    socket.on("live_reader:position", (data: {
+    socket.on("live_reader:position", async (data: {
       clubId: string;
       bookId: string;
       sessionId: string;
@@ -445,6 +485,8 @@ export function initializeReaderWebSocket(httpServer: HttpServer) {
     }) => {
       const { clubId, bookId, sessionId, chapter, positionRaw } = data;
       const roomName = `club:${clubId}:book:${bookId}`;
+
+      await liveSessionsStore.updatePosition(sessionId, chapter, positionRaw);
 
       socket.to(roomName).emit('live_reader:position_update', {
         sessionId,
@@ -455,13 +497,23 @@ export function initializeReaderWebSocket(httpServer: HttpServer) {
       });
     });
 
+    socket.on('live_reader:heartbeat', async (data: { sessionId: string }) => {
+      await liveSessionsStore.heartbeat(data.sessionId);
+    });
+
     /**
      * Присоединиться к клубной комнате для получения уведомлений о чтецах.
      */
-    socket.on("join_club", (data: { clubId: string }) => {
+    socket.on("join_club", async (data: { clubId: string }) => {
       const { clubId } = data;
       socket.join(`club:${clubId}`);
       logger.info(`[WS Reader] ${authSocket.username} joined club room ${clubId}`);
+
+      // Отправляем подключившемуся текущих активных чтецов этого клуба
+      const currentReaders = await liveSessionsStore.getByClub(clubId);
+      for (const reader of currentReaders) {
+        socket.emit('live_reader:started', reader);
+      }
     });
   });
 
@@ -477,17 +529,21 @@ async function verifyBookAccess(userId: string, bookId: string, clubId?: string)
     const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
     if (!user?.status || user.status !== 'active') return false;
 
-    // Проверка существования книги
-    const [book] = await db.select().from(books).where(eq(books.id, bookId)).limit(1);
-    if (!book) return false;
-
-    // Если это персональная книга
-    if (book.uploadedBy === userId) {
-      return true;
-    }
-
-    // Если это клубная книга - проверить членство
     if (clubId) {
+      const [clubBook] = await db
+        .select()
+        .from(clubBooks)
+        .where(
+          and(
+            eq(clubBooks.id, bookId),
+            eq(clubBooks.clubId, clubId),
+            eq(clubBooks.isDeleted, false),
+          )
+        )
+        .limit(1);
+
+      if (!clubBook) return false;
+
       const [membership] = await db
         .select()
         .from(clubMembers)
@@ -499,11 +555,16 @@ async function verifyBookAccess(userId: string, bookId: string, clubId?: string)
           )
         )
         .limit(1);
-      
+
       return !!membership;
     }
 
-    return false;
+    // Legacy/personal books path
+    const [book] = await db.select().from(books).where(eq(books.id, bookId)).limit(1);
+    if (!book) return false;
+
+    return book.uploadedBy === userId;
+
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     logger.error({ error: errorMessage }, '[WS Reader] Error verifying book access');

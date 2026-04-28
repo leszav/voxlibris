@@ -482,8 +482,25 @@ export type BookFormat = typeof bookFormats[number];
 export const bookTypes = ["personal", "club"] as const;
 export type BookType = typeof bookTypes[number];
 
+export const genreSources = ["metadata", "manual", "migration", "admin"] as const;
+export type GenreSource = typeof genreSources[number];
+
 export const accessActions = ["READ_OPENED", "READ_SESSION_END", "READ_DELETED"] as const;
 export type AccessAction = typeof accessActions[number];
+
+export const genres = pgTable("genres", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  code: varchar("code", { length: 120 }).notNull().unique(),
+  labelRu: text("label_ru").notNull(),
+  labelEn: text("label_en"),
+  groupKey: varchar("group_key", { length: 80 }),
+  description: text("description"),
+  aliasesJson: text("aliases_json"),
+  sortOrder: integer("sort_order").notNull().default(0),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+  updatedAt: timestamp("updated_at").notNull().default(sql`now()`),
+});
 
 // Таблица личных книг пользователя (ТЗ 7.1)
 export const personalBooks = pgTable("personal_books", {
@@ -494,6 +511,7 @@ export const personalBooks = pgTable("personal_books", {
   description: text("description"),
   publicationYear: integer("publication_year"),
   genre: text("genre"),
+  primaryGenreId: varchar("primary_genre_id").references(() => genres.id, { onDelete: "set null" }),
   language: text("language"),
   format: text("format").notNull().$type<BookFormat>(),
   fileHash: varchar("file_hash", { length: 64 }),
@@ -518,6 +536,7 @@ export const clubBooks = pgTable("club_books", {
   description: text("description"),
   publicationYear: integer("publication_year"),
   genre: text("genre"),
+  primaryGenreId: varchar("primary_genre_id").references(() => genres.id, { onDelete: "set null" }),
   language: text("language"),
   format: text("format").notNull().$type<BookFormat>(),
   fileHash: varchar("file_hash", { length: 64 }),
@@ -531,6 +550,17 @@ export const clubBooks = pgTable("club_books", {
   softDeletedAt: timestamp("soft_deleted_at"),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
   updatedAt: timestamp("updated_at").notNull().default(sql`now()`),
+});
+
+export const bookGenres = pgTable("book_genres", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  bookId: varchar("book_id").notNull(),
+  bookType: text("book_type").notNull().$type<BookType>(),
+  genreId: varchar("genre_id").notNull().references(() => genres.id, { onDelete: "cascade" }),
+  source: text("source").notNull().default("metadata").$type<GenreSource>(),
+  isPrimary: boolean("is_primary").notNull().default(false),
+  confidence: integer("confidence"),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
 });
 
 // Логирование доступа к книгам (ТЗ 7.1)
@@ -553,6 +583,7 @@ export const insertPersonalBookSchema = createInsertSchema(personalBooks).pick({
   description: true,
   publicationYear: true,
   genre: true,
+  primaryGenreId: true,
   language: true,
   format: true,
   fileHash: true,
@@ -569,6 +600,7 @@ export const insertClubBookSchema = createInsertSchema(clubBooks).pick({
   description: true,
   publicationYear: true,
   genre: true,
+  primaryGenreId: true,
   language: true,
   format: true,
   fileHash: true,
@@ -588,6 +620,26 @@ export const insertBookAccessLogSchema = createInsertSchema(bookAccessLogs).pick
   ipHash: true,
 });
 
+export const insertGenreSchema = createInsertSchema(genres).pick({
+  code: true,
+  labelRu: true,
+  labelEn: true,
+  groupKey: true,
+  description: true,
+  aliasesJson: true,
+  sortOrder: true,
+  isActive: true,
+});
+
+export const insertBookGenreSchema = createInsertSchema(bookGenres).pick({
+  bookId: true,
+  bookType: true,
+  genreId: true,
+  source: true,
+  isPrimary: true,
+  confidence: true,
+});
+
 // VoxLibris Upload types
 export type InsertPersonalBook = z.infer<typeof insertPersonalBookSchema>;
 export type PersonalBook = typeof personalBooks.$inferSelect;
@@ -597,6 +649,12 @@ export type ClubBook = typeof clubBooks.$inferSelect;
 
 export type InsertBookAccessLog = z.infer<typeof insertBookAccessLogSchema>;
 export type BookAccessLog = typeof bookAccessLogs.$inferSelect;
+
+export type InsertGenre = z.infer<typeof insertGenreSchema>;
+export type Genre = typeof genres.$inferSelect;
+
+export type InsertBookGenre = z.infer<typeof insertBookGenreSchema>;
+export type BookGenre = typeof bookGenres.$inferSelect;
 
 // Admin tables for VoxLibris admin panel
 export const moderationReportTypes = ["user", "club", "book", "chat", "reader"] as const;

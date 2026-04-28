@@ -12,6 +12,7 @@ import { serializeClub, serializeClubList, serializeClubMembers } from './lib/cl
 import { getPublicBaseUrl } from './lib/public-base-url.js';
 import { sanitizeClubSettingsInput } from './lib/club-settings-sanitizer.js';
 import { storeOptimizedImageIfNeeded } from './lib/uploaded-image-storage.js';
+import { liveSessionsStore } from './lib/live-sessions-store.js';
 
 const router = express.Router();
 
@@ -179,8 +180,10 @@ router.get('/catalog', async (req, res) => {
   try {
     const rawLimit = typeof req.query.limit === 'string' ? Number.parseInt(req.query.limit, 10) : undefined;
     const limit = Number.isFinite(rawLimit) && rawLimit && rawLimit > 0 ? rawLimit : undefined;
+    const rawOffset = typeof req.query.offset === 'string' ? Number.parseInt(req.query.offset, 10) : undefined;
+    const offset = Number.isFinite(rawOffset) && rawOffset !== undefined && rawOffset >= 0 ? rawOffset : undefined;
     const searchQuery = typeof req.query.q === 'string' ? req.query.q.trim() : undefined;
-    const clubs = await storage.getPublicCatalogClubs(limit, searchQuery);
+    const clubs = await storage.getPublicCatalogClubs(limit, offset, searchQuery);
 
     // Поисковые запросы не кэшируем, общий каталог можно кэшировать.
     if (searchQuery) {
@@ -1151,6 +1154,29 @@ router.post('/:clubId/transfer-ownership', jwtAuth, async (req, res) => {
   } catch (error) {
     console.error('Error transferring ownership:', error);
     res.status(500).json({ message: 'Failed to transfer ownership' });
+  }
+});
+
+/**
+ * GET /api/clubs/:clubId/live-readers
+ * Список активных чтецов клуба.
+ * Источник истины для активных сессий - Redis, а очистка выполняется
+ * через stop/disconnect/heartbeat TTL, а не через хрупкий per-request
+ * опрос Icecast admin endpoint.
+ */
+router.get('/:clubId/live-readers', optionalJwtAuth, async (req, res) => {
+  try {
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.set('Pragma', 'no-cache');
+    res.set('Expires', '0');
+
+    const { clubId } = req.params;
+    const activeReaders = await liveSessionsStore.getByClub(clubId);
+
+    res.json({ readers: activeReaders });
+  } catch (error) {
+    logger.error({ error }, '[Clubs] Error fetching live readers');
+    res.status(500).json({ readers: [] });
   }
 });
 

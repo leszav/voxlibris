@@ -2,7 +2,9 @@ import { Wifi, WifiOff, Radio, BookOpen, ChevronRight, Bookmark, Settings2 } fro
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { cn } from "@/lib/utils";import studioLogo from '/vlstudio-logo.webp';
+import { cn } from "@/lib/utils";
+import { StudioWordmark } from "@/components/studio/StudioWordmark";
+
 export type NetworkQuality = "good" | "fair" | "poor" | "offline";
 
 interface LiveTopBarProps {
@@ -66,7 +68,7 @@ export function LiveTopBar({
   return (
     <header className="h-12 shrink-0 border-b border-border bg-card/80 backdrop-blur-sm flex items-center px-4 gap-4 z-20">
       {/* Логотип */}
-      <img src={studioLogo} alt="VL Studio" className="h-6 w-auto shrink-0 opacity-90" />
+      <StudioWordmark compact className="shrink-0" />
       <Separator orientation="vertical" className="h-5 shrink-0" />
       {/* Левая зона: книга + глава */}
       <div className="flex items-center gap-2 min-w-0 flex-1">

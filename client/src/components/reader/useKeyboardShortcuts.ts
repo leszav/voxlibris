@@ -13,6 +13,12 @@ interface KeyboardShortcut {
   requireAtBottom?: boolean;
   /** Ссылка на контейнер скролла для проверки позиции */
   scrollContainerRef?: RefObject<HTMLElement | null>;
+  /**
+   * Порог (px) для isAtBottom. По умолчанию 20.
+   * Увеличьте, если контейнер имеет bottom-padding (например, pb-32=128px
+   * при активной панели студии), иначе isAtBottom никогда не сработает.
+   */
+  bottomThreshold?: number;
 }
 
 function isAtTop(container: HTMLElement | null | undefined, threshold = 20): boolean {
@@ -44,7 +50,7 @@ export function useKeyboardShortcuts(shortcuts: KeyboardShortcut[]) {
         if (shortcut.requireAtTop && !isAtTop(shortcut.scrollContainerRef?.current)) {
           continue;
         }
-        if (shortcut.requireAtBottom && !isAtBottom(shortcut.scrollContainerRef?.current)) {
+        if (shortcut.requireAtBottom && !isAtBottom(shortcut.scrollContainerRef?.current, shortcut.bottomThreshold)) {
           continue;
         }
 

@@ -64,6 +64,7 @@ export function ChatWidget({ clubId, channel = "general", onCleanupDeleted, canC
   const [isIdle, setIsIdle] = useState(false);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const lastMessageCountRef = useRef(0);
+  const unreadTrackingReadyRef = useRef(false);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const scrollAreaRef = useRef<HTMLDivElement | null>(null);
   const scrollViewportRef = useRef<HTMLDivElement | null>(null);
@@ -124,13 +125,25 @@ export function ChatWidget({ clubId, channel = "general", onCleanupDeleted, canC
     };
   }, [open]);
 
-  // Подсветка пузыря при новых сообщениях, если окно свернуто
+  // Индикатор непрочитанного только для реально новых сообщений,
+  // а не для первичной подгрузки истории.
   useEffect(() => {
+    if (loadingHistory) {
+      return;
+    }
+
+    if (!unreadTrackingReadyRef.current) {
+      lastMessageCountRef.current = messages.length;
+      unreadTrackingReadyRef.current = true;
+      return;
+    }
+
     if (!open && messages.length > lastMessageCountRef.current) {
       setHasUnread(true);
     }
+
     lastMessageCountRef.current = messages.length;
-  }, [messages.length, open]);
+  }, [messages.length, open, loadingHistory]);
 
   // Idle-эффект: чат становится полупрозрачным при неактивности
   useEffect(() => {
@@ -422,12 +435,14 @@ export function ChatWidget({ clubId, channel = "general", onCleanupDeleted, canC
   }, [connected, error]);
 
   return (
-    <div className="fixed bottom-4 right-4 z-40 flex flex-col items-end gap-2">
+    <div className={`fixed bottom-4 right-0 z-40 flex flex-col items-end gap-2 pr-4 transition-transform duration-300 ease-out ${
+      open ? "translate-x-0" : "translate-x-[calc(100%-4rem)] hover:translate-x-0 focus-within:translate-x-0"
+    }`}>
       {/* Окно чата */}
       {open && (
         <div 
           ref={chatRef}
-          className="rounded-lg shadow-xl border bg-background flex flex-col overflow-hidden relative"
+          className="relative flex flex-col overflow-hidden rounded-2xl border border-border/80 bg-background shadow-2xl backdrop-blur-sm"
           style={{ width: chatSize.width, height: chatSize.height }}
         >
           {/* Resize handle */}
@@ -441,11 +456,13 @@ export function ChatWidget({ clubId, channel = "general", onCleanupDeleted, canC
               <Maximize2 className="h-3 w-3 rotate-90 text-foreground/90" />
             </div>
           </div>
-          <div className="flex items-center justify-between px-3 py-2 border-b bg-muted/60">
+          <div className="flex items-center justify-between border-b border-border/80 bg-card/95 px-3 py-2.5 backdrop-blur-sm">
             <div className="flex items-center gap-2 pl-7">
-              <MessageCircle className="w-4 h-4" />
+              <span className="flex h-8 w-8 items-center justify-center rounded-2xl border border-cyan-200/70 bg-cyan-500/10 text-cyan-600 dark:border-cyan-900 dark:text-cyan-400">
+                <MessageCircle className="h-4 w-4" />
+              </span>
               <div className="flex flex-col">
-                <span className="text-sm font-medium">Чат клуба</span>
+                <span className="text-sm font-semibold">Чат клуба</span>
                 <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
                   <span className={`inline-block h-1.5 w-1.5 rounded-full ${connectionMeta.dotClass}`} />
                   {connectionMeta.label} · участников: {participants.length}
@@ -457,7 +474,7 @@ export function ChatWidget({ clubId, channel = "general", onCleanupDeleted, canC
                 <Button 
                   variant="ghost" 
                   size="icon" 
-                  className="h-7 w-7" 
+                  className="h-8 w-8 rounded-xl text-muted-foreground hover:bg-muted hover:text-foreground" 
                   onClick={handleCleanupDeleted}
                   title="Очистить удалённые сообщения"
                 >
@@ -467,10 +484,11 @@ export function ChatWidget({ clubId, channel = "general", onCleanupDeleted, canC
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-7 w-7"
+                className="h-8 w-8 rounded-xl text-muted-foreground hover:bg-muted hover:text-foreground"
                 onClick={() => {
                   setOpen(false);
                 }}
+                title="Свернуть чат"
               >
                 <X className="w-3 h-3" />
               </Button>
@@ -686,17 +704,30 @@ export function ChatWidget({ clubId, channel = "general", onCleanupDeleted, canC
 
       {/* Пузырь чата */}
       <Button
-        size="icon"
-        className={`h-12 w-12 rounded-full shadow-lg relative transition-all duration-300 ${
-          hasUnread ? "ring-2 ring-primary scale-105" : ""
-        } ${isIdle ? "opacity-30 hover:opacity-100" : "opacity-100"}`}
-        variant="default"
+        className={`group relative flex min-w-[220px] items-center gap-3 rounded-2xl border border-cyan-200/80 bg-card/95 px-4 py-3 text-left text-foreground shadow-lg backdrop-blur-sm transition-colors duration-300 hover:border-cyan-300 hover:bg-card ${isIdle ? "opacity-30 hover:opacity-100" : "opacity-100"}`}
+        variant="ghost"
         onClick={handleToggle}
+        title={open ? "Свернуть чат" : "Открыть чат клуба"}
+        aria-label={open ? "Свернуть чат" : "Открыть чат клуба"}
       >
-        <MessageCircle className="w-6 h-6" />
-        {hasUnread && (
-          <span className="absolute -top-1 -right-1 inline-flex h-3 w-3 rounded-full bg-red-500 animate-pulse" />
-        )}
+        <span className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-cyan-200 bg-cyan-500/10 text-cyan-600 dark:border-cyan-900 dark:text-cyan-400">
+          <MessageCircle className="h-4.5 w-4.5 transition-transform duration-200 group-hover:scale-105" />
+          {hasUnread && (
+            <span className="absolute right-1.5 top-1.5 inline-flex h-2.5 w-2.5 rounded-full bg-red-500" />
+          )}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="flex items-center gap-2 text-xs text-muted-foreground">
+            <span className={`inline-block h-1.5 w-1.5 rounded-full ${connectionMeta.dotClass}`} />
+            {connectionMeta.label}
+            <span className="inline-flex items-center rounded-full bg-cyan-500/10 px-1.5 py-0.5 text-[10px] font-medium leading-none text-cyan-700 dark:text-cyan-300">
+              {participants.length}
+            </span>
+          </span>
+          <span className="mt-1 block text-sm font-semibold text-foreground">
+            Чат клуба
+          </span>
+        </span>
       </Button>
     </div>
   );

@@ -36,7 +36,7 @@ export function useAudioSession({ userId }: AudioSessionOptions) {
     if (!userId) return;
 
     const token = getAccessToken();
-    const socket = io('/', {
+    const socket = io('/reading-sessions', {
       transports: ['websocket'],
       withCredentials: true,
       auth: token ? { token } : undefined,
@@ -53,18 +53,30 @@ export function useAudioSession({ userId }: AudioSessionOptions) {
       setSessionActive(false);
     });
 
-    socket.on('session:started', () => {
+    socket.on('reading-session:joined', (data: { listenerCount: number }) => {
       setSessionActive(true);
+      setListenerCount(data.listenerCount);
       setError(null);
     });
 
-    socket.on('session:ended', () => {
-      setSessionActive(false);
-      setListenerCount(0);
+    socket.on('reading-session:left', (data: { listenerCount: number }) => {
+      setListenerCount(data.listenerCount);
     });
 
-    socket.on('listeners:update', (data: { count: number }) => {
-      setListenerCount(data.count);
+    socket.on('reading-session:listener-joined', (data: { listenerCount: number }) => {
+      setSessionActive(true);
+      setListenerCount(data.listenerCount);
+    });
+
+    socket.on('reading-session:listener-left', (data: { listenerCount: number }) => {
+      setListenerCount(data.listenerCount);
+    });
+
+    socket.on('reading-session:status-updated', (data: { status: string }) => {
+      if (data.status === 'completed' || data.status === 'cancelled') {
+        setSessionActive(false);
+        setListenerCount(0);
+      }
     });
 
     socket.on('error', (data: { message?: string }) => {
@@ -79,23 +91,25 @@ export function useAudioSession({ userId }: AudioSessionOptions) {
 
   const joinSessionRoom = useCallback((sessionId: string): void => {
     if (!socketRef.current?.connected) return;
-    socketRef.current.emit('session:join', { sessionId });
+    socketRef.current.emit('reading-session:join', sessionId);
   }, []);
 
   const leaveSessionRoom = useCallback((sessionId: string): void => {
     if (!socketRef.current?.connected) return;
-    socketRef.current.emit('session:leave', { sessionId });
+    socketRef.current.emit('reading-session:leave', sessionId);
   }, []);
 
   const notifyBroadcastStarted = useCallback((sessionId: string): void => {
     if (!socketRef.current?.connected) return;
-    socketRef.current.emit('broadcast:started', { sessionId });
-  }, []);
+    setSessionActive(true);
+    joinSessionRoom(sessionId);
+  }, [joinSessionRoom]);
 
   const notifyBroadcastEnded = useCallback((sessionId: string): void => {
-    if (!socketRef.current?.connected) return;
-    socketRef.current.emit('broadcast:ended', { sessionId });
-  }, []);
+    leaveSessionRoom(sessionId);
+    setSessionActive(false);
+    setListenerCount(0);
+  }, [leaveSessionRoom]);
 
   const notifyBroadcastPaused = useCallback((sessionId: string): void => {
     if (!socketRef.current?.connected) return;

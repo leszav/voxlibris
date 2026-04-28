@@ -1,7 +1,8 @@
 /* Reader Theme Styles */
 
 /* Light Theme */
-body.reader-light {
+body.reader-light,
+body.club-reader-light {
   --reader-bg: #ffffff;
   --reader-text: #1a1a1a;
   --reader-text-secondary: #666666;
@@ -9,7 +10,8 @@ body.reader-light {
 }
 
 /* Dark Theme */
-body.reader-dark {
+body.reader-dark,
+body.club-reader-dark {
   --reader-bg: #1a1a1a;
   --reader-text: #e5e5e5;
   --reader-text-secondary: #999999;
@@ -17,7 +19,8 @@ body.reader-dark {
 }
 
 /* Sepia Theme */
-body.reader-sepia {
+body.reader-sepia,
+body.club-reader-sepia {
   --reader-bg: #f4ecd8;
   --reader-text: #5c4a3a;
   --reader-text-secondary: #8b7355;
@@ -35,6 +38,7 @@ body.reader-sepia {
 }
 
 .club-reader-content {
+  color: var(--reader-text);
   font-size: var(--club-reader-font-size, 18px);
   font-family: var(--club-reader-font-family, Georgia);
   line-height: var(--club-reader-line-height, 1.6);
@@ -66,8 +70,8 @@ body.reader-sepia {
 .club-reader-content > ul,
 .club-reader-content > ol,
 .club-reader-content > hr {
-  content-visibility: auto;
-  contain-intrinsic-size: 0 100px;
+  content-visibility: visible;
+  contain-intrinsic-size: auto;
 }
 
 /* Reader container alignment */

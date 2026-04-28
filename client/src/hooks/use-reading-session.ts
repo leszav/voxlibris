@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useAuth } from './use-auth';
 import { io, type Socket } from 'socket.io-client';
 import { getAccessToken } from '@/lib/token-store';
+import { apiRequest } from '@/lib/queryClient';
 
 interface ReadingSessionState {
   sessionId?: string;
@@ -43,6 +44,7 @@ export function useReadingSession() {
   
   const socketRef = useRef<Socket | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const listenerPollRef = useRef<NodeJS.Timeout | null>(null);
   const sessionRef = useRef<ReadingSessionState>(session);
 
   useEffect(() => {
@@ -55,6 +57,10 @@ export function useReadingSession() {
       if (timerRef.current) {
         clearInterval(timerRef.current);
         timerRef.current = null;
+      }
+      if (listenerPollRef.current) {
+        clearInterval(listenerPollRef.current);
+        listenerPollRef.current = null;
       }
       return;
     }
@@ -135,6 +141,10 @@ export function useReadingSession() {
       if (timerRef.current) {
         clearInterval(timerRef.current);
         timerRef.current = null;
+      }
+      if (listenerPollRef.current) {
+        clearInterval(listenerPollRef.current);
+        listenerPollRef.current = null;
       }
       socket.disconnect();
     };
@@ -255,13 +265,22 @@ export function useReadingSession() {
 
   // End reading session
   const endReading = () => {
-    if (!session.sessionId || !socketRef.current) return;
-    
-    socketRef.current.emit('end_reading', session.sessionId);
+    if (!session.sessionId) return;
+
+    const sessionId = session.sessionId;
+
+    void apiRequest(`/api/sessions/${sessionId}/end`, {
+      method: 'PUT',
+    }).catch((error) => {
+      if (import.meta.env.DEV) {
+        console.error('Failed to end reading session:', error);
+      }
+    });
+
     stopTimer();
-    
-    setSession(prev => ({ 
-      ...prev, 
+
+    setSession(prev => ({
+      ...prev,
       isLive: false,
       isPaused: false
     }));
@@ -290,15 +309,16 @@ export function useReadingSession() {
     if (!session.sessionId) return;
     
     try {
-      const response = await fetch(`/api/sessions/${session.sessionId}/listeners`, {
+      const response = await fetch(`/api/sessions/${session.sessionId}`, {
         credentials: 'include'
       });
       
       if (response.ok) {
         const data = await response.json();
+        const nextCount = Number(data?.session?.listenerCount ?? 0);
         setSession(prev => ({ 
           ...prev, 
-          listenerCount: data.count 
+          listenerCount: nextCount,
         }));
       }
       } catch (error) {
@@ -307,6 +327,29 @@ export function useReadingSession() {
         }
       }
   };
+
+  useEffect(() => {
+    if (!session.sessionId || !session.isLive) {
+      if (listenerPollRef.current) {
+        clearInterval(listenerPollRef.current);
+        listenerPollRef.current = null;
+      }
+      return;
+    }
+
+    void fetchListenerCount();
+
+    listenerPollRef.current = setInterval(() => {
+      void fetchListenerCount();
+    }, 3000);
+
+    return () => {
+      if (listenerPollRef.current) {
+        clearInterval(listenerPollRef.current);
+        listenerPollRef.current = null;
+      }
+    };
+  }, [session.sessionId, session.isLive]);
 
   return {
     session,

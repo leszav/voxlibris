@@ -1,6 +1,8 @@
 import { Router, Request, Response } from 'express';
 import { storage, repositories } from '../repositories/index.js';
 import { logger } from '../lib/logger.js';
+import { setStudioStreamClosureIntent } from '../lib/studio-stream-intent-store.js';
+import { sessionAnalyticsService } from '../services/session-analytics-service.js';
 
 const router = Router();
 const readingSessionStatuses = ['active', 'paused', 'completed', 'cancelled'] as const;
@@ -253,6 +255,10 @@ router.put('/:sessionId/status', async (req: Request, res: Response) => {
       });
     }
 
+    if (status === 'paused') {
+      await setStudioStreamClosureIntent(sessionId, 'pause');
+    }
+
     const updatedSession = await storage.readingSessions.updateSessionStatus(sessionId, status);
 
     res.json({
@@ -383,6 +389,12 @@ router.post('/:sessionId/join', async (req: Request, res: Response) => {
 
     // Добавляем слушателя
     await storage.readingSessions.addSessionListener(sessionId, userId);
+    await sessionAnalyticsService.trackListenerJoin(
+      sessionId,
+      userId,
+      req.ip,
+      req.get('user-agent')
+    );
 
     // Обновляем количество слушателей
     const listenerCount = await storage.readingSessions.getSessionListenerCount(sessionId);
@@ -421,6 +433,7 @@ router.post('/:sessionId/leave', async (req: Request, res: Response) => {
 
     // Удаляем слушателя
     await storage.readingSessions.removeSessionListener(sessionId, userId);
+    await sessionAnalyticsService.trackListenerLeave(sessionId, userId);
 
     // Обновляем количество слушателей
     const listenerCount = await storage.readingSessions.getSessionListenerCount(sessionId);

@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { Mic, MicOff, Pause, Play, Square, MessageSquare, Users, Settings2 } from "lucide-react";
+import { Mic, MicOff, Pause, Play, Square, MessageSquare, Users, Settings2, Bookmark } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import studioLogo from '/vlstudio-logo.webp';
+import { StudioWordmark } from "@/components/studio/StudioWordmark";
 
 interface ControlBarProps {
   state: "prep" | "live" | "paused";
@@ -20,7 +20,15 @@ interface ControlBarProps {
   onEnd: () => void;
   onOpenChat: () => void;
   chatUnread?: number;
+  onBookmark?: () => void;
   onSettings: () => void;
+  /**
+   * Когда false — убирает fixed-позиционирование.
+   * Используйте в контекстах, где панель должна быть частью layout-потока
+   * (например, footer flex-колонки), а не float поверх контента.
+   * По умолчанию true (классическое поведение).
+   */
+  floating?: boolean;
 }
 
 function formatElapsed(seconds: number): string {
@@ -53,7 +61,9 @@ export function ControlBar({
   onEnd,
   onOpenChat,
   chatUnread = 0,
+  onBookmark,
   onSettings,
+  floating = true,
 }: Readonly<ControlBarProps>) {
   const [vuLevel, setVuLevel] = useState(0);
   const [vuPeak, setVuPeak] = useState(0);
@@ -92,12 +102,17 @@ export function ControlBar({
 
   return (
     <div
-      className="fixed bottom-6 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1 rounded-2xl border border-border bg-card/95 shadow-xl backdrop-blur-sm px-3 py-2"
+      className={cn(
+        "flex items-center gap-1 rounded-2xl border border-border bg-card/95 shadow-xl backdrop-blur-sm px-3 py-2",
+        floating && "fixed bottom-6 left-1/2 -translate-x-1/2 z-30",
+      )}
       role="toolbar"
       aria-label="Панель управления трансляцией"
     >
       {/* Логотип */}
-      <img src={studioLogo} alt="VL Studio" className="h-5 w-auto shrink-0 opacity-75 mr-1 pr-2 border-r border-border" />
+      <div className="mr-1 shrink-0 border-r border-border pr-2">
+        <StudioWordmark compact />
+      </div>
 
       {/* Left group: mic + VU */}
       <div className="flex items-center gap-2 pr-3 border-r border-border">
@@ -151,14 +166,25 @@ export function ControlBar({
         </span>
 
         {state === "live" && (
-          <Button
-            size="icon"
-            className="h-9 w-9 rounded-xl bg-amber-500 hover:bg-amber-600 text-white border-none"
-            onClick={onPause}
-            title="Пауза"
-          >
-            <Pause className="w-4 h-4 fill-current" />
-          </Button>
+          <>
+            <Button
+              size="icon"
+              className="h-9 w-9 rounded-xl bg-amber-500 hover:bg-amber-600 text-white border-none"
+              onClick={onPause}
+              title="Пауза"
+            >
+              <Pause className="w-4 h-4 fill-current" />
+            </Button>
+            <Button
+              variant="destructive"
+              size="icon"
+              className="h-9 w-9 rounded-xl"
+              onClick={onEnd}
+              title="Завершить эфир"
+            >
+              <Square className="w-3.5 h-3.5 fill-current" />
+            </Button>
+          </>
         )}
 
         {state === "paused" && (
@@ -206,6 +232,18 @@ export function ControlBar({
           <Users className="w-3.5 h-3.5" />
           {listenerCount}
         </span>
+
+        {onBookmark && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-9 w-9 rounded-xl text-muted-foreground hover:text-foreground"
+            onClick={onBookmark}
+            title="Закладка"
+          >
+            <Bookmark className="w-4 h-4" />
+          </Button>
+        )}
 
         <Button
           variant="ghost"

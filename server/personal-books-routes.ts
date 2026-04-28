@@ -13,6 +13,7 @@ import { logger } from './lib/logger.js';
 import { optimizeImage } from './image-optimizer.js';
 import { db } from './db.js';
 import { and, eq } from 'drizzle-orm';
+import { genreService } from './services/genre-service.js';
 
 const router = Router();
 
@@ -106,6 +107,26 @@ function normalizeUploadMetadata(metadata: UploadMetadata): UploadMetadata {
     }
 
     return normalized;
+}
+
+async function enrichUploadMetadataWithGenreLabels(metadata: UploadMetadata): Promise<UploadMetadata> {
+    const genreInput = [metadata.genre, ...(Array.isArray(metadata.genres) ? metadata.genres : [])]
+        .filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
+
+    if (genreInput.length === 0) {
+        return metadata;
+    }
+
+    const presentation = await genreService.buildUploadGenrePresentation(genreInput);
+    if (!presentation) {
+        return metadata;
+    }
+
+    return {
+        ...metadata,
+        genre: presentation.genre,
+        genres: presentation.genres,
+    };
 }
 
 // Cache for parsed books (to avoid re-parsing on every request)
@@ -202,6 +223,7 @@ router.post('/upload', jwtAuth, requireActiveUser, upload.single('file'), async 
         }
 
         metadata = normalizeUploadMetadata(metadata);
+        metadata = await enrichUploadMetadataWithGenreLabels(metadata);
 
         // Проверка дубликатов
         const title = metadata.title || req.file.originalname;
@@ -366,6 +388,16 @@ router.post('/upload/:sessionId/confirm', jwtAuth, requireActiveUser, async (req
             coverUrl: coverUrl,
         });
 
+        const genreInput = [metadata.genre, ...(Array.isArray(metadata.genres) ? metadata.genres : [])]
+            .filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
+
+        const persistedGenres = await genreService.persistBookGenres('personal', book.id, genreInput, 'metadata');
+
+        const bookWithGenres = await storage.updatePersonalBook(book.id, {
+            primaryGenreId: persistedGenres.primaryGenreId ?? undefined,
+            genre: persistedGenres.legacyGenre ?? undefined,
+        });
+
         // Clean up: delete temp file from MinIO and remove session
         try {
             await fileStorage.deleteFile(session.tempStorageKey);
@@ -373,7 +405,16 @@ router.post('/upload/:sessionId/confirm', jwtAuth, requireActiveUser, async (req
             console.warn(`[PersonalBooks] Failed to clean temp file ${session.tempStorageKey}:`, e);
         }
         uploadSessions.delete(sessionId);
-        res.json(book);
+        if (!bookWithGenres) {
+            return res.status(500).json({ error: 'Failed to persist genres for uploaded book' });
+        }
+
+        const genresPayload = await genreService.getBookGenresPayload('personal', book.id);
+        res.json({
+            ...bookWithGenres,
+            primaryGenre: genresPayload.primaryGenre,
+            genres: genresPayload.genres,
+        });
     } catch (error) {
         console.error('Confirm upload error:', error);
         res.status(500).json({ error: 'Internal server error' });
@@ -390,17 +431,22 @@ router.get('/', jwtAuth, async (req, res) => {
         books.map(async (book) => {
             try {
                 const progress = await storage.getUserReadingProgress(req.user!.id, book.id);
+                const genresPayload = await genreService.getBookGenresPayload('personal', book.id);
                 return {
                     ...book,
                     progress: progress?.progress || 0,
-                    currentChapter: progress?.currentChapter || 1
+                    currentChapter: progress?.currentChapter || 1,
+                    primaryGenre: genresPayload.primaryGenre,
+                    genres: genresPayload.genres,
                 };
             } catch (error_) {
                 console.warn('[PersonalBooks] Ошибка при обновлении прогресса:', error_);
                 return {
                     ...book,
                     progress: 0,
-                    currentChapter: 1
+                    currentChapter: 1,
+                    primaryGenre: null,
+                    genres: [],
                 };
             }
         })
@@ -447,7 +493,12 @@ router.get('/:id', jwtAuth, async (req, res) => {
     if (!book) return res.status(404).json({ error: 'Book not found' });
     if (book.userId !== req.user.id) return res.status(403).json({ error: 'Forbidden' });
 
-    res.json(book);
+    const genresPayload = await genreService.getBookGenresPayload('personal', book.id);
+    res.json({
+        ...book,
+        primaryGenre: genresPayload.primaryGenre,
+        genres: genresPayload.genres,
+    });
 });
 
 // Update Book
@@ -470,7 +521,25 @@ router.patch('/:id', jwtAuth, async (req, res) => {
     }
 
     const updatedBook = await storage.updatePersonalBook(req.params.id, filteredUpdates);
-    res.json(updatedBook);
+    if (!updatedBook) return res.status(404).json({ error: 'Book not found' });
+
+    const genreInput = [updates.genre, ...(Array.isArray(updates.genres) ? updates.genres : [])]
+        .filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
+
+    const persistedGenres = await genreService.persistBookGenres('personal', req.params.id, genreInput, 'manual');
+    const enrichedBook = await storage.updatePersonalBook(req.params.id, {
+        primaryGenreId: persistedGenres.primaryGenreId ?? undefined,
+        genre: persistedGenres.legacyGenre ?? undefined,
+    });
+
+    if (!enrichedBook) return res.status(404).json({ error: 'Book not found' });
+
+    const genresPayload = await genreService.getBookGenresPayload('personal', req.params.id);
+    res.json({
+        ...enrichedBook,
+        primaryGenre: genresPayload.primaryGenre,
+        genres: genresPayload.genres,
+    });
 });
 
 // Delete Book

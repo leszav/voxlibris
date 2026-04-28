@@ -104,6 +104,14 @@ export function PersonalUploadWizard({ onSuccess, onCancel }: Readonly<PersonalU
         setDuplicates([]);
     };
 
+    const handleGenreChange = (value: string) => {
+        setMetadata((current) => ({
+            ...current,
+            genre: value,
+            genres: value.trim() ? [value.trim()] : [],
+        }));
+    };
+
     if (step === 'processing') {
         return (
             <div className="flex flex-col items-center justify-center p-8 space-y-4">
@@ -220,8 +228,12 @@ export function PersonalUploadWizard({ onSuccess, onCancel }: Readonly<PersonalU
                                 <Input
                                     id="genre"
                                     value={metadata.genre || ''}
-                                    onChange={(e) => setMetadata({ ...metadata, genre: e.target.value })}
+                                    placeholder="Например: Киберпанк, Социальная НФ"
+                                    onChange={(e) => handleGenreChange(e.target.value)}
                                 />
+                                <p className="text-xs text-muted-foreground">
+                                    Несколько жанров указывайте через запятую.
+                                </p>
                             </div>
                             <div className="space-y-2">
                                 <Label htmlFor="year">Год издания</Label>

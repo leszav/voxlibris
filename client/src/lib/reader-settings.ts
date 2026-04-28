@@ -121,8 +121,8 @@ function getViewportWidth(viewportWidth?: number): number {
     return viewportWidth;
   }
 
-  if (typeof window !== "undefined") {
-    return window.innerWidth;
+  if (globalThis.window !== undefined) {
+    return globalThis.window.innerWidth;
   }
 
   return MOBILE_READER_BREAKPOINT;
@@ -135,6 +135,12 @@ export function getEffectiveReaderSettings(settings: ReaderSettings, viewportWid
 }
 
 export function isMobileReaderViewport(viewportWidth?: number): boolean {
+  // Prefer pointer media query: touch devices (phones, tablets) have coarse pointer
+  // regardless of viewport width, while desktops always have fine (mouse) pointer.
+  // Falls back to viewport width when window is not available (SSR / tests).
+  if (viewportWidth === undefined && globalThis.window !== undefined) {
+    return globalThis.window.matchMedia("(pointer: coarse)").matches;
+  }
   return getViewportWidth(viewportWidth) < MOBILE_READER_BREAKPOINT;
 }
 

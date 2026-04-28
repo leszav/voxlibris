@@ -5,6 +5,7 @@ import { AdminLayout } from "@/components/layout/AdminLayout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -80,6 +81,14 @@ async function deleteRecording(recordingId: string): Promise<void> {
   });
 }
 
+async function bulkDeleteRecordings(ids: string[]): Promise<{ deleted: number; notFound: number }> {
+  return apiRequest<{ deleted: number; notFound: number }>("/api/v1/admin/recordings", {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids }),
+  });
+}
+
 function formatDateTime(value: string): string {
   return new Intl.DateTimeFormat("ru-RU", {
     dateStyle: "medium",
@@ -120,6 +129,12 @@ function RecordingCardSkeleton() {
   );
 }
 
+function getSelectAllState(allSelected: boolean, someSelected: boolean): boolean | "indeterminate" {
+  if (allSelected) return true;
+  if (someSelected) return "indeterminate";
+  return false;
+}
+
 export default function AdminRecordings() {
   const queryClient = useQueryClient();
   const { user } = useAuth();
@@ -134,6 +149,7 @@ export default function AdminRecordings() {
     limit: 12,
   });
   const [playingId, setPlayingId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const { data, isLoading, isFetching } = useQuery({
     queryKey: ["admin-recordings", filters],
@@ -158,12 +174,80 @@ export default function AdminRecordings() {
     },
   });
 
+  const bulkDeleteMutation = useMutation({
+    mutationFn: bulkDeleteRecordings,
+    onSuccess: async (result) => {
+      await queryClient.invalidateQueries({ queryKey: ["admin-recordings"] });
+      setSelectedIds(new Set());
+      toast({
+        title: "Записи удалены",
+        description: `Удалено: ${result.deleted}` + (result.notFound > 0 ? `, не найдено: ${result.notFound}` : "") + ".",
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "Не удалось удалить записи",
+        description: error instanceof Error ? error.message : "Неизвестная ошибка",
+        variant: "destructive",
+      });
+    },
+  });
+
   const recordings = data?.recordings ?? [];
   const clubOptions = data?.filters.clubs ?? [];
   const bookOptions = data?.filters.books ?? [];
   const readerOptions = data?.filters.readers ?? [];
   const pagination = data?.pagination;
   const canDelete = user?.role === "admin";
+
+  const allSelected = recordings.length > 0 && recordings.every((r) => selectedIds.has(r.id));
+  const someSelected = recordings.some((r) => selectedIds.has(r.id));
+
+  const handleSelectAll = () => {
+    if (allSelected) {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        recordings.forEach((r) => next.delete(r.id));
+        return next;
+      });
+    } else {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        recordings.forEach((r) => next.add(r.id));
+        return next;
+      });
+    }
+  };
+
+  const handleToggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const handleBulkDelete = async () => {
+    const ids = Array.from(selectedIds);
+    const confirmed = await modalConfirm({
+      title: (() => {
+        let noun = "записей";
+        if (ids.length === 1) noun = "запись";
+        else if (ids.length < 5) noun = "записи";
+        return `Удалить ${ids.length} ${noun}?`;
+      })(),
+      description: "Выбранные файлы будут удалены с сервера. Это действие нельзя отменить.",
+      confirmLabel: "Удалить",
+      cancelLabel: "Отмена",
+      variant: "destructive",
+    });
+    if (!confirmed) return;
+    bulkDeleteMutation.mutate(ids);
+  };
 
   useEffect(() => {
     return () => {
@@ -243,74 +327,117 @@ export default function AdminRecordings() {
     );
   } else {
     content = (
-      <div className="grid gap-4 lg:grid-cols-2">
-        {recordings.map((recording) => {
-          const isPlayingThisRecording = playingId === recording.id;
-          const playbackLabel = isPlayingThisRecording ? "Остановить" : "Прослушать";
-
-          return (
-            <Card key={recording.id} className="border-border/70 shadow-sm">
-              <CardHeader className="gap-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <CardTitle className="line-clamp-2 text-lg">{recording.bookTitle}</CardTitle>
-                    <CardDescription className="mt-1 flex flex-wrap items-center gap-2">
-                      <Badge variant="secondary">{recording.clubName}</Badge>
-                      {recording.chapter !== null && <Badge variant="outline">Глава {recording.chapter}</Badge>}
-                    </CardDescription>
-                  </div>
-
-                  {canDelete && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="shrink-0"
-                      onClick={() => void handleDelete(recording)}
-                      disabled={deleteMutation.isPending}
-                    >
-                      {deleteMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-                    </Button>
+      <div className="space-y-4">
+        {canDelete && (
+          <div className="flex items-center gap-3 rounded-md border bg-muted/30 px-4 py-2">
+            <Checkbox
+              id="select-all"
+              checked={getSelectAllState(allSelected, someSelected)}
+              onCheckedChange={handleSelectAll}
+            />
+            <label htmlFor="select-all" className="cursor-pointer text-sm font-medium select-none">
+              {allSelected ? "Снять выбор со всех" : "Выбрать все на странице"}
+            </label>
+            {selectedIds.size > 0 && (
+              <>
+                <span className="text-sm text-muted-foreground">Выбрано: {selectedIds.size}</span>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  className="ml-auto"
+                  onClick={() => void handleBulkDelete()}
+                  disabled={bulkDeleteMutation.isPending}
+                >
+                  {bulkDeleteMutation.isPending ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Trash2 className="mr-2 h-4 w-4" />
                   )}
-                </div>
-              </CardHeader>
+                  Удалить выбранные
+                </Button>
+              </>
+            )}
+          </div>
+        )}
 
-              <CardContent className="space-y-4">
-                <div className="grid gap-2 text-sm text-muted-foreground sm:grid-cols-2">
-                  <div className="flex items-center gap-2">
-                    <Mic className="h-4 w-4" />
-                    <span>{recording.readerName}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Calendar className="h-4 w-4" />
-                    <span>{formatDateTime(recording.recordedAt)}</span>
-                  </div>
-                  <div className="flex items-center gap-2 sm:col-span-2">
-                    <Users2 className="h-4 w-4" />
-                    <span>Размер файла: {formatBytes(recording.fileSize)} • Длительность: {formatDuration(recording.durationSeconds)}</span>
-                  </div>
-                </div>
+        <div className="grid gap-4 lg:grid-cols-2">
+          {recordings.map((recording) => {
+            const isPlayingThisRecording = playingId === recording.id;
+            const playbackLabel = isPlayingThisRecording ? "Остановить" : "Прослушать";
+            const isSelected = selectedIds.has(recording.id);
 
-                <div className="flex flex-wrap gap-2">
-                  <Button variant={isPlayingThisRecording ? "secondary" : "default"} onClick={() => void handleTogglePlayback(recording)}>
-                    {isPlayingThisRecording ? <Pause className="mr-2 h-4 w-4" /> : <Play className="mr-2 h-4 w-4" />}
-                    {playbackLabel}
-                  </Button>
-                  <Button variant="outline" asChild>
-                    <a href={recording.downloadUrl}>
-                      <Download className="mr-2 h-4 w-4" />
-                      Скачать
-                    </a>
-                  </Button>
-                </div>
+            return (
+              <Card key={recording.id} className={`border-border/70 shadow-sm transition-colors ${isSelected ? "ring-2 ring-primary/50" : ""}`}>
+                <CardHeader className="gap-3">
+                  <div className="flex items-start justify-between gap-3">
+                    {canDelete && (
+                      <Checkbox
+                        checked={isSelected}
+                        onCheckedChange={() => handleToggleSelect(recording.id)}
+                        className="mt-1 shrink-0"
+                        aria-label={`Выбрать запись ${recording.fileName}`}
+                      />
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <CardTitle className="line-clamp-2 text-lg">{recording.bookTitle}</CardTitle>
+                      <CardDescription className="mt-1 flex flex-wrap items-center gap-2">
+                        <Badge variant="secondary">{recording.clubName}</Badge>
+                        {recording.chapter !== null && <Badge variant="outline">Глава {recording.chapter}</Badge>}
+                      </CardDescription>
+                    </div>
 
-                <div className="rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-                  <div>Сессия: {recording.sessionId}</div>
-                  <div>Файл: {recording.fileName}</div>
-                </div>
-              </CardContent>
-            </Card>
-          );
-        })}
+                    {canDelete && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="shrink-0"
+                        onClick={() => void handleDelete(recording)}
+                        disabled={deleteMutation.isPending}
+                      >
+                        {deleteMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                      </Button>
+                    )}
+                  </div>
+                </CardHeader>
+
+                <CardContent className="space-y-4">
+                  <div className="grid gap-2 text-sm text-muted-foreground sm:grid-cols-2">
+                    <div className="flex items-center gap-2">
+                      <Mic className="h-4 w-4" />
+                      <span>{recording.readerName}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Calendar className="h-4 w-4" />
+                      <span>{formatDateTime(recording.recordedAt)}</span>
+                    </div>
+                    <div className="flex items-center gap-2 sm:col-span-2">
+                      <Users2 className="h-4 w-4" />
+                      <span>Размер файла: {formatBytes(recording.fileSize)} • Длительность: {formatDuration(recording.durationSeconds)}</span>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <Button variant={isPlayingThisRecording ? "secondary" : "default"} onClick={() => void handleTogglePlayback(recording)}>
+                      {isPlayingThisRecording ? <Pause className="mr-2 h-4 w-4" /> : <Play className="mr-2 h-4 w-4" />}
+                      {playbackLabel}
+                    </Button>
+                    <Button variant="outline" asChild>
+                      <a href={recording.downloadUrl}>
+                        <Download className="mr-2 h-4 w-4" />
+                        Скачать
+                      </a>
+                    </Button>
+                  </div>
+
+                  <div className="rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+                    <div>Сессия: {recording.sessionId}</div>
+                    <div>Файл: {recording.fileName}</div>
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
       </div>
     );
   }

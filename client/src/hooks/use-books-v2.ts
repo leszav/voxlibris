@@ -20,6 +20,8 @@ export interface PersonalBook {
   updatedAt?: string;
   progress?: number;
   currentChapter?: number;
+  primaryGenre?: BookGenreSummary | null;
+  genres?: BookGenreSummary[];
 }
 
 export interface ClubBook {
@@ -38,6 +40,16 @@ export interface ClubBook {
   coverUrl?: string;
   recommendedReadingOrder?: number;
   uploadedAt: string;
+  primaryGenre?: BookGenreSummary | null;
+  genres?: BookGenreSummary[];
+}
+
+export interface BookGenreSummary {
+  id: string;
+  code: string;
+  label: string;
+  groupKey?: string | null;
+  isPrimary?: boolean;
 }
 
 export interface DuplicateMatch {
@@ -61,9 +73,20 @@ export interface UploadMetadata {
   language?: string;
   publicationYear?: number;
   genre?: string;
+  genres?: string[];
   coverImageData?: string | null; // Base64
   coverImageType?: string | null;
   [key: string]: unknown;
+}
+
+export interface UpdatePersonalBookData {
+  title?: string;
+  author?: string;
+  description?: string;
+  publicationYear?: number;
+  genre?: string;
+  genres?: string[];
+  language?: string;
 }
 
 // --- Personal Books Hooks ---
@@ -125,7 +148,7 @@ export function useDeletePersonalBook() {
 export function useUpdatePersonalBook() {
   const queryClient = useQueryClient();
 
-  return useMutation<PersonalBook, Error, { bookId: string; updates: Partial<PersonalBook> }>({
+  return useMutation<PersonalBook, Error, { bookId: string; updates: UpdatePersonalBookData }>({
     mutationFn: async ({ bookId, updates }) => {
       return apiRequest<PersonalBook>(`/api/v1/user/books/${bookId}`, {
         method: "PATCH",
@@ -202,8 +225,16 @@ export interface UpdateClubBookData {
   description?: string;
   coverUrl?: string;
   genre?: string;
+  genres?: string[];
   language?: string;
   publicationYear?: number;
+}
+
+export function useGenresCatalog() {
+  return useQuery<BookGenreSummary[]>({
+    queryKey: ["/api/v1/genres/catalog"],
+    queryFn: () => apiRequest<BookGenreSummary[]>("/api/v1/genres/catalog"),
+  });
 }
 
 export function useUpdateClubBook(clubId: string) {

@@ -423,6 +423,7 @@ export class ReadingRepository extends BaseRepository {
       const result = await this.db
         .update(readingSessions)
         .set({
+          isActive: false,
           isLive: false,
           endedAt: new Date()
         })

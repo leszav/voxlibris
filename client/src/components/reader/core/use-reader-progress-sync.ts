@@ -27,6 +27,8 @@ interface UseRestoreReaderScrollOptions {
   currentChapter: number | null;
   currentPositionRaw?: string | null;
   contentReady: boolean;
+  onProgrammaticScroll?: (holdMs?: number) => void;
+  isProgrammaticScroll?: () => boolean;
   delayMs?: number;
   retryAttempts?: number;
   retryDelayMs?: number;
@@ -37,6 +39,7 @@ interface RestoreReaderScrollPositionOptions {
   contentAreaRef?: RefObject<HTMLElement | null>;
   currentChapter: number | null;
   currentPositionRaw?: string | null;
+  onProgrammaticScroll?: (holdMs?: number) => void;
   delayMs?: number;
   retryAttempts?: number;
   retryDelayMs?: number;
@@ -152,6 +155,7 @@ function scheduleReaderScrollRestore({
   contentAreaRef,
   currentChapter,
   currentPositionRaw,
+  onProgrammaticScroll,
   delayMs = 300,
   retryAttempts = 4,
   retryDelayMs = 150,
@@ -227,6 +231,7 @@ function scheduleReaderScrollRestore({
     if (
       contentArea &&
       typeof position.textOffset === "number" &&
+      (onProgrammaticScroll?.(Math.max(400, retryDelayMs + 120)), true) &&
       restoreByTextOffset(container, contentArea, position.textOffset)
     ) {
       return;
@@ -241,6 +246,7 @@ function scheduleReaderScrollRestore({
       );
     }
 
+    onProgrammaticScroll?.(Math.max(400, retryDelayMs + 120));
     container.scrollTop = targetScrollTop;
     const restored = Math.abs(container.scrollTop - targetScrollTop) <= 2;
 
@@ -336,6 +342,8 @@ export function useRestoreReaderScroll({
   currentChapter,
   currentPositionRaw,
   contentReady,
+  onProgrammaticScroll,
+  isProgrammaticScroll,
   delayMs = 300,
   retryAttempts = 4,
   retryDelayMs = 150,
@@ -355,6 +363,9 @@ export function useRestoreReaderScroll({
     }
 
     const markInteracted = () => {
+      if (isProgrammaticScroll?.()) {
+        return;
+      }
       interactedChaptersRef.current.add(currentChapter);
     };
 
@@ -396,11 +407,12 @@ export function useRestoreReaderScroll({
       contentAreaRef,
       currentChapter,
       currentPositionRaw,
+      onProgrammaticScroll,
       delayMs,
       retryAttempts,
       retryDelayMs,
     });
-  }, [contentReady, currentChapter, currentPositionRaw, scrollContainerRef, contentAreaRef, delayMs, retryAttempts, retryDelayMs]);
+  }, [contentReady, currentChapter, currentPositionRaw, scrollContainerRef, contentAreaRef, onProgrammaticScroll, delayMs, retryAttempts, retryDelayMs]);
 
   useEffect(() => {
     return () => {

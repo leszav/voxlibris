@@ -1,6 +1,8 @@
 import { Server as SocketIOServer, Socket, Namespace } from 'socket.io';
 import { storage, repositories } from '../repositories/index.js';
 import { logger } from '../lib/logger.js';
+import { authService } from '../auth-service.js';
+import { sessionAnalyticsService } from '../services/session-analytics-service.js';
 
 interface AuthenticatedSocket extends Socket {
   userId?: string;
@@ -13,6 +15,37 @@ type ReadingSessionStatus = typeof readingSessionStatuses[number];
  * WebSocket обработчики для сессий чтения
  */
 export function setupReadingSessionsHandlers(_io: SocketIOServer, namespace: Namespace) {
+  namespace.use(async (socket: AuthenticatedSocket, next) => {
+    try {
+      const auth = socket.handshake.auth as Record<string, unknown> | undefined;
+      const authToken = typeof auth?.token === 'string' ? auth.token : undefined;
+      const headerToken = socket.handshake.headers.authorization?.replace('Bearer ', '');
+      const cookieToken = socket.handshake.headers.cookie?.match(/(?:^|;\s*)accessToken=([^;]+)/)?.[1];
+      const token = authToken || headerToken || cookieToken;
+
+      if (!token) {
+        return next(new Error('Authentication required'));
+      }
+
+      const payload = authService.verifyAccessToken(token);
+      if (!payload?.userId) {
+        return next(new Error('Invalid token'));
+      }
+
+      const user = await storage.getUser(payload.userId);
+      if (!user || user.status !== 'active' || !user.emailConfirmed) {
+        return next(new Error('User not allowed'));
+      }
+
+      socket.userId = payload.userId;
+      next();
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.error({ error: errorMessage }, 'Reading sessions websocket authentication error');
+      next(new Error('Authentication failed'));
+    }
+  });
+
   namespace.on('connection', (socket: AuthenticatedSocket) => {
     const userId = socket.userId;
     if (!userId) {
@@ -43,6 +76,12 @@ export function setupReadingSessionsHandlers(_io: SocketIOServer, namespace: Nam
 
         // Добавляем слушателя
         await storage.readingSessions.addSessionListener(sessionId, userId);
+        await sessionAnalyticsService.trackListenerJoin(
+          sessionId,
+          userId,
+          socket.handshake.address,
+          socket.handshake.headers['user-agent']
+        );
 
         // Обновляем количество слушателей
         const listenerCount = await storage.readingSessions.getSessionListenerCount(sessionId);
@@ -75,6 +114,7 @@ export function setupReadingSessionsHandlers(_io: SocketIOServer, namespace: Nam
       try {
         // Удаляем слушателя
         await storage.readingSessions.removeSessionListener(sessionId, userId);
+        await sessionAnalyticsService.trackListenerLeave(sessionId, userId);
 
         // Обновляем количество слушателей
         const listenerCount = await storage.readingSessions.getSessionListenerCount(sessionId);

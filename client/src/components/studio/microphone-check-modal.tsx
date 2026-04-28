@@ -72,6 +72,18 @@ function getMicStatusClass(microphoneLoading: boolean, microphoneAvailable: bool
   return 'text-red-400';
 }
 
+function getConfirmButtonLabel(canConfirm: boolean, result: MicrophoneCheckResult | null): string {
+  if (!canConfirm) {
+    return 'Сначала включите микрофон';
+  }
+
+  if (result?.status === 'needs-adjustment') {
+    return 'Продолжить несмотря на рекомендацию';
+  }
+
+  return 'Продолжить';
+}
+
 function getMetricWidth(level: number): number {
   if (level <= 0) return 0;
   return Math.max(6, Math.min(100, level));
@@ -213,6 +225,7 @@ export function MicrophoneCheckModal({
   const activeVolumeLevel = result?.volumeLevel ?? liveVolumeLevel;
   const noSignalDetected = microphoneAvailable && !microphoneLoading && isInitialized && !isRecording && activeVolumeLevel < 2;
   const canConfirm = (result?.volumeLevel ?? 0) >= 2;
+  const confirmButtonLabel = getConfirmButtonLabel(canConfirm, result);
 
   const subtitle = useMemo(() => {
     if (microphoneLoading) {
@@ -358,9 +371,7 @@ export function MicrophoneCheckModal({
                 result.status === 'needs-adjustment' ? 'bg-amber-600 hover:bg-amber-700' : 'bg-emerald-600 hover:bg-emerald-700'
               )}
             >
-              {canConfirm
-                ? (result.status === 'needs-adjustment' ? 'Продолжить несмотря на рекомендацию' : 'Продолжить')
-                : 'Сначала включите микрофон'}
+              {confirmButtonLabel}
             </Button>
 
             <p className="text-xs text-stone-500 text-center">

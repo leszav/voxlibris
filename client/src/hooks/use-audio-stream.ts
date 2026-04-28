@@ -13,7 +13,23 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { getAccessToken } from '@/lib/token-store';
+import {
+  getStudioStreamConnectionErrorMessage,
+  getStudioStreamStartErrorMessage,
+} from '@/lib/studio-streaming-errors';
+import {
+  getStudioAudioMimeType,
+  getStudioMicrophoneErrorMessage,
+  requestStudioMicrophoneStream,
+} from '@/lib/studio-media-input';
+import {
+  createStudioLocalRecorder,
+  createStudioStreamRecorder,
+} from '@/lib/studio-media-recorder';
+import { createStudioRecordingBlob } from '@/lib/studio-recording-blob';
+import { bindStudioMicrophoneEnded } from '@/lib/studio-media-track';
+import { createStudioStreamingBody } from '@/lib/studio-streaming-body';
+import { startStudioStreamIngest } from '@/lib/studio-streaming-gateway';
 
 // --- Типы ---
 
@@ -52,26 +68,6 @@ export interface AudioStreamControls {
 
 // --- Вспомогательные ---
 
-const AUDIO_CONSTRAINTS: MediaTrackConstraints = {
-  echoCancellation: true,
-  noiseSuppression: true,
-  autoGainControl: true,
-  sampleRate: 48000,
-  channelCount: 1,
-};
-
-function getBestMimeType(): string {
-  const candidates = [
-    'audio/webm;codecs=opus',
-    'audio/webm',
-    'audio/ogg;codecs=opus',
-  ];
-  for (const type of candidates) {
-    if (MediaRecorder.isTypeSupported(type)) return type;
-  }
-  return '';
-}
-
 // --- Хук ---
 
 export function useAudioStream(options: AudioStreamOptions): AudioStreamState & AudioStreamControls {
@@ -90,7 +86,12 @@ export function useAudioStream(options: AudioStreamOptions): AudioStreamState & 
   const localChunksRef = useRef<Blob[]>([]);
   const abortControllerRef = useRef<AbortController | null>(null);
   const fetchPromiseRef = useRef<Promise<void> | null>(null);
+  const detachTrackEndedRef = useRef<(() => void) | null>(null);
   const statusRef = useRef<StreamStatus>('idle');
+  const pausedRef = useRef(false);
+  const mutedRef = useRef(false);
+  const mimeTypeRef = useRef<string | null>(null);
+  const pauseRequestedRef = useRef(false);
 
   // Readable stream controller для передачи chunks в fetch
   const streamControllerRef = useRef<ReadableStreamDefaultController<Uint8Array> | null>(null);
@@ -113,12 +114,32 @@ export function useAudioStream(options: AudioStreamOptions): AudioStreamState & 
     onError?.(message, 'stream');
   }, [onError, updateStatus]);
 
-  const cleanup = useCallback(() => {
-    // Завершаем stream controller
+  const applyTrackState = useCallback(() => {
+    const enabled = !(pausedRef.current || mutedRef.current);
+    mediaStreamRef.current?.getAudioTracks().forEach((track) => {
+      track.enabled = enabled;
+    });
+  }, []);
+
+  const closeStreamController = useCallback(() => {
     try { streamControllerRef.current?.close(); } catch { /* already closed */ }
     streamControllerRef.current = null;
+  }, []);
 
-    // Останавливаем MediaRecorder
+  const stopStreamingTransport = useCallback(() => {
+    closeStreamController();
+
+    if (streamRecorderRef.current?.state !== 'inactive') {
+      try { streamRecorderRef.current?.stop(); } catch { /* ignore */ }
+    }
+    streamRecorderRef.current = null;
+
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+    fetchPromiseRef.current = null;
+  }, [closeStreamController]);
+
+  const stopRecorders = useCallback(() => {
     if (streamRecorderRef.current?.state !== 'inactive') {
       try { streamRecorderRef.current?.stop(); } catch { /* ignore */ }
     }
@@ -128,22 +149,127 @@ export function useAudioStream(options: AudioStreamOptions): AudioStreamState & 
       try { localRecorderRef.current?.stop(); } catch { /* ignore */ }
     }
     localRecorderRef.current = null;
+  }, []);
 
-    // Освобождаем микрофон
-    mediaStreamRef.current?.getTracks().forEach((t) => t.stop());
+  const pauseRecorders = useCallback(() => {
+    if (streamRecorderRef.current?.state === 'recording') {
+      try { streamRecorderRef.current.pause(); } catch { /* ignore */ }
+    }
+
+    if (localRecorderRef.current?.state === 'recording') {
+      try { localRecorderRef.current.pause(); } catch { /* ignore */ }
+    }
+  }, []);
+
+  const resumeRecorders = useCallback(() => {
+    if (streamRecorderRef.current?.state === 'paused') {
+      try { streamRecorderRef.current.resume(); } catch { /* ignore */ }
+    }
+
+    if (localRecorderRef.current?.state === 'paused') {
+      try { localRecorderRef.current.resume(); } catch { /* ignore */ }
+    }
+  }, []);
+
+  const releaseMediaStream = useCallback(() => {
+    detachTrackEndedRef.current?.();
+    detachTrackEndedRef.current = null;
+    mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
     mediaStreamRef.current = null;
     setMediaStream(null);
-
-    // Прерываем fetch
-    abortControllerRef.current?.abort();
-    abortControllerRef.current = null;
-    fetchPromiseRef.current = null;
   }, []);
+
+  const cleanup = useCallback(() => {
+    stopStreamingTransport();
+    stopRecorders();
+    releaseMediaStream();
+    pausedRef.current = false;
+    pauseRequestedRef.current = false;
+    mimeTypeRef.current = null;
+  }, [releaseMediaStream, stopRecorders, stopStreamingTransport]);
 
   // Размонтирование
   useEffect(() => {
     return () => { cleanup(); };
   }, [cleanup]);
+
+  const startStreamingTransport = useCallback(async (stream: MediaStream, mimeType: string): Promise<void> => {
+    if (!sessionId) {
+      reportStreamError('sessionId обязателен для запуска стрима');
+      return;
+    }
+
+    pauseRequestedRef.current = false;
+
+    // 1. Создаём ReadableStream для передачи chunks в fetch
+    const { body: readable } = createStudioStreamingBody((controller) => {
+      streamControllerRef.current = controller;
+    });
+
+    // 2. Настраиваем MediaRecorder (стрим в Icecast)
+    const streamRecorder = createStudioStreamRecorder({
+      stream,
+      mimeType,
+      onChunk: (chunk) => {
+        if (!streamControllerRef.current) return;
+        chunk.arrayBuffer().then((buf) => {
+          streamControllerRef.current?.enqueue(new Uint8Array(buf));
+        });
+      },
+      onError: () => {
+        reportMicError('Ошибка записи звука. Проверьте микрофон.');
+        cleanup();
+      },
+    });
+
+    streamRecorderRef.current = streamRecorder;
+
+    // 3. Запускаем fetch (long-running streaming request)
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
+    fetchPromiseRef.current = (async () => {
+      try {
+        const response = await startStudioStreamIngest({
+          sessionId,
+          mimeType,
+          body: readable,
+          signal: controller.signal,
+        });
+
+        const startErrorMessage = await getStudioStreamStartErrorMessage(response);
+        if (startErrorMessage) {
+          reportStreamError(startErrorMessage);
+          cleanup();
+          return;
+        }
+
+        // Сервер ответил 200 — Icecast принял поток
+        updateStatus('streaming');
+
+      } catch (err) {
+        const connectionErrorMessage = getStudioStreamConnectionErrorMessage(err);
+        if (connectionErrorMessage === null) {
+          if (pauseRequestedRef.current) {
+            pauseRequestedRef.current = false;
+            updateStatus('paused');
+            return;
+          }
+
+          // Нормальное завершение через stop()
+          updateStatus('stopped');
+          return;
+        }
+        reportStreamError(connectionErrorMessage);
+        cleanup();
+      }
+    })();
+
+    // 4. Запускаем рекордер стрима
+    streamRecorder.start(250); // chunk каждые 250 мс
+
+    await Promise.resolve();
+  }, [cleanup, reportMicError, reportStreamError, sessionId, updateStatus]);
 
   // --- Запуск ---
 
@@ -162,118 +288,48 @@ export function useAudioStream(options: AudioStreamOptions): AudioStreamState & 
     // 1. Получаем микрофон
     let stream: MediaStream;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: AUDIO_CONSTRAINTS, video: false });
+      stream = await requestStudioMicrophoneStream();
     } catch (err) {
-      let msg = `Ошибка доступа к микрофону: ${err instanceof Error ? err.message : String(err)}`;
-      if (err instanceof Error && err.name === 'NotAllowedError') {
-        msg = 'Доступ к микрофону запрещён. Разрешите его в настройках браузера.';
-      }
-      reportMicError(msg);
+      reportMicError(getStudioMicrophoneErrorMessage(err));
       return;
     }
 
     mediaStreamRef.current = stream;
     setMediaStream(stream);
+    pausedRef.current = false;
+    applyTrackState();
 
     // 2. Выбираем MIME тип
-    const mimeType = getBestMimeType();
+    const mimeType = getStudioAudioMimeType();
     if (!mimeType) {
-      stream.getTracks().forEach((t) => t.stop());
+      stream.getTracks().forEach((track) => track.stop());
       reportMicError('Браузер не поддерживает запись голоса. Используйте Chrome 105+.');
       return;
     }
 
-    // 3. Создаём ReadableStream для передачи в fetch
-    const readable = new ReadableStream<Uint8Array>({
-      start(controller) {
-        streamControllerRef.current = controller;
-      },
-      cancel() {
-        streamControllerRef.current = null;
-      },
-    });
+    mimeTypeRef.current = mimeType;
 
-    // 4. Настраиваем MediaRecorder (стрим в Icecast)
-    const streamRecorder = new MediaRecorder(stream, {
-      mimeType,
-      audioBitsPerSecond: 64_000,
-    });
-
-    streamRecorder.ondataavailable = (e) => {
-      if (e.data.size === 0 || !streamControllerRef.current) return;
-      e.data.arrayBuffer().then((buf) => {
-        streamControllerRef.current?.enqueue(new Uint8Array(buf));
-      });
-    };
-
-    streamRecorder.onerror = () => {
-      reportMicError('Ошибка записи звука. Проверьте микрофон.');
-      cleanup();
-    };
-
-    streamRecorderRef.current = streamRecorder;
-
-    // 5. Настраиваем локальный MediaRecorder (запись)
+    // 3. Настраиваем локальный MediaRecorder (запись)
     if (enableRecording) {
-      const localRecorder = new MediaRecorder(stream, { mimeType });
       localChunksRef.current = [];
 
-      localRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) localChunksRef.current.push(e.data);
-      };
-
-      localRecorder.onstop = () => {
-        const blob = new Blob(localChunksRef.current, { type: mimeType });
-        setRecordingBlob(blob);
-        setIsRecording(false);
-      };
+      const localRecorder = createStudioLocalRecorder({
+        stream,
+        mimeType,
+        onChunk: (chunk) => {
+          localChunksRef.current.push(chunk);
+        },
+        onStop: () => {
+          const blob = createStudioRecordingBlob(localChunksRef.current, mimeType);
+          setRecordingBlob(blob);
+          setIsRecording(false);
+        },
+      });
 
       localRecorderRef.current = localRecorder;
     }
 
-    // 6. Запускаем fetch (long-running streaming request)
-    const token = getAccessToken();
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
-
-    fetchPromiseRef.current = (async () => {
-      try {
-        const response = await fetch(`/api/studio/stream/${sessionId}`, {
-          method: 'POST',
-          // @ts-expect-error duplex не в стандартных типах TS, но нужен для request streaming
-          duplex: 'half',
-          body: readable,
-          headers: {
-            'Content-Type': mimeType,
-            ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
-          },
-          signal: controller.signal,
-          credentials: 'include',
-        });
-
-        if (!response.ok) {
-          const body = await response.json().catch(() => ({}));
-          reportStreamError(body.error ?? `Сервер отклонил подключение (${response.status})`);
-          cleanup();
-          return;
-        }
-
-        // Сервер ответил 200 — Icecast принял поток
-        updateStatus('streaming');
-
-      } catch (err) {
-        if (err instanceof Error && err.name === 'AbortError') {
-          // Нормальное завершение через stop()
-          updateStatus('stopped');
-          return;
-        }
-        reportStreamError(`Ошибка соединения со стримом: ${err instanceof Error ? err.message : String(err)}`);
-        cleanup();
-      }
-    })();
-
-    // 7. Запускаем рекордеры
-    streamRecorder.start(250); // chunk каждые 250 мс
+    await startStreamingTransport(stream, mimeType);
 
     if (enableRecording && localRecorderRef.current) {
       localRecorderRef.current.start(1000); // chunk каждую секунду для записи
@@ -281,69 +337,67 @@ export function useAudioStream(options: AudioStreamOptions): AudioStreamState & 
     }
 
     // Мониторинг: трек завершился (микрофон отключился физически)
-    stream.getAudioTracks()[0]?.addEventListener('ended', () => {
+    detachTrackEndedRef.current = bindStudioMicrophoneEnded(stream, () => {
       if (statusRef.current === 'streaming') {
         reportMicError('Микрофон отключился. Проверьте устройство.');
         cleanup();
       }
     });
 
-  }, [sessionId, enableRecording, reportMicError, reportStreamError, updateStatus, cleanup]);
+  }, [sessionId, enableRecording, reportMicError, updateStatus, cleanup, applyTrackState, startStreamingTransport]);
 
   // --- Остановка ---
 
   const stop = useCallback((): void => {
     if (status === 'idle' || status === 'stopped') return;
 
-    // Завершаем stream → fetch получит конец body → Icecast закроет mountpoint
-    try { streamControllerRef.current?.close(); } catch { /* ignore */ }
-    streamControllerRef.current = null;
-
-    // Останавливаем recorder'ы
-    if (streamRecorderRef.current?.state !== 'inactive') {
-      streamRecorderRef.current?.stop();
-    }
-
-    if (localRecorderRef.current?.state !== 'inactive') {
-      localRecorderRef.current?.stop(); // вызовет onstop → запишет blob
-    }
-
-    // Освобождаем микрофон
-    mediaStreamRef.current?.getTracks().forEach((t) => t.stop());
-    mediaStreamRef.current = null;
-    setMediaStream(null);
-
-    abortControllerRef.current?.abort();
-    abortControllerRef.current = null;
+    stopStreamingTransport();
+    stopRecorders();
+    releaseMediaStream();
+    pauseRequestedRef.current = false;
+    pausedRef.current = false;
+    mimeTypeRef.current = null;
 
     updateStatus('stopped');
-  }, [status, updateStatus]);
+  }, [status, releaseMediaStream, stopRecorders, stopStreamingTransport, updateStatus]);
 
   // --- Пауза / возобновление ---
 
   const pause = useCallback((): void => {
-    if (streamRecorderRef.current?.state === 'recording') {
-      streamRecorderRef.current.pause();
-      localRecorderRef.current?.pause();
+    if (statusRef.current === 'streaming') {
+      pausedRef.current = true;
+      applyTrackState();
+      pauseRequestedRef.current = true;
+      stopStreamingTransport();
+      pauseRecorders();
       updateStatus('paused');
     }
-  }, [updateStatus]);
+  }, [applyTrackState, pauseRecorders, stopStreamingTransport, updateStatus]);
 
   const resume = useCallback((): void => {
-    if (streamRecorderRef.current?.state === 'paused') {
-      streamRecorderRef.current.resume();
-      localRecorderRef.current?.resume();
-      updateStatus('streaming');
+    if (statusRef.current === 'paused') {
+      pausedRef.current = false;
+      applyTrackState();
+      resumeRecorders();
+      const stream = mediaStreamRef.current;
+      const mimeType = mimeTypeRef.current;
+
+      if (!stream || !mimeType) {
+        void start();
+        return;
+      }
+
+      updateStatus('connecting');
+      void startStreamingTransport(stream, mimeType);
     }
-  }, [updateStatus]);
+  }, [applyTrackState, resumeRecorders, start, startStreamingTransport, updateStatus]);
 
   // --- Mute (отключение микрофона без остановки потока) ---
 
   const mute = useCallback((muted: boolean): void => {
-    mediaStreamRef.current?.getAudioTracks().forEach((t) => {
-      t.enabled = !muted;
-    });
-  }, []);
+    mutedRef.current = muted;
+    applyTrackState();
+  }, [applyTrackState]);
 
   // --- Скачать запись ---
 
