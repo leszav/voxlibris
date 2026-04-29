@@ -2,9 +2,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { MessageCircle, X, Maximize2, Trash2, Eraser, Smile, ChevronDown, Send } from "lucide-react";
 import { useChat } from "@/hooks/use-chat";
 import { useAuth } from "@/hooks/use-auth";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
 import type { ChatMessageWithUser } from "@shared/schema";
 
 interface ChatWidgetProps {
@@ -12,6 +14,8 @@ interface ChatWidgetProps {
   readonly channel?: string;
   readonly onCleanupDeleted?: () => Promise<void>;
   readonly canCleanup?: boolean;
+  readonly mobileBottomOffsetPx?: number;
+  readonly mobileTopOffsetPx?: number;
 }
 
 const blockedEmojiPattern = /(?:🏳️‍🌈|🏳️‍⚧️|🌈|👬|👭|👨‍❤️‍👨|👩‍❤️‍👩|👨‍👨‍👧‍👦|👩‍👩‍👧‍👦|👨‍👨‍👧|👨‍👨‍👦|👩‍👩‍👧|👩‍👩‍👦)/u;
@@ -52,7 +56,30 @@ type ChatRenderRow = {
   showUsername: boolean;
 };
 
-export function ChatWidget({ clubId, channel = "general", onCleanupDeleted, canCleanup = false }: Readonly<ChatWidgetProps>) {
+function getMobileViewportMetrics() {
+  if (typeof window === "undefined") {
+    return { windowHeight: 0, keyboardInset: 0 };
+  }
+
+  const viewport = window.visualViewport;
+  const windowHeight = window.innerHeight;
+  const visibleHeight = viewport?.height ?? windowHeight;
+  const offsetTop = viewport?.offsetTop ?? 0;
+
+  return {
+    windowHeight,
+    keyboardInset: Math.max(0, windowHeight - visibleHeight - offsetTop),
+  };
+}
+
+export function ChatWidget({
+  clubId,
+  channel = "general",
+  onCleanupDeleted,
+  canCleanup = false,
+  mobileBottomOffsetPx = 16,
+  mobileTopOffsetPx = 16,
+}: Readonly<ChatWidgetProps>) {
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState("");
   const [hasUnread, setHasUnread] = useState(false);
@@ -71,6 +98,8 @@ export function ChatWidget({ clubId, channel = "general", onCleanupDeleted, canC
   const chatRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const idleTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const isMobile = useIsMobile();
+  const [mobileViewportMetrics, setMobileViewportMetrics] = useState(() => getMobileViewportMetrics());
 
   const { user } = useAuth();
   const { messages, participants, sendMessage, deleteMessage, connected, client, loadingHistory, error } = useChat({
@@ -195,6 +224,29 @@ export function ChatWidget({ clubId, channel = "general", onCleanupDeleted, canC
     inputRef.current.style.height = "auto";
     inputRef.current.style.height = `${Math.min(inputRef.current.scrollHeight, 132)}px`;
   }, [input]);
+
+  useEffect(() => {
+    if (!isMobile || typeof window === "undefined") {
+      return;
+    }
+
+    const updateViewportMetrics = () => {
+      setMobileViewportMetrics(getMobileViewportMetrics());
+    };
+
+    const viewport = window.visualViewport;
+
+    updateViewportMetrics();
+    window.addEventListener("resize", updateViewportMetrics);
+    viewport?.addEventListener("resize", updateViewportMetrics);
+    viewport?.addEventListener("scroll", updateViewportMetrics);
+
+    return () => {
+      window.removeEventListener("resize", updateViewportMetrics);
+      viewport?.removeEventListener("resize", updateViewportMetrics);
+      viewport?.removeEventListener("scroll", updateViewportMetrics);
+    };
+  }, [isMobile]);
 
   const handleInputKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key !== "Enter" || e.shiftKey || e.nativeEvent.isComposing) {
@@ -434,28 +486,70 @@ export function ChatWidget({ clubId, channel = "general", onCleanupDeleted, canC
     return { label: "подключение...", dotClass: "bg-amber-500 animate-pulse" };
   }, [connected, error]);
 
+  const mobileSheetBottomOffset = mobileBottomOffsetPx + mobileViewportMetrics.keyboardInset;
+  const mobileAvailableHeight = Math.max(
+    240,
+    mobileViewportMetrics.windowHeight - mobileSheetBottomOffset - mobileTopOffsetPx,
+  );
+  const mobilePreferredHeight = Math.max(
+    320,
+    Math.round(mobileViewportMetrics.windowHeight * 0.72),
+  );
+  const closedContainerTranslation = isMobile
+    ? "translate-x-0"
+    : "translate-x-[calc(100%-4rem)] hover:translate-x-0 focus-within:translate-x-0";
+
+  const containerStyle = isMobile
+    ? { bottom: `calc(env(safe-area-inset-bottom) + ${mobileSheetBottomOffset}px)` }
+    : { bottom: "1rem" };
+
+  const chatWindowStyle = isMobile
+    ? {
+        width: "calc(100vw - 0.75rem)",
+        maxWidth: "calc(100vw - 0.75rem)",
+        height: `${Math.min(mobilePreferredHeight, mobileAvailableHeight)}px`,
+        maxHeight: `${mobileAvailableHeight}px`,
+      }
+    : { width: chatSize.width, height: chatSize.height };
+
   return (
-    <div className={`fixed bottom-4 right-0 z-40 flex flex-col items-end gap-2 pr-4 transition-transform duration-300 ease-out ${
-      open ? "translate-x-0" : "translate-x-[calc(100%-4rem)] hover:translate-x-0 focus-within:translate-x-0"
-    }`}>
+    <div
+      className={cn(
+        "fixed z-[60] flex flex-col gap-2 transition-transform duration-300 ease-out",
+        isMobile && open ? "inset-x-0 items-stretch px-1.5" : "right-0 items-end pr-2 sm:pr-4",
+        open ? "translate-x-0" : closedContainerTranslation,
+      )}
+      style={containerStyle}
+    >
       {/* Окно чата */}
       {open && (
         <div 
           ref={chatRef}
-          className="relative flex flex-col overflow-hidden rounded-2xl border border-border/80 bg-background shadow-2xl backdrop-blur-sm"
-          style={{ width: chatSize.width, height: chatSize.height }}
+          className={cn(
+            "relative flex flex-col overflow-hidden border border-border/80 bg-background shadow-2xl backdrop-blur-sm",
+            isMobile ? "rounded-[1.25rem]" : "rounded-2xl",
+          )}
+          style={chatWindowStyle}
         >
-          {/* Resize handle */}
-          <div 
-            className="absolute top-0 left-0 z-10 flex h-8 w-8 items-start justify-start p-[2px] cursor-nw-resize"
-            onMouseDown={handleMouseDown}
-            aria-hidden="true"
-            title="Потяните для изменения размера"
-          >
-            <div className="pointer-events-none flex h-6 w-6 items-center justify-center rounded-br-sm border-2 border-transparent bg-muted/85 shadow-sm transition-colors">
-              <Maximize2 className="h-3 w-3 rotate-90 text-foreground/90" />
+          {isMobile && (
+            <div className="flex justify-center pb-1 pt-2">
+              <div className="h-1.5 w-12 rounded-full bg-muted-foreground/25" />
             </div>
-          </div>
+          )}
+
+          {/* Resize handle */}
+          {!isMobile && (
+            <div 
+              className="absolute top-0 left-0 z-10 flex h-8 w-8 items-start justify-start p-[2px] cursor-nw-resize"
+              onMouseDown={handleMouseDown}
+              aria-hidden="true"
+              title="Потяните для изменения размера"
+            >
+              <div className="pointer-events-none flex h-6 w-6 items-center justify-center rounded-br-sm border-2 border-transparent bg-muted/85 shadow-sm transition-colors">
+                <Maximize2 className="h-3 w-3 rotate-90 text-foreground/90" />
+              </div>
+            </div>
+          )}
           <div className="flex items-center justify-between border-b border-border/80 bg-card/95 px-3 py-2.5 backdrop-blur-sm">
             <div className="flex items-center gap-2 pl-7">
               <span className="flex h-8 w-8 items-center justify-center rounded-2xl border border-cyan-200/70 bg-cyan-500/10 text-cyan-600 dark:border-cyan-900 dark:text-cyan-400">
@@ -639,8 +733,8 @@ export function ChatWidget({ clubId, channel = "general", onCleanupDeleted, canC
               
               {/* Custom Safe Emoji Picker */}
               {showEmojiPicker && (
-                <div className="absolute bottom-10 left-0 z-50 shadow-lg rounded-lg border bg-background p-4">
-                  <div className="w-72 h-80 flex flex-col">
+                <div className="absolute bottom-10 left-0 z-50 rounded-lg border bg-background p-3 shadow-lg sm:p-4">
+                  <div className="flex h-80 w-[min(18rem,calc(100vw-5rem))] flex-col sm:w-72">
                     {/* Search */}
                     <input
                       type="text"
@@ -702,33 +796,57 @@ export function ChatWidget({ clubId, channel = "general", onCleanupDeleted, canC
         </div>
       )}
 
-      {/* Пузырь чата */}
-      <Button
-        className={`group relative flex min-w-[220px] items-center gap-3 rounded-2xl border border-cyan-200/80 bg-card/95 px-4 py-3 text-left text-foreground shadow-lg backdrop-blur-sm transition-colors duration-300 hover:border-cyan-300 hover:bg-card ${isIdle ? "opacity-30 hover:opacity-100" : "opacity-100"}`}
-        variant="ghost"
-        onClick={handleToggle}
-        title={open ? "Свернуть чат" : "Открыть чат клуба"}
-        aria-label={open ? "Свернуть чат" : "Открыть чат клуба"}
-      >
-        <span className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-cyan-200 bg-cyan-500/10 text-cyan-600 dark:border-cyan-900 dark:text-cyan-400">
-          <MessageCircle className="h-4.5 w-4.5 transition-transform duration-200 group-hover:scale-105" />
-          {hasUnread && (
-            <span className="absolute right-1.5 top-1.5 inline-flex h-2.5 w-2.5 rounded-full bg-red-500" />
-          )}
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="flex items-center gap-2 text-xs text-muted-foreground">
-            <span className={`inline-block h-1.5 w-1.5 rounded-full ${connectionMeta.dotClass}`} />
-            {connectionMeta.label}
-            <span className="inline-flex items-center rounded-full bg-cyan-500/10 px-1.5 py-0.5 text-[10px] font-medium leading-none text-cyan-700 dark:text-cyan-300">
-              {participants.length}
+      {/* Триггер чата */}
+      {(!isMobile || !open) && (
+        isMobile ? (
+          <Button
+            className={cn(
+              "relative h-14 w-14 rounded-full border border-cyan-200/80 bg-card/95 text-cyan-600 shadow-lg backdrop-blur-sm transition-colors duration-300 hover:border-cyan-300 hover:bg-card dark:border-cyan-900 dark:text-cyan-400",
+              isIdle ? "opacity-40 hover:opacity-100" : "opacity-100",
+            )}
+            variant="ghost"
+            size="icon"
+            onClick={handleToggle}
+            title={open ? "Свернуть чат" : "Открыть чат клуба"}
+            aria-label={open ? "Свернуть чат" : "Открыть чат клуба"}
+          >
+            <MessageCircle className="h-5 w-5" />
+            {hasUnread && (
+              <span className="absolute right-3 top-3 inline-flex h-2.5 w-2.5 rounded-full bg-red-500" />
+            )}
+          </Button>
+        ) : (
+          <Button
+            className={cn(
+              "group relative flex min-w-[220px] items-center gap-3 rounded-2xl border border-cyan-200/80 bg-card/95 px-4 py-3 text-left text-foreground shadow-lg backdrop-blur-sm transition-colors duration-300 hover:border-cyan-300 hover:bg-card",
+              isIdle ? "opacity-30 hover:opacity-100" : "opacity-100",
+            )}
+            variant="ghost"
+            onClick={handleToggle}
+            title={open ? "Свернуть чат" : "Открыть чат клуба"}
+            aria-label={open ? "Свернуть чат" : "Открыть чат клуба"}
+          >
+            <span className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-cyan-200 bg-cyan-500/10 text-cyan-600 dark:border-cyan-900 dark:text-cyan-400">
+              <MessageCircle className="h-4.5 w-4.5 transition-transform duration-200 group-hover:scale-105" />
+              {hasUnread && (
+                <span className="absolute right-1.5 top-1.5 inline-flex h-2.5 w-2.5 rounded-full bg-red-500" />
+              )}
             </span>
-          </span>
-          <span className="mt-1 block text-sm font-semibold text-foreground">
-            Чат клуба
-          </span>
-        </span>
-      </Button>
+            <span className="min-w-0 flex-1">
+              <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                <span className={`inline-block h-1.5 w-1.5 rounded-full ${connectionMeta.dotClass}`} />
+                {connectionMeta.label}
+                <span className="inline-flex items-center rounded-full bg-cyan-500/10 px-1.5 py-0.5 text-[10px] font-medium leading-none text-cyan-700 dark:text-cyan-300">
+                  {participants.length}
+                </span>
+              </span>
+              <span className="mt-1 block text-sm font-semibold text-foreground">
+                Чат клуба
+              </span>
+            </span>
+          </Button>
+        )
+      )}
     </div>
   );
 }

@@ -92,6 +92,43 @@ function getListenerStatusMeta(status: PlayerStatus, isMuted: boolean): {
   }
 }
 
+function useCompactListenerActionButtons() {
+  const [useCompactActionButtons, setUseCompactActionButtons] = useState(false);
+
+  useEffect(() => {
+    const currentWindow = globalThis.window;
+    if (!currentWindow) {
+      return;
+    }
+
+    const mql = currentWindow.matchMedia("(max-width: 360px)");
+    const updateCompactActionButtons = () => {
+      setUseCompactActionButtons(mql.matches);
+    };
+
+    updateCompactActionButtons();
+    mql.addEventListener("change", updateCompactActionButtons);
+
+    return () => {
+      mql.removeEventListener("change", updateCompactActionButtons);
+    };
+  }, []);
+
+  return useCompactActionButtons;
+}
+
+function getRatingButtonLabel(hasSubmittedRating: boolean, isSubmittingRating: boolean) {
+  if (hasSubmittedRating) {
+    return "Оценка сохранена";
+  }
+
+  if (isSubmittingRating) {
+    return "Сохраняем...";
+  }
+
+  return "Оценить чтеца";
+}
+
 interface ListenerOverlayProps {
   reader: LiveReader;
   /** URL обложки книги */
@@ -123,6 +160,7 @@ export function ListenerOverlay({
   const [selectedRating, setSelectedRating] = useState(0);
   const [isSubmittingRating, setIsSubmittingRating] = useState(false);
   const [hasSubmittedRating, setHasSubmittedRating] = useState(false);
+  const useCompactActionButtons = useCompactListenerActionButtons();
   const { toast } = useToast();
   const streamEndedHandledRef = useRef(false);
 
@@ -200,6 +238,7 @@ export function ListenerOverlay({
   const isLoading = status === 'loading';
   const showRecoveryActions = effectiveStatus === "stalled" || effectiveStatus === "error";
   const statusMeta = getListenerStatusMeta(effectiveStatus, isMuted);
+  const ratingButtonLabel = getRatingButtonLabel(hasSubmittedRating, isSubmittingRating);
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center px-4 py-6">
@@ -324,32 +363,48 @@ export function ListenerOverlay({
               onClick={() => void handleSubmitRating()}
               disabled={selectedRating === 0 || isSubmittingRating || hasSubmittedRating}
             >
-              {hasSubmittedRating ? 'Оценка сохранена' : isSubmittingRating ? 'Сохраняем...' : 'Оценить чтеца'}
+              {ratingButtonLabel}
             </Button>
           </div>
 
           <div className="flex gap-3">
             <Button
-              className="flex-1 h-11 rounded-2xl"
+              className={cn(
+                "h-11 rounded-2xl min-w-0",
+                useCompactActionButtons ? "flex-1 px-0" : "flex-1",
+              )}
               variant={isPlaying ? "secondary" : "default"}
               onClick={play}
               disabled={statusMeta.actionDisabled}
               title={statusMeta.actionLabel}
+              aria-label={statusMeta.actionLabel}
             >
-              <span className="mr-2">
+              <span className={cn(!useCompactActionButtons && "mr-2")}>
                 <PlayPauseIcon isLoading={isLoading} isPlaying={isPlaying} />
               </span>
-              {statusMeta.actionLabel}
+              {useCompactActionButtons ? (
+                <span className="sr-only">{statusMeta.actionLabel}</span>
+              ) : (
+                statusMeta.actionLabel
+              )}
             </Button>
 
             <Button
               variant="destructive"
-              className="h-11 rounded-2xl px-5"
+              className={cn(
+                "h-11 rounded-2xl min-w-0",
+                useCompactActionButtons ? "flex-1 px-0" : "px-5",
+              )}
               onClick={handleStop}
               title="Отключиться от эфира"
+              aria-label="Отключиться от эфира"
             >
-              <LogOut className="mr-2 h-3.5 w-3.5" />
-              Отключиться
+              <LogOut className={cn("h-3.5 w-3.5", !useCompactActionButtons && "mr-2")} />
+              {useCompactActionButtons ? (
+                <span className="sr-only">Отключиться</span>
+              ) : (
+                "Отключиться"
+              )}
             </Button>
           </div>
         </div>

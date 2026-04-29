@@ -266,8 +266,8 @@ export function MicrophoneCheckModal({
     : getMicStatusClass(microphoneLoading, microphoneAvailable);
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-[#252525] p-8 rounded-2xl border border-white/10 shadow-2xl max-w-lg w-full">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+      <div className="max-h-[calc(100dvh-2rem)] w-full max-w-lg overflow-y-auto rounded-2xl border border-white/10 bg-[#252525] p-8 shadow-2xl">
         <div className="text-center mb-6">
           <div className={cn('w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4', getHeaderToneClass(result))}>
             <StatusIcon result={result} isInitializing={isInitializing} />

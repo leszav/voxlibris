@@ -30,7 +30,7 @@ interface SessionJoinedPayload {
   isPaused: boolean;
 }
 
-export function useReadingSession() {
+export function useReadingSession(enabled: boolean = true) {
   const { user } = useAuth();
   const [session, setSession] = useState<ReadingSessionState>({
     isLive: false,
@@ -53,7 +53,7 @@ export function useReadingSession() {
 
   // Initialize WebSocket connection
   useEffect(() => {
-    if (!user) {
+    if (!enabled || !user) {
       if (timerRef.current) {
         clearInterval(timerRef.current);
         timerRef.current = null;
@@ -62,6 +62,11 @@ export function useReadingSession() {
         clearInterval(listenerPollRef.current);
         listenerPollRef.current = null;
       }
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+        socketRef.current = null;
+      }
+      setSession(prev => ({ ...prev, isConnected: false }));
       return;
     }
 
@@ -148,7 +153,7 @@ export function useReadingSession() {
       }
       socket.disconnect();
     };
-  }, [user]);
+  }, [enabled, user]);
 
   // Timer for elapsed time
   const startTimer = () => {

@@ -38,9 +38,9 @@ export function GuestRecoveryDialog({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-4 py-6">
       <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-      <div className="relative bg-background rounded-2xl p-6 w-full max-w-sm mx-4">
+      <div className="relative max-h-[calc(100dvh-3rem)] w-full max-w-sm overflow-y-auto rounded-2xl bg-background p-6">
         <h2 className="text-xl font-serif font-bold mb-4">Восстановить доступ</h2>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>

@@ -4,6 +4,7 @@ interface UseReaderPanelsAutocloseOptions {
   isOpen: boolean;
   onClose: () => void;
   contentRef: RefObject<HTMLElement | null>;
+  protectedRefs?: Array<RefObject<HTMLElement | null>>;
   inactivityMs?: number;
 }
 
@@ -11,6 +12,7 @@ export function useReaderPanelsAutoclose({
   isOpen,
   onClose,
   contentRef,
+  protectedRefs = [],
   inactivityMs = 3000,
 }: UseReaderPanelsAutocloseOptions): void {
   const inactivityTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -41,13 +43,53 @@ export function useReaderPanelsAutoclose({
     }
 
     const contentElement = contentRef.current;
+    const protectedElements = protectedRefs
+      .map((ref) => ref.current)
+      .filter((element): element is HTMLElement => Boolean(element));
 
-    const handleReaderActivity = () => {
+    const isInsideProtectedPanel = (target: EventTarget | null): boolean => {
+      if (!(target instanceof Node)) {
+        return false;
+      }
+
+      return protectedElements.some((element) => element.contains(target));
+    };
+
+    const handleReaderActivity = (event: Event) => {
+      if (isInsideProtectedPanel(event.target)) {
+        clearInactivityTimer();
+        return;
+      }
+
       resetInactivityTimer();
     };
 
-    const handleTextInteraction = () => {
+    const handleTextInteraction = (event: Event) => {
+      if (isInsideProtectedPanel(event.target)) {
+        return;
+      }
+
       onClose();
+    };
+
+    const handleProtectedPointerEnter = () => {
+      clearInactivityTimer();
+    };
+
+    const handleProtectedPointerLeave = () => {
+      resetInactivityTimer();
+    };
+
+    const handleProtectedFocusIn = () => {
+      clearInactivityTimer();
+    };
+
+    const handleProtectedFocusOut = (event: FocusEvent) => {
+      if (isInsideProtectedPanel(event.relatedTarget)) {
+        return;
+      }
+
+      resetInactivityTimer();
     };
 
     resetInactivityTimer();
@@ -63,6 +105,13 @@ export function useReaderPanelsAutoclose({
     contentElement?.addEventListener("wheel", handleTextInteraction, true);
     contentElement?.addEventListener("focusin", handleTextInteraction, true);
 
+    protectedElements.forEach((element) => {
+      element.addEventListener("pointerenter", handleProtectedPointerEnter, true);
+      element.addEventListener("pointerleave", handleProtectedPointerLeave, true);
+      element.addEventListener("focusin", handleProtectedFocusIn, true);
+      element.addEventListener("focusout", handleProtectedFocusOut, true);
+    });
+
     return () => {
       clearInactivityTimer();
       document.removeEventListener("pointerdown", handleReaderActivity, true);
@@ -74,6 +123,13 @@ export function useReaderPanelsAutoclose({
       contentElement?.removeEventListener("touchstart", handleTextInteraction, true);
       contentElement?.removeEventListener("wheel", handleTextInteraction, true);
       contentElement?.removeEventListener("focusin", handleTextInteraction, true);
+
+      protectedElements.forEach((element) => {
+        element.removeEventListener("pointerenter", handleProtectedPointerEnter, true);
+        element.removeEventListener("pointerleave", handleProtectedPointerLeave, true);
+        element.removeEventListener("focusin", handleProtectedFocusIn, true);
+        element.removeEventListener("focusout", handleProtectedFocusOut, true);
+      });
     };
-  }, [clearInactivityTimer, contentRef, isOpen, onClose, resetInactivityTimer]);
+  }, [clearInactivityTimer, contentRef, isOpen, onClose, protectedRefs, resetInactivityTimer]);
 }

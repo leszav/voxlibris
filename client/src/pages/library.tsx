@@ -277,42 +277,6 @@ export default function Library() {
     },
   });
 
-  // Проверка авторизации
-  if (!isAuthenticated) {
-    return (
-      <MainLayout>
-        <div className="container flex justify-center px-4 py-8 sm:px-6 sm:py-12 md:px-12">
-          <Card className="max-w-md w-full">
-            <CardHeader className="text-center">
-              <div className="mx-auto mb-4 h-12 w-12 rounded-full bg-blue-100 flex items-center justify-center">
-                <LogIn className="h-6 w-6 text-blue-600" />
-              </div>
-              <CardTitle>Требуется авторизация</CardTitle>
-            </CardHeader>
-            <CardContent className="text-center space-y-4">
-              <p className="text-muted-foreground">
-                Личная библиотека доступна только авторизованным пользователям. Войдите в систему
-                или зарегистрируйтесь, чтобы загружать и читать свои книги.
-              </p>
-              <div className="flex flex-col sm:flex-row gap-2 justify-center">
-                <Button asChild>
-                  <Link href="/auth/login">
-                    <LogIn className="h-4 w-4 mr-2" />
-                    Войти / Регистрация
-                  </Link>
-                </Button>
-                <Button variant="outline" onClick={() => setLocation("/")}>
-                  <ArrowLeft className="h-4 w-4 mr-2" />
-                  На главную
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      </MainLayout>
-    );
-  }
-
   const handleBookUploadSuccess = () => {
     refetch();
   };
@@ -591,6 +555,41 @@ export default function Library() {
 
     return book.primaryGenre?.label || book.genre || "";
   };
+
+  if (!isAuthenticated) {
+    return (
+      <MainLayout>
+        <div className="container flex justify-center px-4 py-8 sm:px-6 sm:py-12 md:px-12">
+          <Card className="max-w-md w-full">
+            <CardHeader className="text-center">
+              <div className="mx-auto mb-4 h-12 w-12 rounded-full bg-blue-100 flex items-center justify-center">
+                <LogIn className="h-6 w-6 text-blue-600" />
+              </div>
+              <CardTitle>Требуется авторизация</CardTitle>
+            </CardHeader>
+            <CardContent className="text-center space-y-4">
+              <p className="text-muted-foreground">
+                Личная библиотека доступна только авторизованным пользователям. Войдите в систему
+                или зарегистрируйтесь, чтобы загружать и читать свои книги.
+              </p>
+              <div className="flex flex-col sm:flex-row gap-2 justify-center">
+                <Button asChild>
+                  <Link href="/auth/login">
+                    <LogIn className="h-4 w-4 mr-2" />
+                    Войти / Регистрация
+                  </Link>
+                </Button>
+                <Button variant="outline" onClick={() => setLocation("/")}>
+                  <ArrowLeft className="h-4 w-4 mr-2" />
+                  На главную
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </MainLayout>
+    );
+  }
 
   return (
     <MainLayout>

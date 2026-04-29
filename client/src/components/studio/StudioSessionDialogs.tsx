@@ -13,8 +13,8 @@ export function StudioEndConfirmDialog({ open, onCancel, onConfirm }: Readonly<S
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/60 px-4 backdrop-blur-sm">
-      <div className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/60 px-4 py-6 backdrop-blur-sm">
+      <div className="max-h-[calc(100dvh-3rem)] w-full max-w-md overflow-y-auto rounded-2xl border border-border bg-card p-6 shadow-2xl">
         <div className="space-y-3">
           <h2 className="text-xl font-semibold text-foreground">Завершить эфир?</h2>
           <p className="text-sm text-muted-foreground">
@@ -92,8 +92,8 @@ export function StudioSummaryDialog({ open, sessionId, elapsedTime, listenerCoun
   });
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/60 px-4 backdrop-blur-sm">
-      <div className="w-full max-w-lg rounded-2xl border border-border bg-card p-6 shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/60 px-4 py-6 backdrop-blur-sm">
+      <div className="max-h-[calc(100dvh-3rem)] w-full max-w-lg overflow-y-auto rounded-2xl border border-border bg-card p-6 shadow-2xl">
         <div className="space-y-2">
           <h2 className="text-2xl font-semibold text-foreground">Итоги сессии</h2>
           <p className="text-sm text-muted-foreground">Эфир завершен. Ниже краткая сводка текущей live-сессии.</p>

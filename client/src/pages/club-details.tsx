@@ -34,6 +34,7 @@ import { LiveReadersBubble, ActiveReadersModal } from "@/components/studio/LiveR
 import { ListenerOverlay } from "@/components/studio/ListenerOverlay";
 import { useLiveReaders } from "@/hooks/use-live-readers";
 import { useClubLiveListening } from "@/hooks/use-club-live-listening";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -688,49 +689,51 @@ function MembersListCard({ clubId, clubTitle, members, memberCount, membersLoadi
               </span>
             </div>
           ) : (
-            members.map((member) => (
-              <div key={member.id} className="flex flex-col gap-3 rounded-xl border border-border/60 p-3 sm:flex-row sm:items-center sm:justify-between sm:border-0 sm:p-0">
-                <div className="flex items-center gap-3">
-                  <Avatar>
-                    <AvatarFallback className="bg-primary/10 text-primary font-bold">
-                      {member.username.substring(0, 2).toUpperCase()}
-                    </AvatarFallback>
-                  </Avatar>
-                  <div>
-                    <p className="text-sm font-medium">{member.username}</p>
-                    <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                      <span>
-                        Присоединился {new Date(member.joinedAt).toLocaleDateString()}
-                      </span>
+            <div className="max-h-[28rem] space-y-4 overflow-y-auto pr-1 sm:max-h-[32rem]">
+              {members.map((member) => (
+                <div key={member.id} className="flex flex-col gap-3 rounded-xl border border-border/60 p-3 2xl:flex-row 2xl:items-center 2xl:justify-between 2xl:border-0 2xl:p-0">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <Avatar>
+                      <AvatarFallback className="bg-primary/10 text-primary font-bold">
+                        {member.username.substring(0, 2).toUpperCase()}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium">{member.username}</p>
+                      <div className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
+                        <span>
+                          Присоединился {new Date(member.joinedAt).toLocaleDateString()}
+                        </span>
+                      </div>
                     </div>
                   </div>
+                  <div className="flex flex-wrap items-center gap-2 self-start">
+                    <Badge variant={getMemberRoleBadgeVariant(member.role)} className="shrink-0">
+                      {member.role === "owner" && "Владелец"}
+                      {member.role === "moderator" && "Модератор"}
+                      {member.role === "member" && "Участник"}
+                    </Badge>
+                    {(isOwner || isModerator) && canRemove(member.role, member.id) && (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button size="icon" variant="ghost" className="h-8 w-8">
+                            <MoreHorizontal className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem
+                            className="text-destructive"
+                            onClick={() => handleRemoveMember(member.id, member.username)}
+                          >
+                            <Trash2 className="h-4 w-4 mr-2" /> Удалить из клуба
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    )}
+                  </div>
                 </div>
-                <div className="flex items-center gap-2 self-start sm:self-auto">
-                  <Badge variant={getMemberRoleBadgeVariant(member.role)}>
-                    {member.role === "owner" && "Владелец"}
-                    {member.role === "moderator" && "Модератор"}
-                    {member.role === "member" && "Участник"}
-                  </Badge>
-                  {(isOwner || isModerator) && canRemove(member.role, member.id) && (
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button size="icon" variant="ghost" className="h-8 w-8">
-                          <MoreHorizontal className="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem
-                          className="text-destructive"
-                          onClick={() => handleRemoveMember(member.id, member.username)}
-                        >
-                          <Trash2 className="h-4 w-4 mr-2" /> Удалить из клуба
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  )}
-                </div>
-              </div>
-            ))
+              ))}
+            </div>
           )}
         </div>
       ) : (
@@ -964,9 +967,36 @@ interface ClubContentTabsProps {
 }
 
 function ClubContentTabs({ clubId, isMember, isOwner, currentUserId, settings, scheduleItems, activeBookId, setLocation }: ClubContentTabsProps) {
+  const isMobile = useIsMobile();
+  const [activeTab, setActiveTab] = useState("about");
+  const tabOptions = [
+    { value: "about", label: "О клубе" },
+    { value: "reading-plan", label: "План чтения" },
+    { value: "discussion", label: "Обсуждение" },
+    { value: "schedule", label: "Расписание" },
+    ...(isMember ? [{ value: "library", label: "Библиотека" }] : []),
+  ];
+
   return (
-    <Tabs defaultValue="about" className="w-full">
-      <TabsList className="-mx-4 flex h-auto w-[calc(100%+2rem)] justify-start gap-2 overflow-x-auto whitespace-nowrap border-b rounded-none bg-transparent px-4 py-0 sm:mx-0 sm:w-full sm:gap-6 sm:px-0">
+    <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+      {isMobile ? (
+        <div className="mb-4 sm:hidden">
+          <Select value={activeTab} onValueChange={setActiveTab}>
+            <SelectTrigger className="h-11 w-full rounded-xl">
+              <SelectValue placeholder="Выберите раздел клуба" />
+            </SelectTrigger>
+            <SelectContent>
+              {tabOptions.map((tab) => (
+                <SelectItem key={tab.value} value={tab.value}>
+                  {tab.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      ) : null}
+
+      <TabsList className="hidden h-auto w-full justify-start gap-6 overflow-x-auto whitespace-nowrap border-b rounded-none bg-transparent px-0 py-0 sm:flex">
         <TabsTrigger
           value="about"
           className="rounded-none border-b-2 border-transparent data-[state=active]:border-accent data-[state=active]:bg-transparent data-[state=active]:shadow-none py-3 px-1 font-medium"
@@ -1138,6 +1168,7 @@ function ClubContentTabs({ clubId, isMember, isOwner, currentUserId, settings, s
 }
 
 export default function ClubDetails() {
+  const isMobile = useIsMobile();
   const [, params] = useRoute("/clubs/:id");
   const clubId = params?.id || "";
   const [, setLocation] = useLocation();
@@ -1293,15 +1324,23 @@ export default function ClubDetails() {
             clubId={club.id} 
             onCleanupDeleted={() => handleCleanupChat(0)}
             canCleanup={isOwner}
+            mobileBottomOffsetPx={88}
+            mobileTopOffsetPx={76}
           />
         )}
 
         {isAuthenticated && isMember && activeBookId && (
-          <div className="fixed bottom-20 right-0 z-30 translate-x-[calc(100%-4rem)] pr-4 transition-transform duration-300 ease-out hover:translate-x-0 focus-within:translate-x-0">
+          <div className={cn(
+            "fixed z-30 transition-transform duration-300 ease-out",
+            isMobile
+              ? "bottom-[calc(env(safe-area-inset-bottom)+9rem)] right-3 translate-x-0 pr-0"
+              : "bottom-20 right-0 translate-x-[calc(100%-4rem)] pr-4 hover:translate-x-0 focus-within:translate-x-0",
+          )}>
             <LiveReadersBubble
               readers={readers}
               flashCount={flashCount}
               onOpenModal={() => setLiveModalOpen(true)}
+              compact={isMobile}
             />
           </div>
         )}

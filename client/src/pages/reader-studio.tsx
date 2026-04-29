@@ -1,10 +1,14 @@
 import React, { useState, useEffect } from "react";
 import { useLocation, useRoute } from "wouter";
+import { AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Slider } from "@/components/ui/slider";
 import { useAuth } from "@/hooks/use-auth";
 import { useBookChapter, useCreateBookContent, useDeleteBookContent } from "@/hooks/use-books";
 import { useClub } from "@/hooks/use-clubs";
+import { useStudioDeviceEligibility } from "@/hooks/use-studio-device-eligibility";
 import { ReadingStage, THEMES, FONTS, type ThemeKey } from "@/components/studio/ReadingStage";
 import { DedicatedStudioShell } from "@/components/studio/DedicatedStudioShell";
 import { StudioStageOverlays } from "@/components/studio/StudioStageOverlays";
@@ -28,6 +32,10 @@ export default function ReaderStudio() {
   const [uploadMode, setUploadMode] = useState(false);
   const [contentText, setContentText] = useState("");
   const [showPrepModal, setShowPrepModal] = useState(true);
+  const [tabletOverrideGranted, setTabletOverrideGranted] = useState(false);
+  const studioEligibility = useStudioDeviceEligibility();
+  const studioAccessAllowed = studioEligibility.mode === "allowed"
+    || (studioEligibility.mode === "override" && tabletOverrideGranted);
 
   // Extract route params
   const clubId = params?.clubId || "";
@@ -46,7 +54,7 @@ export default function ReaderStudio() {
     currentChapter,
     readerName: user?.username ?? 'Чтец',
     userId: user?.id,
-    enabled: true,
+    enabled: studioAccessAllowed,
   });
 
   // Hooks for data fetching
@@ -74,6 +82,12 @@ export default function ReaderStudio() {
   useEffect(() => {
     localStorage.setItem('reader_font', currentFont);
   }, [currentFont]);
+
+  useEffect(() => {
+    if (studioEligibility.mode !== "override") {
+      setTabletOverrideGranted(false);
+    }
+  }, [studioEligibility.mode]);
 
   // Handlers for content management
   const handleUploadContent = async () => {
@@ -117,6 +131,65 @@ export default function ReaderStudio() {
       }
     }
   };
+
+  if (studioEligibility.mode === "blocked") {
+    return (
+      <div className="min-h-screen bg-[#F9F8F6] flex items-center justify-center px-4">
+        <Card className="w-full max-w-xl">
+          <CardHeader className="text-center">
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-amber-100">
+              <AlertTriangle className="h-6 w-6 text-amber-600" />
+            </div>
+            <CardTitle>VoxLibris Studio недоступна на телефонах</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4 text-center">
+            <p className="text-muted-foreground">{studioEligibility.reason}</p>
+            <Button variant="outline" onClick={() => setLocation(`/clubs/${clubId}`)}>
+              Вернуться в клуб
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  if (studioEligibility.mode === "override" && !tabletOverrideGranted) {
+    return (
+      <div className="min-h-screen bg-[#F9F8F6] flex items-center justify-center px-4">
+        <Card className="w-full max-w-2xl">
+          <CardHeader className="text-center">
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-amber-100">
+              <AlertTriangle className="h-6 w-6 text-amber-600" />
+            </div>
+            <CardTitle>Studio на планшете требует подтверждения</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <Alert className="border-amber-200 bg-amber-50 text-amber-900 [&>svg]:text-amber-600">
+              <AlertTriangle className="h-4 w-4" />
+              <AlertTitle>Планшетный режим может быть нестабильным</AlertTitle>
+              <AlertDescription>
+                <p>{studioEligibility.reason}</p>
+                <p className="mt-2 text-xs text-amber-800/90">
+                  Текущее устройство: ширина {studioEligibility.viewportWidth ?? "—"} px,
+                  {" "}pointer {studioEligibility.hasFinePointer ? "fine" : "coarse"},
+                  {" "}hover {studioEligibility.hasHover ? "yes" : "no"}.
+                </p>
+              </AlertDescription>
+            </Alert>
+
+            <div className="flex flex-col justify-center gap-2 sm:flex-row">
+              <Button onClick={() => setTabletOverrideGranted(true)}>
+                Все равно открыть Studio
+              </Button>
+              <Button variant="outline" onClick={() => setLocation(`/clubs/${clubId}`)}>
+                Вернуться в клуб
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   const state = studio.state;
   const elapsedTime = studio.elapsedTime;

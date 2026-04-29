@@ -54,6 +54,7 @@ interface LiveReadersBubbleProps {
   flashCount: number;
   onOpenModal: () => void;
   className?: string;
+  compact?: boolean;
 }
 
 function getLiveReadersBubbleMeta(isActive: boolean, flashing: boolean, readersCount: number): {
@@ -98,6 +99,7 @@ export function LiveReadersBubble({
   flashCount,
   onOpenModal,
   className,
+  compact = false,
 }: Readonly<LiveReadersBubbleProps>) {
   const [flashing, setFlashing] = useState(false);
   const [isIdle, setIsIdle] = useState(false);
@@ -148,6 +150,39 @@ export function LiveReadersBubble({
       }
     };
   }, []);
+
+  if (compact) {
+    return (
+      <button
+        type="button"
+        onClick={isActive ? onOpenModal : undefined}
+        className={cn(
+          "relative flex h-12 w-12 items-center justify-center rounded-full border bg-card/95 shadow-lg backdrop-blur-sm transition-all duration-200",
+          isIdle ? "opacity-40 hover:opacity-100" : "opacity-100",
+          containerStateClassName,
+          className,
+        )}
+        title={isActive ? `Читают вслух: ${readers.length}` : "Никто не читает вслух"}
+        aria-label={isActive ? `${readers.length} активных чтецов` : "Нет активных чтецов"}
+      >
+        <Radio className={cn("h-4.5 w-4.5 transition-all duration-300", isActive && "animate-pulse text-fuchsia-600 dark:text-fuchsia-300", flashing && "scale-110")} />
+        {isActive ? (
+          <>
+            <span className="absolute right-2 top-2 flex h-2.5 w-2.5">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-fuchsia-500/70" />
+              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-fuchsia-500" />
+            </span>
+            <span className="absolute -bottom-1 -right-1 inline-flex min-w-5 items-center justify-center rounded-full border border-background bg-fuchsia-500 px-1 text-[10px] font-semibold leading-5 text-white shadow-sm">
+              {readers.length}
+            </span>
+          </>
+        ) : null}
+        {flashing && (
+          <span className="pointer-events-none absolute inset-0 rounded-full border border-fuchsia-300/70" />
+        )}
+      </button>
+    );
+  }
 
   return (
     <button

@@ -12,7 +12,7 @@ export function LiveShell({
   controlBar,
 }: Readonly<LiveShellProps>) {
   return (
-    <div className="flex flex-col h-screen overflow-hidden bg-[#F9F8F6] dark:bg-background">
+    <div className="flex h-[100dvh] flex-col overflow-hidden bg-[#F9F8F6] dark:bg-background">
       {/* Top bar */}
       {topBar}
 

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo, type ComponentProps, type RefObject } from "react";
-import { useParams } from "wouter";
+import { useLocation, useParams } from "wouter";
 import { useAnalytics } from "../../hooks/use-analytics";
 import { getMobileAnalyticsContext } from "@/lib/mobile-analytics";
 import { useAddBookmark, useBookmarks, useDeleteBookmark } from "../../hooks/use-reader";
@@ -516,6 +516,7 @@ function useReaderSavedPositionActions({
 }
 
 function ReaderWorkspaceView({
+  onBackToLibrary,
   selectionState,
   addBookmarkFromSelection,
   clearSelection,
@@ -549,12 +550,16 @@ function ReaderWorkspaceView({
   scrollContainerRef,
   scheduleProgressSave,
   contentAreaRef,
+  tocPanelRef,
+  bookmarksPanelRef,
+  settingsPanelRef,
   mainContent,
   isSyncing,
   lastSyncTime,
   syncError,
   progress,
 }: Readonly<{
+  onBackToLibrary: () => void;
   selectionState: { text: string; top: number; left: number } | null;
   addBookmarkFromSelection: () => void;
   clearSelection: () => void;
@@ -588,6 +593,9 @@ function ReaderWorkspaceView({
   scrollContainerRef: RefObject<HTMLDivElement | null>;
   scheduleProgressSave: () => void;
   contentAreaRef: RefObject<HTMLDivElement | null>;
+  tocPanelRef: RefObject<HTMLDivElement | null>;
+  bookmarksPanelRef: RefObject<HTMLDivElement | null>;
+  settingsPanelRef: RefObject<HTMLDivElement | null>;
   mainContent: React.ReactNode;
   isSyncing: boolean;
   lastSyncTime: number | null;
@@ -603,7 +611,7 @@ function ReaderWorkspaceView({
   }, [tocOpen]);
 
   return (
-    <div className="flex flex-col h-screen bg-background text-foreground overflow-hidden">
+    <div className="flex h-[100dvh] flex-col overflow-hidden bg-background text-foreground">
       {selectionState && (
         <SelectionBookmarkPrompt
           text={selectionState.text}
@@ -628,7 +636,7 @@ function ReaderWorkspaceView({
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => (globalThis.location.href = '/library')}
+              onClick={onBackToLibrary}
               className="text-xs sm:text-sm"
             >
               <ArrowLeft className="w-4 h-4 mr-1 sm:mr-2" />
@@ -652,7 +660,7 @@ function ReaderWorkspaceView({
             </div>
             {tocOpen && (
               <div className="fixed inset-0 z-50 flex items-start justify-end pointer-events-none">
-                <div className="bg-background border rounded-lg shadow-xl w-[85vw] max-w-[320px] sm:max-w-md max-h-[80vh] overflow-y-auto pointer-events-auto mt-14 mr-2 sm:mr-4 flex flex-col">
+                <div ref={tocPanelRef} className="bg-background border rounded-lg shadow-xl w-[85vw] max-w-[320px] sm:max-w-md max-h-[80vh] overflow-y-auto pointer-events-auto mt-14 mr-2 sm:mr-4 flex flex-col">
                   <div className="sticky top-0 bg-background border-b p-3 sm:p-4 flex items-center justify-between flex-none">
                     <h3 className="font-semibold text-base sm:text-lg">Оглавление</h3>
                     <Button variant="ghost" size="sm" onClick={() => setTocOpen(false)}>✕</Button>
@@ -714,7 +722,7 @@ function ReaderWorkspaceView({
                 <span className="hidden xs:inline">Закладки</span>
               </Button>
               {bookmarksOpen && (
-                <div className="absolute left-0 top-full mt-2 w-[85vw] max-w-[360px] sm:w-96 max-h-96 overflow-y-auto bg-background text-foreground border rounded-md shadow-lg p-3 sm:p-4 z-50">
+                <div ref={bookmarksPanelRef} className="absolute left-0 top-full mt-2 w-[85vw] max-w-[360px] sm:w-96 max-h-96 overflow-y-auto bg-background text-foreground border rounded-md shadow-lg p-3 sm:p-4 z-50">
                   {bookmarksLoading ? (
                     <p className="text-sm text-muted-foreground">Загрузка закладок...</p>
                   ) : (
@@ -768,7 +776,7 @@ function ReaderWorkspaceView({
                 <Settings className="w-4 h-4 sm:w-5 sm:h-5" />
               </Button>
               {settingsOpen && (
-                <div className="absolute right-0 top-full mt-2 w-[85vw] max-w-[320px] sm:w-80 bg-background text-foreground border rounded-md shadow-lg p-3 sm:p-4 z-50">
+                <div ref={settingsPanelRef} className="absolute right-0 top-full mt-2 w-[85vw] max-w-[320px] sm:w-80 bg-background text-foreground border rounded-md shadow-lg p-3 sm:p-4 z-50">
                   <ReaderControls
                     settings={settings}
                     onSettingsChange={updateSettingsWithAnchor}
@@ -822,6 +830,7 @@ function ReaderWorkspaceView({
 }
 
 export function ReaderWorkspace({ bookId: propBookId, clubId, params }: Readonly<ReaderWorkspaceProps>) {
+  const [, setLocation] = useLocation();
   const routeParams = useParams();
   const bookId = propBookId || params?.bookId || routeParams.bookId;
 
@@ -889,6 +898,9 @@ export function ReaderWorkspace({ bookId: propBookId, clubId, params }: Readonly
 
   const scrollElementRef = scrollContainerRef as RefObject<HTMLElement | null>;
   const contentAreaRef = useRef<HTMLDivElement>(null);
+  const tocPanelRef = useRef<HTMLDivElement | null>(null);
+  const bookmarksPanelRef = useRef<HTMLDivElement | null>(null);
+  const settingsPanelRef = useRef<HTMLDivElement | null>(null);
   const closeAllPanels = useCallback(() => {
     setTocOpen(false);
     setBookmarksOpen(false);
@@ -921,6 +933,7 @@ export function ReaderWorkspace({ bookId: propBookId, clubId, params }: Readonly
     isOpen: tocOpen || bookmarksOpen || settingsOpen,
     onClose: closeAllPanels,
     contentRef: scrollElementRef,
+    protectedRefs: [tocPanelRef, bookmarksPanelRef, settingsPanelRef],
   });
 
   const { suggestedProgress, dismissSuggestion } = useReaderLatestProgress({
@@ -1066,6 +1079,7 @@ export function ReaderWorkspace({ bookId: propBookId, clubId, params }: Readonly
 
   return (
     <ReaderWorkspaceView
+      onBackToLibrary={() => setLocation("/library")}
       selectionState={selectionState}
       addBookmarkFromSelection={addBookmarkFromSelection}
       clearSelection={clearSelection}
@@ -1099,6 +1113,9 @@ export function ReaderWorkspace({ bookId: propBookId, clubId, params }: Readonly
       scrollContainerRef={scrollContainerRef}
       scheduleProgressSave={scheduleProgressSave}
       contentAreaRef={contentAreaRef}
+      tocPanelRef={tocPanelRef}
+      bookmarksPanelRef={bookmarksPanelRef}
+      settingsPanelRef={settingsPanelRef}
       mainContent={mainContent}
       isSyncing={isSyncing}
       lastSyncTime={lastSyncTime}

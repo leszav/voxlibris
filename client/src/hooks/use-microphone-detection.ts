@@ -65,10 +65,10 @@ async function readMicrophonePermissionStatus(): Promise<MicrophonePermissionSta
   }
 }
 
-export function useMicrophoneDetection() {
+export function useMicrophoneDetection(enabled: boolean = true) {
   const [status, setStatus] = useState<MicrophoneStatus>({
     isAvailable: false,
-    isLoading: true,
+    isLoading: enabled,
     error: null,
     permissionStatus: 'unknown'
   });
@@ -179,6 +179,21 @@ export function useMicrophoneDetection() {
 
   // Автоматическое детектирование при монтировании
   useEffect(() => {
+    if (!enabled) {
+      setStatus({
+        isAvailable: false,
+        isLoading: false,
+        error: null,
+        permissionStatus: 'unknown'
+      });
+
+      return () => {
+        if (detectRetryTimeoutRef.current) {
+          clearTimeout(detectRetryTimeoutRef.current);
+        }
+      };
+    }
+
     detectMicrophone();
 
     // Слушаем изменения устройств
@@ -211,7 +226,7 @@ export function useMicrophoneDetection() {
         clearTimeout(detectRetryTimeoutRef.current);
       }
     };
-  }, []);
+  }, [enabled]);
 
   return {
     ...status,

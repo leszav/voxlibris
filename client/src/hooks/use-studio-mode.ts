@@ -77,9 +77,16 @@ export function useStudioMode({
   const [isInitialized, setIsInitialized] = useState(false);
   const initRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const startLockRef = useRef(false);
+  const resourcesActivatedRef = useRef(enabled);
+
+  if (enabled) {
+    resourcesActivatedRef.current = true;
+  }
+
+  const resourcesEnabled = enabled || resourcesActivatedRef.current;
 
   const { session, createSession, startReading, pauseReading, resumeReading, endReading } =
-    useReadingSession();
+    useReadingSession(resourcesEnabled);
 
   // Ref-обёртка для нестабильной функции — не вызывает перезапуск эффекта
   const createSessionRef = useRef(createSession);
@@ -90,7 +97,7 @@ export function useStudioMode({
     isLoading: microphoneLoading,
     error: microphoneError,
     retryDetection,
-  } = useMicrophoneDetection();
+  } = useMicrophoneDetection(resourcesEnabled);
 
   const {
     listenerCount: sessionListenerCount,
@@ -99,7 +106,7 @@ export function useStudioMode({
     notifyBroadcastPaused,
     notifyBroadcastResumed,
     joinSessionRoom,
-  } = useAudioSession({ userId });
+  } = useAudioSession({ userId, enabled: resourcesEnabled });
 
   const {
     status: audioStatus,

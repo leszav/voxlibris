@@ -81,6 +81,7 @@ export default function GuestReader() {
 
   const contentRef = useRef<HTMLDivElement>(null);
   const contentAreaRef = useRef<HTMLElement>(null);
+  const settingsPanelRef = useRef<HTMLDivElement>(null);
   const scrollProgressRef = useRef(0);
   const sessionIdRef = useRef<string | null>(null);
   const sessionStartTimeRef = useRef(0);
@@ -114,6 +115,7 @@ export default function GuestReader() {
     isOpen: showSettings,
     onClose: () => setShowSettings(false),
     contentRef: contentRef as React.RefObject<HTMLElement | null>,
+    protectedRefs: [settingsPanelRef as React.RefObject<HTMLElement | null>],
   });
 
   useEffect(() => {
@@ -332,7 +334,7 @@ export default function GuestReader() {
         </div>
 
         {showSettings && (
-          <div className="container mx-auto px-4 py-3 border-t bg-card space-y-3">
+          <div ref={settingsPanelRef} className="container mx-auto px-4 py-3 border-t bg-card space-y-3">
             {viewportWidth < 768 && (
               <p className="text-xs text-muted-foreground">
                 На телефоне применяется минимальный шрифт, минимальный интервал и максимальная ширина текста.

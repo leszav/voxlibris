@@ -1190,27 +1190,36 @@ export class FB2Parser extends BaseBookParser {
           return;
         }
 
-        chapterNumber = this.appendSectionChapters(section, chapters, chapterNumber);
+        chapterNumber = this.appendSectionChapters(section, chapters, chapterNumber, []);
       });
     });
 
     return chapters;
   }
 
-  private appendSectionChapters(section: XmlElement, chapters: BookChapter[], chapterNumber: number): number {
+  private appendSectionChapters(
+    section: XmlElement,
+    chapters: BookChapter[],
+    chapterNumber: number,
+    ancestorTitles: string[],
+  ): number {
     if (chapters.length >= MAX_BOOK_CHAPTERS) {
       return chapterNumber;
     }
 
+    const sectionTitle = this.extractSectionTitle(section);
     const childSections = asArray<XmlElement>(section?.section);
     const directContent = this.extractSectionOwnContent(section);
     const directWordCount = this.countWords(directContent);
+    const nextAncestorTitles = sectionTitle?.trim()
+      ? [...ancestorTitles, sectionTitle.trim()]
+      : ancestorTitles;
 
     if (this.shouldSplitSectionIntoChildChapters(section, childSections, directWordCount)) {
       const hasMeaningfulIntro = directWordCount >= 80;
 
       if (hasMeaningfulIntro) {
-        const title = this.extractSectionTitle(section) || `Chapter ${chapterNumber}`;
+        const title = sectionTitle || this.buildFallbackSectionTitle(ancestorTitles, chapterNumber, true);
         chapters.push({
           chapterNumber,
           title,
@@ -1225,7 +1234,7 @@ export class FB2Parser extends BaseBookParser {
           break;
         }
 
-        chapterNumber = this.appendSectionChapters(childSection, chapters, chapterNumber);
+        chapterNumber = this.appendSectionChapters(childSection, chapters, chapterNumber, nextAncestorTitles);
       }
 
       return chapterNumber;
@@ -1233,7 +1242,7 @@ export class FB2Parser extends BaseBookParser {
 
     const chapterContent = this.extractSectionContent(section);
     if (chapterContent.trim()) {
-      const title = this.extractSectionTitle(section) || `Chapter ${chapterNumber}`;
+      const title = sectionTitle || this.buildFallbackSectionTitle(ancestorTitles, chapterNumber, true);
 
       chapters.push({
         chapterNumber,
@@ -1271,12 +1280,16 @@ export class FB2Parser extends BaseBookParser {
       const title = this.extractSectionTitle(childSection);
       return title ? !this.isStructuralSubsectionTitle(title) : false;
     });
-
-    if (sectionTitle && nonStructuralChildTitles.length === 0) {
-      return false;
-    }
+    const structuralChildTitles = titledChildSections.filter((childSection) => {
+      const title = this.extractSectionTitle(childSection);
+      return title ? this.isStructuralSubsectionTitle(title) : false;
+    });
 
     if (childSections.length >= 2 && isContainerLike && nonStructuralChildTitles.length >= 2) {
+      return true;
+    }
+
+    if (childSections.length >= 2 && isContainerLike && structuralChildTitles.length >= 1) {
       return true;
     }
 
@@ -1294,7 +1307,19 @@ export class FB2Parser extends BaseBookParser {
       return true;
     }
 
-    return /^(?:\d+|\d+[.)]|[ivxlcdm]+|[ivxlcdm]+[.)]|часть\s+\d+|глава\s+\d+)$/i.test(normalized);
+    return /^(?:\d+|\d+[.)]|[ivxlcdm]+|[ivxlcdm]+[.)]|(?:часть|глава|книга|том|раздел|акт)\s+(?:\d+|[ivxlcdm]+|первая|вторая|третья|четвертая|четвёртая|пятая|шестая|седьмая|восьмая|девятая|десятая|одиннадцатая|двенадцатая|последняя)|(?:пролог|эпилог))$/i.test(normalized);
+  }
+
+  private buildFallbackSectionTitle(ancestorTitles: string[], chapterNumber: number, preferIntroLabel = false): string {
+    const nearestAncestorTitle = [...ancestorTitles]
+      .reverse()
+      .find((title) => title.trim().length > 0);
+
+    if (nearestAncestorTitle) {
+      return preferIntroLabel ? `${nearestAncestorTitle} — вступление` : nearestAncestorTitle;
+    }
+
+    return `Chapter ${chapterNumber}`;
   }
 
   private extractSectionTitle(section: XmlElement): string | undefined {

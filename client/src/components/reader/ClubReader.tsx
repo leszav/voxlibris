@@ -42,8 +42,10 @@ import { LiveReadersBubble, ActiveReadersModal } from "@/components/studio/LiveR
 import { ListenerOverlay } from "@/components/studio/ListenerOverlay";
 import { useLiveReaders } from "@/hooks/use-live-readers";
 import { useClubLiveListening } from "@/hooks/use-club-live-listening";
+import { useStudioDeviceEligibility } from "@/hooks/use-studio-device-eligibility";
 import { useStudioMode } from "@/hooks/use-studio-mode";
 import { useAuth } from "@/hooks/use-auth";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { EmbeddedClubStudioShell } from "@/components/studio/EmbeddedClubStudioShell";
 import type { ReaderSettings } from "@/lib/reader-settings";
 
@@ -82,11 +84,14 @@ interface PendingScrollRestore {
 }
 
 function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
+  const studioEligibility = useStudioDeviceEligibility();
+  const isMobile = useIsMobile();
   const [currentChapter, setCurrentChapter] = useState<number | null>(null);
   const [tocOpen, setTocOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [bookmarksOpen, setBookmarksOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [tabletOverrideGranted, setTabletOverrideGranted] = useState(false);
   const [pendingScrollRestore, setPendingScrollRestore] = useState<PendingScrollRestore | null>(null);
   const chapterScrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const manualRestoreCleanupRef = useRef<(() => void) | null>(null);
@@ -102,6 +107,10 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
   const lastReaderPositionRef = useRef<{ chapter: number; positionRaw: string } | null>(null);
   // Предложение перейти к позиции чтеца после окончания стрима
   const [streamEndedSuggestion, setStreamEndedSuggestion] = useState<{ chapter: number; positionRaw: string } | null>(null);
+  const tocPanelRef = useRef<HTMLDivElement | null>(null);
+  const settingsPanelRef = useRef<HTMLDivElement | null>(null);
+  const bookmarksPanelRef = useRef<HTMLDivElement | null>(null);
+  const helpPanelRef = useRef<HTMLDivElement | null>(null);
 
   const applyReaderPosition = useCallback((chapter: number, positionRaw: string | null | undefined) => {
     if (!positionRaw) {
@@ -116,6 +125,20 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
 
   // ── Режим студии ─────────────────────────────────────────────────
   const [studioOpen, setStudioOpen] = useState(false);
+  const studioAccessAllowed = studioEligibility.mode === "allowed"
+    || (studioEligibility.mode === "override" && tabletOverrideGranted);
+
+  useEffect(() => {
+    if (studioEligibility.mode !== "override") {
+      setTabletOverrideGranted(false);
+    }
+  }, [studioEligibility.mode]);
+
+  useEffect(() => {
+    if (!studioAccessAllowed && studioOpen) {
+      setStudioOpen(false);
+    }
+  }, [studioAccessAllowed, studioOpen]);
 
   const handlePositionUpdate = useCallback((update: { chapter: number; positionRaw: string }) => {
     // Сохраняем последнюю позицию чтеца
@@ -190,7 +213,7 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
     currentChapter: currentChapter ?? 1,
     readerName: user?.username ?? 'Чтец',
     userId: user?.id,
-    enabled: studioOpen,
+    enabled: studioOpen && studioAccessAllowed,
   });
 
   const embeddedStudioView = resolveReaderStudioViewState({
@@ -508,6 +531,7 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
     isOpen: tocOpen || settingsOpen || bookmarksOpen || helpOpen,
     onClose: closeAllPanels,
     contentRef: scrollElementRef,
+    protectedRefs: [tocPanelRef, settingsPanelRef, bookmarksPanelRef, helpPanelRef],
   });
 
   const { suggestedProgress, dismissSuggestion } = useReaderLatestProgress({
@@ -655,7 +679,7 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
   ]);
 
   return (
-    <div className="h-screen flex flex-col bg-background text-foreground overflow-hidden">
+    <div className="flex h-[100dvh] flex-col overflow-hidden bg-background text-foreground">
       {suggestedProgress && (
         <LatestPositionPrompt
           currentChapter={currentChapter}
@@ -751,6 +775,7 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
           className="fixed inset-0 z-50 flex items-center justify-end pointer-events-none"
         >
           <div
+            ref={settingsPanelRef}
             className="bg-background border rounded-lg shadow-xl w-[85vw] max-w-[320px] sm:max-w-md max-h-[80vh] pointer-events-auto mr-2 sm:mr-4"
           >
             <div className="sticky top-0 bg-background border-b p-3 sm:p-4 flex items-center justify-between">
@@ -780,6 +805,7 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
           className="fixed inset-0 z-50 flex items-center justify-end pointer-events-none"
         >
           <div
+            ref={tocPanelRef}
             className="bg-background border rounded-lg shadow-xl w-[85vw] max-w-[320px] sm:max-w-md max-h-[80vh] overflow-y-auto pointer-events-auto mr-2 sm:mr-4 flex flex-col"
           >
             <div className="sticky top-0 bg-background border-b p-3 sm:p-4 flex items-center justify-between flex-none">
@@ -814,6 +840,7 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
           className="fixed inset-0 z-50 flex items-center justify-end pointer-events-none"
         >
           <div
+            ref={bookmarksPanelRef}
             className="bg-background border rounded-lg shadow-xl w-[85vw] max-w-[320px] sm:max-w-md max-h-[80vh] overflow-y-auto pointer-events-auto mr-2 sm:mr-4 flex flex-col"
           >
             <div className="sticky top-0 bg-background border-b p-3 sm:p-4 flex items-center justify-between flex-none">
@@ -951,24 +978,49 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
       {/* Пузыри над чатом: живые чтецы + кнопка читать вслух */}
       {!studioOpen && (
         <>
-          <div className="fixed bottom-36 right-0 z-30 translate-x-[calc(100%-4rem)] pr-4 transition-transform duration-300 ease-out hover:translate-x-0 focus-within:translate-x-0">
+          <div className={cn(
+            "fixed z-30 transition-transform duration-300 ease-out",
+            isMobile
+              ? `right-3 translate-x-0 pr-0 ${studioEligibility.mode === "blocked" ? "bottom-[calc(env(safe-area-inset-bottom)+5rem)]" : "bottom-[calc(env(safe-area-inset-bottom)+8.5rem)]"}`
+              : `right-0 translate-x-[calc(100%-4rem)] pr-4 hover:translate-x-0 focus-within:translate-x-0 ${studioEligibility.mode === "blocked" ? "bottom-20" : "bottom-36"}`,
+          )}>
             <LiveReadersBubble
               readers={readers}
               flashCount={flashCount}
               onOpenModal={() => setLiveModalOpen(true)}
+              compact={isMobile}
             />
           </div>
 
-          <div className="fixed bottom-20 right-0 z-30 translate-x-[calc(100%-4rem)] pr-4 transition-transform duration-300 ease-out hover:translate-x-0 focus-within:translate-x-0">
-            <ReadNowBubble
-              onClick={() => setStudioOpen(true)}
-            />
-          </div>
+          {studioEligibility.mode !== "blocked" && (
+            <div className={cn(
+              "fixed z-30 transition-transform duration-300 ease-out",
+              isMobile
+                ? "bottom-[calc(env(safe-area-inset-bottom)+5rem)] right-3 translate-x-0 pr-0"
+                : "bottom-20 right-0 translate-x-[calc(100%-4rem)] pr-4 hover:translate-x-0 focus-within:translate-x-0",
+            )}>
+              <ReadNowBubble
+                onClick={() => {
+                  if (studioEligibility.mode === "override" && !tabletOverrideGranted) {
+                    setTabletOverrideGranted(true);
+                  }
+
+                  setStudioOpen(true);
+                }}
+                title={
+                  studioEligibility.mode === "override" && !tabletOverrideGranted
+                    ? "Открыть Studio с подтверждением для планшета"
+                    : undefined
+                }
+                compact={isMobile}
+              />
+            </div>
+          )}
         </>
       )}
 
       {/* Чат клуба */}
-      <ChatWidget clubId={clubId} />
+      <ChatWidget clubId={clubId} mobileTopOffsetPx={72} />
 
       {/* Модалка активных чтецов */}
       <ActiveReadersModal

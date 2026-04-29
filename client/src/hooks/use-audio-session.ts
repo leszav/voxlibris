@@ -17,6 +17,7 @@ import { getAccessToken } from '@/lib/token-store';
 
 interface AudioSessionOptions {
   userId?: string | null;
+  enabled?: boolean;
 }
 
 interface AudioSessionStats {
@@ -24,7 +25,7 @@ interface AudioSessionStats {
   duration: number;
 }
 
-export function useAudioSession({ userId }: AudioSessionOptions) {
+export function useAudioSession({ userId, enabled = true }: AudioSessionOptions) {
   const [listenerCount, setListenerCount] = useState(0);
   const [sessionActive, setSessionActive] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -33,7 +34,15 @@ export function useAudioSession({ userId }: AudioSessionOptions) {
   const socketRef = useRef<Socket | null>(null);
 
   useEffect(() => {
-    if (!userId) return;
+    if (!enabled || !userId) {
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+        socketRef.current = null;
+      }
+      setSessionActive(false);
+      setListenerCount(0);
+      return;
+    }
 
     const token = getAccessToken();
     const socket = io('/reading-sessions', {
@@ -87,7 +96,7 @@ export function useAudioSession({ userId }: AudioSessionOptions) {
       socket.disconnect();
       socketRef.current = null;
     };
-  }, [userId]);
+  }, [enabled, userId]);
 
   const joinSessionRoom = useCallback((sessionId: string): void => {
     if (!socketRef.current?.connected) return;

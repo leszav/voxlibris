@@ -25,8 +25,8 @@ export function KeyboardHelp({ isOpen, onClose }: KeyboardHelpProps) {
   ];
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-background border rounded-lg shadow-lg max-w-md w-full mx-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4 py-6">
+      <div className="max-h-[calc(100dvh-3rem)] w-full max-w-md overflow-y-auto rounded-lg border bg-background shadow-lg">
         <div className="p-6">
           <div className="flex items-center gap-2 mb-4">
             <Keyboard className="w-5 h-5" />
