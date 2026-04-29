@@ -1,7 +1,5 @@
 import { Node, mergeAttributes } from "@tiptap/core";
 
-export const SPOILER_BLOCK_LABEL = "Спойлер";
-
 export const SpoilerBlock = Node.create({
   name: "spoilerBlock",
 
@@ -27,23 +25,7 @@ export const SpoilerBlock = Node.create({
       mergeAttributes(HTMLAttributes, {
         "data-spoiler-block": "true",
       }),
-      [
-        "div",
-        {
-          "data-spoiler-label": "true",
-          role: "button",
-          tabindex: "0",
-          contenteditable: "false",
-        },
-        SPOILER_BLOCK_LABEL,
-      ],
-      [
-        "div",
-        {
-          "data-spoiler-content": "true",
-        },
-        0,
-      ],
+      0,
     ];
   },
 });

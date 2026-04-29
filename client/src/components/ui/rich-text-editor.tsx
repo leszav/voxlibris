@@ -8,6 +8,7 @@ import TextAlign from "@tiptap/extension-text-align";
 import { cn } from "@/lib/utils";
 import { modalPrompt, useToast } from "@/hooks/use-toast";
 import { SpoilerBlock } from "@/components/ui/spoiler-block-extension";
+import { SpoilerMark } from "@/components/ui/spoiler-mark-extension";
 import {
   Bold, Italic, Strikethrough,
   List, ListOrdered, Quote, Undo, Redo,
@@ -110,6 +111,7 @@ export const RichTextEditor = React.forwardRef<RichTextEditorRef, RichTextEditor
         TextAlign.configure({
           types: ["heading", "paragraph"],
         }),
+        SpoilerMark,
         SpoilerBlock,
       ],
       content: value || initialValue || "",
@@ -188,12 +190,38 @@ export const RichTextEditor = React.forwardRef<RichTextEditorRef, RichTextEditor
       return paragraphs.length > 0 ? paragraphs : null;
     };
 
-    const insertSpoilerBlock = () => {
-      const spoilerContent = buildSpoilerBlockContent();
-      if (!spoilerContent) {
+    const isInlineSpoilerSelection = () => {
+      const { from, to, empty } = editor.state.selection;
+      if (empty) {
+        return false;
+      }
+
+      const selectedText = editor.state.doc.textBetween(from, to, "\n\n");
+      return !selectedText.includes("\n");
+    };
+
+    const insertSpoiler = () => {
+      const { empty } = editor.state.selection;
+
+      if (empty) {
         toast({
           title: "Сначала выделите текст",
           description: "Спойлер можно создать только для уже выделенного фрагмента текста.",
+        });
+        return;
+      }
+
+      if (isInlineSpoilerSelection()) {
+        editor.chain().focus().toggleMark("spoiler").run();
+        return;
+      }
+
+      const spoilerContent = buildSpoilerBlockContent();
+      if (!spoilerContent) {
+        toast({
+          title: "Не удалось скрыть текст",
+          description: "Попробуйте выделить цельный фрагмент текста ещё раз.",
+          variant: "destructive",
         });
         return;
       }
@@ -252,7 +280,18 @@ export const RichTextEditor = React.forwardRef<RichTextEditorRef, RichTextEditor
             color: hsl(var(--primary));
             text-decoration: underline;
           }
-        `}</style>
+          .ProseMirror [data-spoiler="true"] {
+            border-radius: 0.35rem;
+            background: linear-gradient(90deg, rgba(148, 163, 184, 0.35), rgba(203, 213, 225, 0.5), rgba(148, 163, 184, 0.35));
+            color: transparent;
+            text-shadow: none;
+          }
+          .ProseMirror [data-spoiler-block="true"] {
+            border-radius: 0.85rem;
+            background: linear-gradient(90deg, rgba(148, 163, 184, 0.18), rgba(203, 213, 225, 0.28), rgba(148, 163, 184, 0.18));
+            padding: 0.2rem 0.35rem;
+          }
+          `}</style>
         <div className="flex items-center gap-1 p-2 border-b bg-muted/50 flex-wrap">
           <HeadingDropdown editor={editor} />
           <MenuButton onClick={() => editor.chain().focus().toggleBold().run()} active={editor.isActive("bold")} title="Жирный (Ctrl+B)">
@@ -289,7 +328,7 @@ export const RichTextEditor = React.forwardRef<RichTextEditorRef, RichTextEditor
             <Quote className="w-4 h-4" />
           </MenuButton>
           {enableSpoilerBlocks && (
-            <MenuButton onClick={insertSpoilerBlock} title="Скрыть текст в блоке-спойлере">
+            <MenuButton onClick={insertSpoiler} title="Скрыть выделенный текст">
               <EyeOff className="w-4 h-4" />
             </MenuButton>
           )}
