@@ -6,12 +6,13 @@ import Color from "@tiptap/extension-color";
 import Link from "@tiptap/extension-link";
 import TextAlign from "@tiptap/extension-text-align";
 import { cn } from "@/lib/utils";
-import { modalPrompt } from "@/hooks/use-toast";
+import { modalPrompt, useToast } from "@/hooks/use-toast";
+import { SpoilerBlock } from "@/components/ui/spoiler-block-extension";
 import {
   Bold, Italic, Strikethrough,
   List, ListOrdered, Quote, Undo, Redo,
   AlignLeft, AlignCenter, AlignRight,
-  Link as LinkIcon, ChevronDown,
+  Link as LinkIcon, ChevronDown, EyeOff,
   Heading1
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -32,6 +33,7 @@ interface RichTextEditorProps {
   readonly className?: string;
   readonly value?: string;
   readonly maxLength?: number;
+  readonly enableSpoilerBlocks?: boolean;
 }
 
 interface MenuButtonProps {
@@ -87,7 +89,8 @@ function HeadingDropdown({ editor }: HeadingDropdownProps): React.ReactElement {
 }
 
 export const RichTextEditor = React.forwardRef<RichTextEditorRef, RichTextEditorProps>(
-  ({ initialValue, onChange, className = "", value, maxLength = 3000 }, ref) => {
+  ({ initialValue, onChange, className = "", value, maxLength = 3000, enableSpoilerBlocks = false }, ref) => {
+    const { toast } = useToast();
     const editor = useEditor({
       extensions: [
         StarterKit.configure({
@@ -107,6 +110,7 @@ export const RichTextEditor = React.forwardRef<RichTextEditorRef, RichTextEditor
         TextAlign.configure({
           types: ["heading", "paragraph"],
         }),
+        SpoilerBlock,
       ],
       content: value || initialValue || "",
       editorProps: {
@@ -156,6 +160,49 @@ export const RichTextEditor = React.forwardRef<RichTextEditorRef, RichTextEditor
     if (!editor) {
       return null;
     }
+
+    const buildSpoilerBlockContent = () => {
+      const { from, to, empty } = editor.state.selection;
+
+      if (empty) {
+        return null;
+      }
+
+      const selectedText = editor.state.doc
+        .textBetween(from, to, "\n\n")
+        .trim();
+
+      if (!selectedText) {
+        return null;
+      }
+
+      const paragraphs = selectedText
+        .split(/\n{2,}/)
+        .map((paragraph) => paragraph.replace(/\n+/g, " ").trim())
+        .filter((paragraph) => paragraph.length > 0)
+        .map((paragraph) => ({
+          type: "paragraph",
+          content: [{ type: "text", text: paragraph }],
+        }));
+
+      return paragraphs.length > 0 ? paragraphs : null;
+    };
+
+    const insertSpoilerBlock = () => {
+      const spoilerContent = buildSpoilerBlockContent();
+      if (!spoilerContent) {
+        toast({
+          title: "Сначала выделите текст",
+          description: "Спойлер можно создать только для уже выделенного фрагмента текста.",
+        });
+        return;
+      }
+
+      editor.chain().focus().insertContent({
+        type: "spoilerBlock",
+        content: spoilerContent,
+      }).run();
+    };
 
     // Получаем текущую длину текста
     const currentLength = editor.getText().length;
@@ -241,6 +288,11 @@ export const RichTextEditor = React.forwardRef<RichTextEditorRef, RichTextEditor
           <MenuButton onClick={() => editor.chain().focus().toggleBlockquote().run()} active={editor.isActive("blockquote")} title="Цитата">
             <Quote className="w-4 h-4" />
           </MenuButton>
+          {enableSpoilerBlocks && (
+            <MenuButton onClick={insertSpoilerBlock} title="Скрыть текст в блоке-спойлере">
+              <EyeOff className="w-4 h-4" />
+            </MenuButton>
+          )}
           <div className="w-px h-6 bg-border mx-1" />
           <MenuButton onClick={() => editor.chain().focus().setTextAlign("left").run()} active={editor.isActive({ textAlign: "left" })} title="По левому краю">
             <AlignLeft className="w-4 h-4" />

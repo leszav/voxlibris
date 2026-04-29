@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo, useState } from 'react';
 import { cn } from '@/lib/utils';
 
 interface HtmlContentRendererProps {
@@ -7,6 +7,51 @@ interface HtmlContentRendererProps {
 }
 
 export function HtmlContentRenderer({ content, className }: HtmlContentRendererProps): React.ReactElement {
+  const [expandedSpoilers, setExpandedSpoilers] = useState<Record<string, boolean>>({});
+
+  const processedContent = useMemo(() => {
+    let spoilerIndex = 0;
+    return content.replace(/<div\s+data-spoiler-block="true"/g, () => {
+      spoilerIndex += 1;
+      return `<div data-spoiler-block="true" data-spoiler-id="spoiler-${spoilerIndex}"`;
+    });
+  }, [content]);
+
+  const handleClick = (event: React.MouseEvent<HTMLDivElement>) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) {
+      return;
+    }
+
+    const spoilerLabel = target.closest<HTMLElement>('[data-spoiler-label="true"]');
+    if (!spoilerLabel) {
+      return;
+    }
+
+    const spoilerRoot = spoilerLabel.closest<HTMLElement>('[data-spoiler-block="true"]');
+    if (!spoilerRoot) {
+      return;
+    }
+
+    const spoilerId = spoilerRoot.dataset.spoilerId;
+    if (!spoilerId) {
+      return;
+    }
+
+    setExpandedSpoilers((prev) => ({
+      ...prev,
+      [spoilerId]: !prev[spoilerId],
+    }));
+  };
+
+  const spoilerStyles = Object.entries(expandedSpoilers)
+    .filter(([, expanded]) => expanded)
+    .map(([spoilerId]) => [
+      `.prose [data-spoiler-id="${spoilerId}"] [data-spoiler-content="true"]{display:block;}`,
+      `.prose [data-spoiler-id="${spoilerId}"] [data-spoiler-label="true"]::after{content:"Скрыть";}`,
+    ].join("\n"))
+    .join("\n");
+
   return (
     <>
       <style>{`
@@ -44,10 +89,41 @@ export function HtmlContentRenderer({ content, className }: HtmlContentRendererP
         .prose s {
           text-decoration: line-through;
         }
+        .prose [data-spoiler-block="true"] {
+          margin: 0.75rem 0;
+          overflow: hidden;
+          border: 1px solid hsl(var(--border));
+          border-radius: 0.9rem;
+          background: hsl(var(--muted) / 0.35);
+        }
+        .prose [data-spoiler-label="true"] {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 0.75rem;
+          cursor: pointer;
+          padding: 0.75rem 0.95rem;
+          font-size: 0.875rem;
+          font-weight: 600;
+          color: hsl(var(--foreground));
+          user-select: none;
+        }
+        .prose [data-spoiler-label="true"]::after {
+          content: "Показать";
+          font-size: 0.75rem;
+          font-weight: 500;
+          color: hsl(var(--muted-foreground));
+        }
+        .prose [data-spoiler-content="true"] {
+          display: none;
+          padding: 0 0.95rem 0.9rem;
+        }
+        ${spoilerStyles}
       `}</style>
       <div
+        onClick={handleClick}
         className={cn('prose prose-sm max-w-none', className)}
-        dangerouslySetInnerHTML={{ __html: content }}
+        dangerouslySetInnerHTML={{ __html: processedContent }}
       />
     </>
   );
