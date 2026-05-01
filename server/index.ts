@@ -45,6 +45,7 @@ import studioStreamRouter from "./routes/studio-stream.js";
 import { logger } from "./lib/logger.js";
 import { loadFeatureFlags } from "./lib/feature-flags.js";
 import { responseCompression } from "./lib/response-compression.js";
+import { createIcecastLiveProxy } from "./lib/icecast-live-proxy.js";
 
 export const app = express();
 
@@ -682,6 +683,12 @@ app.use(express.urlencoded({ extended: false, limit: process.env.URLENCODED_BODY
 
 // Cookie parser для работы с JWT токенами в cookies
 app.use(cookieParser());
+
+// ===== Icecast Live Stream Proxy =====
+// Проксируем /live/* запросы на Icecast для слушателей
+// Это должно быть ПЕРЕД всеми другими middleware, чтобы не попадать в rate-limiting
+app.get('/live/:sessionId', createIcecastLiveProxy());
+app.head('/live/:sessionId', createIcecastLiveProxy());
 
 // Setup JWT-based authentication routes
 // Применить rate limiting middleware
