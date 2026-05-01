@@ -293,9 +293,13 @@ router.post(
       setActiveStudioStream(sessionId, { mountPath, recordingPath });
 
       if (!res.headersSent) {
-        res.status(200);
-        res.setHeader('Content-Type', 'application/json');
-        res.flushHeaders();
+        // Закрываем response сразу после подтверждения старта.
+        // При HTTP/2 upload и response — независимые потоки: request body (upload)
+        // продолжается независимо от того, закрыт ли response.
+        // Держать response открытым нельзя: Chrome при duplex fetch + HTTP/2
+        // ожидает потребления response body; неконсюмированный открытый response
+        // приводит к RST_STREAM и обрыву upload примерно через 300s.
+        res.status(200).json({ streaming: true, mountPath });
       }
     });
 
