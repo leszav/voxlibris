@@ -18,6 +18,13 @@ MAX_CLIENTS="${ICECAST_MAX_CLIENTS:-1000}"
 MAX_SOURCES="${ICECAST_MAX_SOURCES:-20}"
 BURST_SIZE="${ICECAST_BURST_SIZE:-65536}"
 
+# --- Совместимость путей web/admin между разными сборками icecast ---
+# Часть окружений ожидает /usr/local/icecast/*, при этом файлы могут лежать в /usr/share/icecast/*.
+# Делаем стабильные symlink-пути до генерации конфига, чтобы status/admin XSL всегда были доступны.
+mkdir -p /usr/local/icecast
+ln -sfn /usr/share/icecast/web /usr/local/icecast/webroot
+ln -sfn /usr/share/icecast/admin /usr/local/icecast/admin
+
 # --- Генерация конфига из переменных окружения ---
 cat > /etc/icecast2/icecast.xml << EOF
 <icecast>
@@ -56,8 +63,8 @@ cat > /etc/icecast2/icecast.xml << EOF
 
   <paths>
     <logdir>/var/log/icecast</logdir>
-    <webroot>/usr/share/icecast/web</webroot>
-    <adminroot>/usr/share/icecast/admin</adminroot>
+    <webroot>/usr/local/icecast/webroot</webroot>
+    <adminroot>/usr/local/icecast/admin</adminroot>
   </paths>
 
   <logging>

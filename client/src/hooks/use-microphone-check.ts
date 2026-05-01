@@ -21,6 +21,14 @@ const MAX_GAIN = 3;
 const MIN_DBFS = -65;
 const MAX_DBFS = -6;
 const DB_EPSILON = 1e-7;
+const MEDIA_RECORDER_MIME_CANDIDATES = [
+  'audio/webm;codecs=opus',
+  'audio/webm',
+  'audio/mp4;codecs=mp4a.40.2',
+  'audio/mp4',
+  'audio/ogg;codecs=opus',
+  'audio/ogg',
+];
 
 function clamp(value: number, min: number = 0, max: number = 100): number {
   return Math.max(min, Math.min(max, value));
@@ -61,6 +69,27 @@ function mapMicError(error: unknown): string {
   }
 
   return error.message || 'Не удалось получить доступ к микрофону';
+}
+
+function getPreferredMediaRecorderMimeType(): string | undefined {
+  if (!globalThis.MediaRecorder?.isTypeSupported) {
+    return undefined;
+  }
+
+  return MEDIA_RECORDER_MIME_CANDIDATES.find((mimeType) => MediaRecorder.isTypeSupported(mimeType));
+}
+
+function resolveRecordedBlobMimeType(recorder: MediaRecorder, chunks: Blob[]): string {
+  if (recorder.mimeType) {
+    return recorder.mimeType;
+  }
+
+  const firstChunkType = chunks.find((chunk) => chunk.type)?.type;
+  if (firstChunkType) {
+    return firstChunkType;
+  }
+
+  return 'audio/webm';
 }
 
 export function useMicrophoneCheck() {
@@ -353,7 +382,10 @@ export function useMicrophoneCheck() {
     recordingVolumeSamplesRef.current = [];
     recordingNoiseSamplesRef.current = [];
 
-    const mediaRecorder = new MediaRecorder(recordingStream);
+    const preferredMimeType = getPreferredMediaRecorderMimeType();
+    const mediaRecorder = preferredMimeType
+      ? new MediaRecorder(recordingStream, { mimeType: preferredMimeType })
+      : new MediaRecorder(recordingStream);
     mediaRecorderRef.current = mediaRecorder;
 
     mediaRecorder.ondataavailable = (event) => {
@@ -364,7 +396,9 @@ export function useMicrophoneCheck() {
 
     return await new Promise<Blob>((resolve, reject) => {
       mediaRecorder.onstop = () => {
-        resolve(new Blob(audioChunksRef.current, { type: 'audio/webm' }));
+        resolve(new Blob(audioChunksRef.current, {
+          type: resolveRecordedBlobMimeType(mediaRecorder, audioChunksRef.current),
+        }));
       };
 
       mediaRecorder.onerror = () => {
