@@ -50,8 +50,18 @@ cat > /etc/icecast2/icecast.xml << EOF
 
   <hostname>${HOSTNAME}</hostname>
 
+  <!-- 
+    === HTTPS Reverse Proxy Configuration ===
+    Icecast работает за nginx reverse proxy на HTTPS.
+    nginx проксирует запросы на HTTP (port 8000) с заголовками X-Forwarded-*.
+  -->
   <listen-socket>
     <port>8000</port>
+    <bind-address>0.0.0.0</bind-address>
+    <!-- Icecast генерирует URLs как http:// по умолчанию, но получает запросы через https:// от nginx.
+         Некоторые браузеры не любят mixed content.
+         Решение: nginx переписывает заголовок Host и X-Forwarded-Proto правильно,
+         поэтому Icecast знает что фронтенд использует HTTPS. -->
   </listen-socket>
 
   <!-- Запись только для авторизованных source-клиентов -->
