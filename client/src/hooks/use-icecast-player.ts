@@ -48,6 +48,21 @@ let stallTimer: ReturnType<typeof setInterval> | null = null;
 let lastUpdateTime = 0;
 let suppressNextAudioError = false;
 
+function normalizePublicStreamUrl(streamUrl: string): string {
+  try {
+    const url = new URL(streamUrl, globalThis.location?.origin);
+    if (url.hostname === 'radio.voxlibris.ru' && url.port === '8000' && url.pathname.startsWith('/live/')) {
+      url.protocol = 'https:';
+      url.port = '';
+      return url.toString();
+    }
+  } catch {
+    // Ignore malformed URLs and let the native audio element surface the error.
+  }
+
+  return streamUrl;
+}
+
 const statusListeners = new Set<StatusListener>();
 const errorListeners = new Set<ErrorListener>();
 
@@ -128,19 +143,20 @@ function startStallDetection(audio: HTMLAudioElement): void {
 
 async function startSharedPlayback(streamUrl: string, autoPlay: boolean, initialVolume: number): Promise<void> {
   const audio = ensureSharedAudio(initialVolume);
+  const normalizedStreamUrl = normalizePublicStreamUrl(streamUrl);
   sharedError = null;
   sharedVolume = initialVolume;
   audio.volume = initialVolume;
 
-  if (sharedStreamUrl === streamUrl && !audio.paused && !audio.ended) {
+  if (sharedStreamUrl === normalizedStreamUrl && !audio.paused && !audio.ended) {
     notifyStatus('playing');
     return;
   }
 
-  if (sharedStreamUrl !== streamUrl) {
+  if (sharedStreamUrl !== normalizedStreamUrl) {
     audio.pause();
-    audio.src = streamUrl;
-    sharedStreamUrl = streamUrl;
+    audio.src = normalizedStreamUrl;
+    sharedStreamUrl = normalizedStreamUrl;
   }
 
   if (!autoPlay) {

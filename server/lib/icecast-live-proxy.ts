@@ -92,10 +92,10 @@ export function createIcecastLiveProxy() {
           // Обработка ошибок stream
           icecastRes.on('error', (err) => {
             logger.error({ error: err }, `[icecast-proxy] Icecast response error for ${path}`);
-            if (!res.headersSent) {
-              res.status(502).json({ error: 'Bad gateway - Icecast error' });
-            } else {
+              if (res.headersSent) {
               res.destroy();
+              } else {
+                res.status(502).json({ error: 'Bad gateway - Icecast error' });
             }
           });
         },

@@ -17,6 +17,10 @@ function getCacheControlHeader(relativePath: string) {
     return "no-cache";
   }
 
+  if (relativePath === "sw.js") {
+    return "no-cache, no-store, must-revalidate";
+  }
+
   if (relativePath.startsWith("assets/")) {
     return "public, max-age=31536000, immutable";
   }
@@ -61,11 +65,12 @@ function trySendPrecompressedAsset(req: express.Request, res: express.Response, 
   const supportsBrotli = typeof acceptEncoding === "string" && acceptEncoding.includes("br");
   const supportsGzip = typeof acceptEncoding === "string" && acceptEncoding.includes("gzip");
 
-  const candidatePath = supportsBrotli && fs.existsSync(`${absolutePath}.br`)
-    ? { filePath: `${absolutePath}.br`, encoding: "br" }
-    : supportsGzip && fs.existsSync(`${absolutePath}.gz`)
-      ? { filePath: `${absolutePath}.gz`, encoding: "gzip" }
-      : null;
+  let candidatePath: { filePath: string; encoding: "br" | "gzip" } | null = null;
+  if (supportsBrotli && fs.existsSync(`${absolutePath}.br`)) {
+    candidatePath = { filePath: `${absolutePath}.br`, encoding: "br" };
+  } else if (supportsGzip && fs.existsSync(`${absolutePath}.gz`)) {
+    candidatePath = { filePath: `${absolutePath}.gz`, encoding: "gzip" };
+  }
 
   if (!candidatePath) {
     return false;
