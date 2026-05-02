@@ -21,6 +21,7 @@
  */
 
 import { Router, type Request, type Response } from 'express';
+import http from 'node:http';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import { PassThrough } from 'node:stream';
@@ -49,6 +50,9 @@ const ICECAST_INTERNAL_HOST = process.env.ICECAST_INTERNAL_HOST || 'srv-captain-
 const ICECAST_INTERNAL_PORT = Number.parseInt(process.env.ICECAST_INTERNAL_PORT || '8000', 10);
 const ICECAST_SOURCE_PASSWORD = process.env.ICECAST_SOURCE_PASSWORD;
 const STUDIO_RECORDINGS_DIR = getStudioRecordingsDir();
+const ICECAST_MOUNT_PROBE_ATTEMPTS = 12;
+const ICECAST_MOUNT_PROBE_DELAY_MS = 250;
+const FORCE_PUBLISHER_SHUTDOWN_TIMEOUT_MS = 3000;
 
 const ALLOWED_AUDIO_CONTENT_TYPES = new Set([
   'audio/webm',
@@ -64,6 +68,54 @@ function isAllowedAudioContentType(contentType: string | undefined): boolean {
   for (const allowed of ALLOWED_AUDIO_CONTENT_TYPES) {
     if (normalized.startsWith(allowed)) return true;
   }
+  return false;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+async function probeIcecastMount(mountPath: string): Promise<boolean> {
+  return await new Promise((resolve) => {
+    const request = http.request({
+      hostname: ICECAST_INTERNAL_HOST,
+      port: ICECAST_INTERNAL_PORT,
+      path: mountPath,
+      method: 'GET',
+      headers: {
+        'User-Agent': 'VoxLibris-Mount-Probe/1.0',
+      },
+    }, (response) => {
+      const ok = response.statusCode === 200;
+      response.destroy();
+      resolve(ok);
+    });
+
+    request.setTimeout(1500, () => {
+      request.destroy(new Error('Icecast mount probe timed out'));
+    });
+
+    request.on('error', () => {
+      resolve(false);
+    });
+
+    request.end();
+  });
+}
+
+async function waitForIcecastMount(mountPath: string): Promise<boolean> {
+  for (let attempt = 0; attempt < ICECAST_MOUNT_PROBE_ATTEMPTS; attempt += 1) {
+    if (await probeIcecastMount(mountPath)) {
+      return true;
+    }
+
+    if (attempt < ICECAST_MOUNT_PROBE_ATTEMPTS - 1) {
+      await sleep(ICECAST_MOUNT_PROBE_DELAY_MS);
+    }
+  }
+
   return false;
 }
 
@@ -179,6 +231,26 @@ router.post(
     let isShuttingDown = false;
     let shutdownReason: string | null = null;
     let recordingFinalized = false;
+    let mountConfirmed = false;
+    let forceShutdownTimer: NodeJS.Timeout | null = null;
+
+    const clearForceShutdownTimer = () => {
+      if (!forceShutdownTimer) {
+        return;
+      }
+
+      clearTimeout(forceShutdownTimer);
+      forceShutdownTimer = null;
+    };
+
+    const scheduleForceShutdown = () => {
+      clearForceShutdownTimer();
+      forceShutdownTimer = setTimeout(() => {
+        try { ffmpeg.kill('SIGKILL'); } catch { /* ignore */ }
+        try { icecastPublisher.kill('SIGKILL'); } catch { /* ignore */ }
+      }, FORCE_PUBLISHER_SHUTDOWN_TIMEOUT_MS);
+      forceShutdownTimer.unref?.();
+    };
 
     const finalizeRecording = async (): Promise<void> => {
       if (recordingFinalized) {
@@ -223,6 +295,7 @@ router.post(
       } catch (err) {
         logger.error({ err, sessionId, recordingPath }, 'Failed to finalize studio recording');
       } finally {
+        clearForceShutdownTimer();
         await clearStudioStreamClosureIntent(sessionId);
       }
     };
@@ -236,19 +309,21 @@ router.post(
       shutdownReason = reason;
       logger.info({ sessionId, reason }, 'Closing stream');
       clearActiveStudioStream(sessionId);
-      try { ffmpeg.stdin.destroy(); } catch { /* ignore */ }
-      try { ffmpeg.kill('SIGTERM'); } catch { /* ignore */ }
-      try { icecastPublishStream.destroy(); } catch { /* ignore */ }
-      try { icecastPublisher.stdin.destroy(); } catch { /* ignore */ }
-      try { icecastPublisher.kill('SIGTERM'); } catch { /* ignore */ }
-      // recordingStream.end() вместо destroy() — дренирует буфер PassThrough в файл.
-      // destroy() выбрасывает буфер немедленно → 0 байт если данные не успели пройти.
-      // pipe({ end: true }) (default) автоматически вызовет recordingWriteStream.end().
+
       recordingWriteStream.once('finish', () => {
         void finalizeRecording();
       });
-      try { recordingStream.end(); } catch { /* ignore */ }
-      if (!res.writableEnded) res.end();
+
+      try { req.unpipe(ffmpeg.stdin); } catch { /* ignore */ }
+      try { ffmpeg.stdin.end(); } catch {
+        try { ffmpeg.stdin.destroy(); } catch { /* ignore */ }
+      }
+
+      scheduleForceShutdown();
+
+      if (res.headersSent && !res.writableEnded) {
+        res.end();
+      }
     };
 
     recordingWriteStream.on('error', (err) => {
@@ -281,28 +356,42 @@ router.post(
 
     icecastPublisher.on('error', (err) => {
       logger.error({ err, sessionId }, 'ffmpeg icecast publisher error');
-      cleanup('icecast-publisher-error');
       if (!res.headersSent) {
         res.status(502).json({ error: 'Cannot connect to streaming server' });
       }
+      cleanup('icecast-publisher-error');
     });
 
-    let liveAccepted = false;
+    const confirmMountAndRespond = async (): Promise<void> => {
+      const mountReady = await waitForIcecastMount(mountPath);
+      if (isShuttingDown || mountConfirmed) {
+        return;
+      }
 
-    icecastPublisher.on('spawn', () => {
-      liveAccepted = true;
-      logger.info({ sessionId, mountPath, recordingPath, recordingFileName }, 'Icecast publish process started');
+      if (!mountReady) {
+        logger.error({ sessionId, mountPath }, 'Icecast publisher started but mount did not become available');
+        if (!res.headersSent) {
+          res.status(502).json({ error: 'Streaming server did not expose live stream' });
+        }
+        cleanup('icecast-mount-timeout');
+        return;
+      }
+
+      mountConfirmed = true;
+      logger.info({ sessionId, mountPath, recordingPath, recordingFileName }, 'Icecast live mount confirmed');
       setActiveStudioStream(sessionId, { mountPath, recordingPath });
 
       if (!res.headersSent) {
-        // Закрываем response сразу после подтверждения старта.
-        // При HTTP/2 upload и response — независимые потоки: request body (upload)
-        // продолжается независимо от того, закрыт ли response.
-        // Держать response открытым нельзя: Chrome при duplex fetch + HTTP/2
-        // ожидает потребления response body; неконсюмированный открытый response
-        // приводит к RST_STREAM и обрыву upload примерно через 300s.
+        // Возвращаем 200 только после фактического появления live mount.
+        // Это снижает риск ложного "эфир начался" в production, когда
+        // ffmpeg-процесс уже spawned, но Icecast ещё не отдал live mount.
         res.status(200).json({ streaming: true, mountPath });
       }
+    };
+
+    icecastPublisher.on('spawn', () => {
+      logger.info({ sessionId, mountPath, recordingPath, recordingFileName }, 'Icecast publish process started');
+      void confirmMountAndRespond();
     });
 
     icecastPublisher.on('close', (code) => {
@@ -310,8 +399,12 @@ router.post(
         logger.warn({ sessionId, code }, 'ffmpeg icecast publisher exited with non-zero code');
       }
 
-      if (!liveAccepted && !res.headersSent) {
+      if (!mountConfirmed && !res.headersSent) {
         res.status(502).json({ error: 'Streaming server rejected the connection' });
+      }
+
+      if (!isShuttingDown) {
+        cleanup('icecast-publisher-close');
       }
     });
 
