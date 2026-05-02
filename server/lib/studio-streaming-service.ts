@@ -1,5 +1,5 @@
 import { storage } from '../repositories/index.js';
-import { getStudioPublicStreamUrl } from './studio-streaming-state.js';
+import { getStudioPublicStreamUrl, hasActiveStudioStream } from './studio-streaming-state.js';
 
 export interface StudioStreamSessionValidationResult {
   ok: boolean;
@@ -90,14 +90,16 @@ export async function buildStudioStreamStatus(sessionId: string): Promise<{
     };
   }
 
+  const hasLiveStream = hasActiveStudioStream(sessionId);
+
   return {
     ok: true,
     status: 200,
     payload: {
       sessionId,
-      isLive: session.isLive && session.isActive,
-      isPaused: session.isActive && !session.isLive,
-      streamUrl: session.isLive && session.isActive
+      isLive: hasLiveStream,
+      isPaused: session.isActive && !hasLiveStream && !session.isLive,
+      streamUrl: hasLiveStream
         ? getStudioPublicStreamUrl(sessionId)
         : null,
     },

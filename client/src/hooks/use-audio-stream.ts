@@ -13,6 +13,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { apiRequest } from '@/lib/queryClient';
 import {
   getStudioStreamConnectionErrorMessage,
   getStudioStreamStartErrorMessage,
@@ -30,6 +31,7 @@ import { createStudioRecordingBlob } from '@/lib/studio-recording-blob';
 import { bindStudioMicrophoneEnded } from '@/lib/studio-media-track';
 import { createStudioStreamingBody } from '@/lib/studio-streaming-body';
 import { startStudioStreamIngest } from '@/lib/studio-streaming-gateway';
+import { getStudioStreamStatusUrl, type StudioStreamStatusResponse } from '@/lib/studio-streaming';
 
 // --- Типы ---
 
@@ -68,6 +70,34 @@ export interface AudioStreamControls {
 
 // --- Вспомогательные ---
 
+const STUDIO_STREAM_READY_ATTEMPTS = 24;
+const STUDIO_STREAM_READY_DELAY_MS = 250;
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError';
+}
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException('Aborted', 'AbortError'));
+      return;
+    }
+
+    const timeout = globalThis.setTimeout(() => {
+      signal?.removeEventListener('abort', handleAbort);
+      resolve();
+    }, ms);
+
+    const handleAbort = () => {
+      globalThis.clearTimeout(timeout);
+      reject(new DOMException('Aborted', 'AbortError'));
+    };
+
+    signal?.addEventListener('abort', handleAbort, { once: true });
+  });
+}
+
 // --- Хук ---
 
 export function useAudioStream(options: AudioStreamOptions): AudioStreamState & AudioStreamControls {
@@ -88,6 +118,7 @@ export function useAudioStream(options: AudioStreamOptions): AudioStreamState & 
   const fetchPromiseRef = useRef<Promise<void> | null>(null);
   const detachTrackEndedRef = useRef<(() => void) | null>(null);
   const statusRef = useRef<StreamStatus>('idle');
+  const errorRef = useRef<string | null>(null);
   const pausedRef = useRef(false);
   const mutedRef = useRef(false);
   const mimeTypeRef = useRef<string | null>(null);
@@ -103,16 +134,51 @@ export function useAudioStream(options: AudioStreamOptions): AudioStreamState & 
   }, [onStatusChange]);
 
   const reportMicError = useCallback((message: string) => {
+    errorRef.current = message;
     setError(message);
     updateStatus('error');
     onError?.(message, 'microphone');
   }, [onError, updateStatus]);
 
   const reportStreamError = useCallback((message: string) => {
+    errorRef.current = message;
     setError(message);
     updateStatus('error');
     onError?.(message, 'stream');
   }, [onError, updateStatus]);
+
+  const waitForStudioStreamReady = useCallback(async (
+    activeSessionId: string,
+    signal: AbortSignal,
+    getTerminalIngestError: () => string | null,
+  ): Promise<void> => {
+    for (let attempt = 0; attempt < STUDIO_STREAM_READY_ATTEMPTS; attempt += 1) {
+      const terminalIngestError = getTerminalIngestError();
+      if (terminalIngestError) {
+        throw new Error(terminalIngestError);
+      }
+
+      const statusResponse = await apiRequest<StudioStreamStatusResponse>(
+        getStudioStreamStatusUrl(activeSessionId),
+        { signal },
+      );
+
+      if (statusResponse.isLive && statusResponse.streamUrl) {
+        return;
+      }
+
+      if (attempt < STUDIO_STREAM_READY_ATTEMPTS - 1) {
+        await sleep(STUDIO_STREAM_READY_DELAY_MS, signal);
+      }
+    }
+
+    const terminalIngestError = getTerminalIngestError();
+    if (terminalIngestError) {
+      throw new Error(terminalIngestError);
+    }
+
+    throw new Error('Сервер стрима не подтвердил live-поток');
+  }, []);
 
   const applyTrackState = useCallback(() => {
     const enabled = !(pausedRef.current || mutedRef.current);
@@ -195,8 +261,7 @@ export function useAudioStream(options: AudioStreamOptions): AudioStreamState & 
 
   const startStreamingTransport = useCallback(async (stream: MediaStream, mimeType: string): Promise<void> => {
     if (!sessionId) {
-      reportStreamError('sessionId обязателен для запуска стрима');
-      return;
+      throw new Error('sessionId обязателен для запуска стрима');
     }
 
     pauseRequestedRef.current = false;
@@ -227,6 +292,7 @@ export function useAudioStream(options: AudioStreamOptions): AudioStreamState & 
     // 3. Запускаем fetch (long-running streaming request)
     const controller = new AbortController();
     abortControllerRef.current = controller;
+    let terminalIngestError: string | null = null;
 
     fetchPromiseRef.current = (async () => {
       try {
@@ -239,13 +305,26 @@ export function useAudioStream(options: AudioStreamOptions): AudioStreamState & 
 
         const startErrorMessage = await getStudioStreamStartErrorMessage(response);
         if (startErrorMessage) {
+          terminalIngestError = startErrorMessage;
           reportStreamError(startErrorMessage);
           cleanup();
           return;
         }
 
-        // Сервер ответил 200 — Icecast принял поток
-        updateStatus('streaming');
+        if (pauseRequestedRef.current) {
+          pauseRequestedRef.current = false;
+          updateStatus('paused');
+          return;
+        }
+
+        if (statusRef.current === 'connecting' || statusRef.current === 'streaming') {
+          terminalIngestError = 'Соединение со стримом неожиданно завершилось';
+          reportStreamError(terminalIngestError);
+          cleanup();
+          return;
+        }
+
+        updateStatus('stopped');
 
       } catch (err) {
         const connectionErrorMessage = getStudioStreamConnectionErrorMessage(err);
@@ -257,9 +336,12 @@ export function useAudioStream(options: AudioStreamOptions): AudioStreamState & 
           }
 
           // Нормальное завершение через stop()
-          updateStatus('stopped');
+          if (statusRef.current !== 'error') {
+            updateStatus('stopped');
+          }
           return;
         }
+        terminalIngestError = connectionErrorMessage;
         reportStreamError(connectionErrorMessage);
         cleanup();
       }
@@ -268,8 +350,33 @@ export function useAudioStream(options: AudioStreamOptions): AudioStreamState & 
     // 4. Запускаем рекордер стрима
     streamRecorder.start(250); // chunk каждые 250 мс
 
-    await Promise.resolve();
-  }, [cleanup, reportMicError, reportStreamError, sessionId, updateStatus]);
+    try {
+      await waitForStudioStreamReady(sessionId, controller.signal, () => terminalIngestError);
+      updateStatus('streaming');
+    } catch (err) {
+      if (controller.signal.aborted) {
+        if (terminalIngestError) {
+          throw new Error(terminalIngestError);
+        }
+
+        if (statusRef.current === 'error' && errorRef.current) {
+          throw new Error(errorRef.current);
+        }
+
+        return;
+      }
+
+      const readinessErrorMessage = err instanceof Error
+        ? err.message
+        : 'Не удалось дождаться запуска live-потока';
+
+      if (statusRef.current !== 'error') {
+        reportStreamError(readinessErrorMessage);
+      }
+      cleanup();
+      throw new Error(readinessErrorMessage);
+    }
+  }, [cleanup, reportMicError, reportStreamError, sessionId, updateStatus, waitForStudioStreamReady]);
 
   // --- Запуск ---
 
@@ -281,6 +388,7 @@ export function useAudioStream(options: AudioStreamOptions): AudioStreamState & 
 
     if (statusRef.current === 'streaming' || statusRef.current === 'connecting') return;
 
+    errorRef.current = null;
     setError(null);
     setRecordingBlob(null);
     updateStatus('connecting');

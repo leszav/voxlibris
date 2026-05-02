@@ -380,13 +380,6 @@ router.post(
       mountConfirmed = true;
       logger.info({ sessionId, mountPath, recordingPath, recordingFileName }, 'Icecast live mount confirmed');
       setActiveStudioStream(sessionId, { mountPath, recordingPath });
-
-      if (!res.headersSent) {
-        // Возвращаем 200 только после фактического появления live mount.
-        // Это снижает риск ложного "эфир начался" в production, когда
-        // ffmpeg-процесс уже spawned, но Icecast ещё не отдал live mount.
-        res.status(200).json({ streaming: true, mountPath });
-      }
     };
 
     icecastPublisher.on('spawn', () => {
