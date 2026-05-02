@@ -77,6 +77,7 @@ export function useStudioMode({
   const [isInitialized, setIsInitialized] = useState(false);
   const initRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const startLockRef = useRef(false);
+  const awaitingSessionLiveSyncRef = useRef(false);
   const resourcesActivatedRef = useRef(enabled);
 
   if (enabled) {
@@ -160,8 +161,20 @@ export function useStudioMode({
 
   // ── Остановить поток при завершении сессии ─────────────────────────────
   useEffect(() => {
-    if (!session.isLive && isStreaming) stopAudioStream();
-  }, [session.isLive, isStreaming, stopAudioStream]);
+    if (session.isLive || !isStreaming) {
+      awaitingSessionLiveSyncRef.current = false;
+      return;
+    }
+
+    // Во время стартового handshake mount уже может подняться,
+    // а session.isLive обновится чуть позже отдельным /start-запросом.
+    // В это окно нельзя автоостанавливать ingest, иначе эфир сам себя гасит.
+    if (isStartingBroadcast || awaitingSessionLiveSyncRef.current) {
+      return;
+    }
+
+    stopAudioStream();
+  }, [session.isLive, isStreaming, isStartingBroadcast, stopAudioStream]);
 
   // ── Присоединиться к комнате сессии ────────────────────────────────────
   useEffect(() => {
@@ -265,6 +278,7 @@ export function useStudioMode({
       }
 
       startLockRef.current = true;
+      awaitingSessionLiveSyncRef.current = true;
       setIsStartingBroadcast(true);
       setStreamStartError(null);
       setMicrophoneIssue(null);
@@ -278,6 +292,7 @@ export function useStudioMode({
         setShowSummary(false);
         setShowEndConfirm(false);
       } catch (err) {
+        awaitingSessionLiveSyncRef.current = false;
         setStreamStartError(err instanceof Error ? err.message : 'Не удалось начать эфир');
       } finally {
         startLockRef.current = false;
