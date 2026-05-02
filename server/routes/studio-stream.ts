@@ -239,13 +239,15 @@ router.post(
       try { ffmpeg.stdin.destroy(); } catch { /* ignore */ }
       try { ffmpeg.kill('SIGTERM'); } catch { /* ignore */ }
       try { icecastPublishStream.destroy(); } catch { /* ignore */ }
-      try { recordingStream.destroy(); } catch { /* ignore */ }
       try { icecastPublisher.stdin.destroy(); } catch { /* ignore */ }
       try { icecastPublisher.kill('SIGTERM'); } catch { /* ignore */ }
+      // recordingStream.end() вместо destroy() — дренирует буфер PassThrough в файл.
+      // destroy() выбрасывает буфер немедленно → 0 байт если данные не успели пройти.
+      // pipe({ end: true }) (default) автоматически вызовет recordingWriteStream.end().
       recordingWriteStream.once('finish', () => {
         void finalizeRecording();
       });
-      try { recordingWriteStream.end(); } catch { /* ignore */ }
+      try { recordingStream.end(); } catch { /* ignore */ }
       if (!res.writableEnded) res.end();
     };
 

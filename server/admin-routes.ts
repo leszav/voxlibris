@@ -11,7 +11,7 @@ import { emailService } from './services/email-service.js';
 import { fileStorage } from './file-storage.js';
 import { CryptoService } from './crypto-service.js';
 import { z } from 'zod';
-import type { UserRole, UserStatus, AdminActionType, AdminActionTargetType } from '../shared/schema.js';
+import type { UserRole, UserStatus, AdminActionType, AdminActionTargetType, InsertGenre } from '../shared/schema.js';
 import { db } from './db.js';
 import postgres from 'postgres';
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
@@ -39,6 +39,16 @@ const adminGenreUpsertSchema = z.object({
 });
 
 const adminGenreUpdateSchema = adminGenreUpsertSchema.omit({ code: true }).partial();
+type AdminGenreUpdatePayload = z.infer<typeof adminGenreUpdateSchema>;
+
+function buildGenreUpdatePayload(payload: AdminGenreUpdatePayload): Partial<InsertGenre> {
+  const { aliases, ...genreFields } = payload;
+
+  return {
+    ...genreFields,
+    ...(Array.isArray(aliases) ? { aliasesJson: JSON.stringify(aliases) } : {}),
+  };
+}
 
 const router = express.Router();
 
@@ -1034,72 +1044,95 @@ interface BookConditions {
   clubWhere?: SQL<unknown>;
 }
 
-function buildBookConditions(filters: BookFilters): BookConditions {
-  const { search, status, genre } = filters;
-  const searchPattern = search ? `%${search}%` : null;
-  const genrePattern = genre ? `%${genre}%` : null;
+interface BookFilterPatterns {
+  searchPattern: string | null;
+  status?: string;
+  genrePattern: string | null;
+}
 
-  const sourceWhere = (conditions: SQL<unknown>[]): SQL<unknown> | undefined => {
-    if (conditions.length === 0) return undefined;
-    if (conditions.length === 1) return conditions[0];
-    return and(...conditions) as SQL<unknown>;
+type StatusConditionMap = Record<AdminBookStatus, SQL<unknown>>;
+
+function sourceWhere(conditions: SQL<unknown>[]): SQL<unknown> | undefined {
+  if (conditions.length === 0) return undefined;
+  if (conditions.length === 1) return conditions[0];
+  return and(...conditions) as SQL<unknown>;
+}
+
+function compactConditions(conditions: Array<SQL<unknown> | undefined>): SQL<unknown>[] {
+  return conditions.filter((condition): condition is SQL<unknown> => Boolean(condition));
+}
+
+function statusCondition(status: string | undefined, conditions: StatusConditionMap): SQL<unknown> | undefined {
+  if (isAdminBookStatus(status)) {
+    return conditions[status];
+  }
+
+  return undefined;
+}
+
+function buildBookFilterPatterns(filters: BookFilters): BookFilterPatterns {
+  return {
+    searchPattern: filters.search ? `%${filters.search}%` : null,
+    status: filters.status,
+    genrePattern: filters.genre ? `%${filters.genre}%` : null,
   };
+}
 
-  const booksConditions: SQL<unknown>[] = [];
-  if (searchPattern) {
-    booksConditions.push(
-      sql`(LOWER(${books.title}) LIKE ${searchPattern} OR LOWER(${books.author}) LIKE ${searchPattern})`
-    );
-  }
-  if (status === 'active') {
-    booksConditions.push(eq(books.status, 'active'));
-  } else if (status === 'blocked') {
-    booksConditions.push(eq(books.status, 'blocked'));
-  } else if (status === 'pending') {
-    booksConditions.push(sql`${books.status} NOT IN ('active', 'blocked')`);
-  }
-  if (genrePattern) {
-    booksConditions.push(sql`false`);
-  }
+function buildSystemBookConditions(filters: BookFilterPatterns): SQL<unknown>[] {
+  const { searchPattern, status, genrePattern } = filters;
 
-  const personalConditions: SQL<unknown>[] = [];
-  if (searchPattern) {
-    personalConditions.push(
-      sql`(LOWER(${personalBooks.title}) LIKE ${searchPattern} OR LOWER(${personalBooks.author}) LIKE ${searchPattern})`
-    );
-  }
-  if (status === 'active') {
-    personalConditions.push(eq(personalBooks.isDeleted, false));
-  } else if (status === 'blocked') {
-    personalConditions.push(eq(personalBooks.isDeleted, true));
-  } else if (status === 'pending') {
-    personalConditions.push(sql`false`);
-  }
-  if (genrePattern) {
-    personalConditions.push(sql`LOWER(COALESCE(${personalBooks.genre}, '')) LIKE ${genrePattern}`);
-  }
+  return compactConditions([
+    searchPattern
+      ? sql`(LOWER(${books.title}) LIKE ${searchPattern} OR LOWER(${books.author}) LIKE ${searchPattern})`
+      : undefined,
+    statusCondition(status, {
+      active: eq(books.status, 'active'),
+      blocked: eq(books.status, 'blocked'),
+      pending: sql`${books.status} NOT IN ('active', 'blocked')`,
+    }),
+    genrePattern ? sql`false` : undefined,
+  ]);
+}
 
-  const clubConditions: SQL<unknown>[] = [];
-  if (searchPattern) {
-    clubConditions.push(
-      sql`(LOWER(${clubBooks.title}) LIKE ${searchPattern} OR LOWER(${clubBooks.author}) LIKE ${searchPattern})`
-    );
-  }
-  if (status === 'active') {
-    clubConditions.push(eq(clubBooks.isDeleted, false));
-  } else if (status === 'blocked') {
-    clubConditions.push(eq(clubBooks.isDeleted, true));
-  } else if (status === 'pending') {
-    clubConditions.push(sql`false`);
-  }
-  if (genrePattern) {
-    clubConditions.push(sql`LOWER(COALESCE(${clubBooks.genre}, '')) LIKE ${genrePattern}`);
-  }
+function buildPersonalBookConditions(filters: BookFilterPatterns): SQL<unknown>[] {
+  const { searchPattern, status, genrePattern } = filters;
+
+  return compactConditions([
+    searchPattern
+      ? sql`(LOWER(${personalBooks.title}) LIKE ${searchPattern} OR LOWER(${personalBooks.author}) LIKE ${searchPattern})`
+      : undefined,
+    statusCondition(status, {
+      active: eq(personalBooks.isDeleted, false),
+      blocked: eq(personalBooks.isDeleted, true),
+      pending: sql`false`,
+    }),
+    genrePattern ? sql`LOWER(COALESCE(${personalBooks.genre}, '')) LIKE ${genrePattern}` : undefined,
+  ]);
+}
+
+function buildClubBookConditions(filters: BookFilterPatterns): SQL<unknown>[] {
+  const { searchPattern, status, genrePattern } = filters;
+
+  return compactConditions([
+    searchPattern
+      ? sql`(LOWER(${clubBooks.title}) LIKE ${searchPattern} OR LOWER(${clubBooks.author}) LIKE ${searchPattern})`
+      : undefined,
+    statusCondition(status, {
+      active: eq(clubBooks.isDeleted, false),
+      blocked: eq(clubBooks.isDeleted, true),
+      pending: sql`false`,
+    }),
+    genrePattern ? sql`LOWER(COALESCE(${clubBooks.genre}, '')) LIKE ${genrePattern}` : undefined,
+  ]);
+}
+
+function buildBookConditions(filters: BookFilters): BookConditions {
+  const patterns = buildBookFilterPatterns(filters);
 
   return {
-    booksWhere: sourceWhere(booksConditions),
-    personalWhere: sourceWhere(personalConditions),
-    clubWhere: sourceWhere(clubConditions),
+    booksWhere: sourceWhere(buildSystemBookConditions(patterns)),
+    personalWhere: sourceWhere(buildPersonalBookConditions(patterns)),
+    clubWhere: sourceWhere(buildClubBookConditions(patterns)),
   };
 }
 
@@ -1455,15 +1488,7 @@ router.put('/genres/:code', jwtAuth, requireFullAdmin, async (req, res) => {
     return res.status(400).json({ error: 'Invalid genre payload' });
   }
 
-  const updated = await storage.updateGenre(req.params.code, {
-    ...(parsed.data.labelRu !== undefined ? { labelRu: parsed.data.labelRu } : {}),
-    ...(parsed.data.labelEn !== undefined ? { labelEn: parsed.data.labelEn } : {}),
-    ...(parsed.data.groupKey !== undefined ? { groupKey: parsed.data.groupKey } : {}),
-    ...(parsed.data.description !== undefined ? { description: parsed.data.description } : {}),
-    ...(parsed.data.aliases !== undefined ? { aliasesJson: JSON.stringify(parsed.data.aliases) } : {}),
-    ...(parsed.data.sortOrder !== undefined ? { sortOrder: parsed.data.sortOrder } : {}),
-    ...(parsed.data.isActive !== undefined ? { isActive: parsed.data.isActive } : {}),
-  });
+  const updated = await storage.updateGenre(req.params.code, buildGenreUpdatePayload(parsed.data));
 
   if (!updated) {
     return res.status(404).json({ error: 'Genre not found' });

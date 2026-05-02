@@ -151,6 +151,9 @@ app.use(
 					imgSrc: ["'self'", "data:", "https:"],
 					scriptSrc: ["'self'", "https://mc.yandex.ru", "https://mc.yandex.com"],
 					connectSrc: ["'self'", "wss:", "https:"],
+					// blob: — для воспроизведения mic-check записи (createObjectURL)
+					// https://radio.voxlibris.ru — для воспроизведения Icecast потока слушателями
+					mediaSrc: ["'self'", "blob:", "https://radio.voxlibris.ru"],
 				frameSrc: ["'none'"],
 				objectSrc: ["'none'"],
 				baseUri: ["'self'"],

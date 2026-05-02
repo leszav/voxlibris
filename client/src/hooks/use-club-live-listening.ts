@@ -30,6 +30,10 @@ function updateListeningState(nextState: ClubListeningState | null): void {
   emitState();
 }
 
+function runBestEffort(task: Promise<unknown>): void {
+  task.catch(() => undefined);
+}
+
 async function resolveReaderStreamUrl(reader: LiveReader): Promise<string> {
   if (reader.streamUrl) {
     return reader.streamUrl;
@@ -180,7 +184,7 @@ export function useClubLiveListening(meta: ClubListeningMeta) {
         }
 
         if (!status.isPaused && wasPaused && nextReader.streamUrl) {
-          void primeIcecastPlayback(nextReader.streamUrl);
+          runBestEffort(primeIcecastPlayback(nextReader.streamUrl));
         }
 
         if (changed) {
@@ -194,9 +198,9 @@ export function useClubLiveListening(meta: ClubListeningMeta) {
       }
     };
 
-    void syncPlaybackState();
+    runBestEffort(syncPlaybackState());
     const timer = globalThis.setInterval(() => {
-      void syncPlaybackState();
+      runBestEffort(syncPlaybackState());
     }, 2000);
 
     return () => {
@@ -224,7 +228,7 @@ export function useClubLiveListening(meta: ClubListeningMeta) {
     await joinReadingSession(reader.sessionId);
     updateListeningState(nextState);
     if (!playbackState.isPaused) {
-      void primeIcecastPlayback(streamUrl);
+      runBestEffort(primeIcecastPlayback(streamUrl));
     }
     return nextState;
   }, [meta.bookAuthor, meta.bookId, meta.bookTitle, meta.clubId, meta.coverUrl]);
@@ -238,7 +242,7 @@ export function useClubLiveListening(meta: ClubListeningMeta) {
     updateListeningState(null);
 
     if (activeSessionId) {
-      void leaveReadingSession(activeSessionId);
+      runBestEffort(leaveReadingSession(activeSessionId));
     }
   }, []);
 
