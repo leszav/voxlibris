@@ -337,8 +337,8 @@ export const securityMiddleware = helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      styleSrc: ["'self'", "'unsafe-inline'", "fonts.googleapis.com"],
-      fontSrc: ["'self'", "fonts.gstatic.com"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      fontSrc: ["'self'"],
       imgSrc: ["'self'", "data:", "blob:", "*.amazonaws.com"], // для S3
       scriptSrc: ["'self'"],
       connectSrc: ["'self'", "*.amazonaws.com", "ws:", "wss:"], // для WebSocket и S3

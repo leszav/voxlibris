@@ -1,38 +1,71 @@
-<svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <!-- Background circle with VoxLibris purple -->
-  <circle cx="128" cy="128" r="128" fill="#8B5CF6" />
-  
-  <!-- Book illustration -->
-  <g transform="translate(64, 64)">
-    <!-- Left page -->
-    <path
-      d="M10 10 L10 108 C10 115 15 120 25 118 L60 110 L60 5 C50 7 15 10 10 10Z"
-      fill="white"
-      opacity="0.95"
-    />
-    
-    <!-- Right page -->
-    <path
-      d="M118 10 C113 10 78 7 68 5 L68 110 L103 118 C113 120 118 115 118 108 L118 10Z"
-      fill="white"
-      opacity="0.95"
-    />
-    
-    <!-- Book spine -->
-    <rect x="60" y="5" width="8" height="113" fill="#E0E7FF" />
-    
-    <!-- Audio waves overlay -->
-    <g transform="translate(64, 40)">
-      <!-- Center wave (tallest) -->
-      <line x1="0" y1="20" x2="0" y2="40" stroke="#F59E0B" stroke-width="4" stroke-linecap="round" />
-      
-      <!-- Side waves -->
-      <line x1="-12" y1="25" x2="-12" y2="35" stroke="#F59E0B" stroke-width="3" stroke-linecap="round" />
-      <line x1="12" y1="25" x2="12" y2="35" stroke="#F59E0B" stroke-width="3" stroke-linecap="round" />
-      
-      <!-- Outer waves (smallest) -->
-      <line x1="-24" y1="28" x2="-24" y2="32" stroke="#F59E0B" stroke-width="2.5" stroke-linecap="round" />
-      <line x1="24" y1="28" x2="24" y2="32" stroke="#F59E0B" stroke-width="2.5" stroke-linecap="round" />
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="512" height="512" rx="108" fill="#F6F6F8"/>
+  <rect x="16" y="16" width="480" height="480" rx="92" stroke="#E1E0E4" stroke-width="2"/>
+
+  <ellipse cx="256" cy="407" rx="154" ry="29" fill="#162245" opacity="0.08"/>
+
+  <path
+    d="M98 182C98 161.013 115.013 144 136 144H223C269.392 144 307 181.608 307 228V336.557C307 346.844 297.628 354.6 287.525 352.675L219.469 339.709C195.673 335.176 171.091 336.635 147.995 343.965L109.641 356.138C103.769 358.001 98 353.616 98 347.455V182Z"
+    fill="#FBFBFC"
+  />
+  <path
+    d="M414 182C414 161.013 396.987 144 376 144H289C242.608 144 205 181.608 205 228V336.557C205 346.844 214.372 354.6 224.475 352.675L292.531 339.709C316.327 335.176 340.909 336.635 364.005 343.965L402.359 356.138C408.231 358.001 414 353.616 414 347.455V182Z"
+    fill="#FDFDFD"
+  />
+
+  <path
+    d="M108 347L189.41 322.706C212.756 315.738 237.593 315.482 261.078 321.966L261 385H108C101.373 385 96 379.627 96 373V358.499C96 353.184 99.501 348.505 104.598 347.018L108 347Z"
+    fill="#5F7AC3"
+  />
+  <path
+    d="M404 347L322.59 322.706C299.244 315.738 274.407 315.482 250.922 321.966L251 385H404C410.627 385 416 379.627 416 373V358.499C416 353.184 412.499 348.505 407.402 347.018L404 347Z"
+    fill="#DC5560"
+  />
+
+  <path d="M118 351L193.281 328.443C214.92 321.961 237.936 321.724 259.705 327.76V346.806L208.058 338.193C187.845 334.823 167.112 336.379 147.673 342.72L118 352.4V351Z" fill="#546CB0"/>
+  <path d="M394 351L318.719 328.443C297.08 321.961 274.064 321.724 252.295 327.76V346.806L303.942 338.193C324.155 334.823 344.888 336.379 364.327 342.72L394 352.4V351Z" fill="#9E252C"/>
+
+  <path d="M256 141C264.837 141 272 148.163 272 157V206L256 230L240 206V157C240 148.163 247.163 141 256 141Z" fill="#DC5560"/>
+  <rect x="248" y="145" width="16" height="240" rx="8" fill="#D6D5DC"/>
+  <path d="M256 145V385" stroke="#C8C6CE" stroke-width="4" stroke-linecap="round"/>
+
+  <path
+    d="M126 190C126 179.507 134.507 171 145 171H209C236.614 171 259 193.386 259 221V312.036L211.126 304.393C190.554 301.109 169.507 302.769 149.693 309.235L126 316.97V190Z"
+    fill="#FFFFFF"
+  />
+  <path
+    d="M386 190C386 179.507 377.493 171 367 171H303C275.386 171 253 193.386 253 221V312.036L300.874 304.393C321.446 301.109 342.493 302.769 362.307 309.235L386 316.97V190Z"
+    fill="#F8F8FA"
+  />
+
+  <path d="M126 190C126 179.507 134.507 171 145 171H209C236.614 171 259 193.386 259 221V230C245.34 219.095 227.999 213 209.447 213H126V190Z" fill="#F6F6F8" opacity="0.9"/>
+  <path d="M386 190C386 179.507 377.493 171 367 171H303C275.386 171 253 193.386 253 221V230C266.66 219.095 284.001 213 302.553 213H386V190Z" fill="#F1F0F4" opacity="0.92"/>
+
+  <g opacity="0.22" stroke="#A5A3AC" stroke-width="5" stroke-linecap="round">
+    <path d="M149 206H219"/>
+    <path d="M149 229H219"/>
+    <path d="M149 252H203"/>
+    <path d="M293 206H363"/>
+    <path d="M293 229H363"/>
+    <path d="M309 252H363"/>
+  </g>
+
+  <g>
+    <path d="M256 164C230.043 164 209 185.043 209 211V222C209 240.576 219.756 256.638 235.375 264.224V283C235.375 294.391 244.609 303.625 256 303.625C267.391 303.625 276.625 294.391 276.625 283V264.224C292.244 256.638 303 240.576 303 222V211C303 185.043 281.957 164 256 164Z" fill="#232226"/>
+    <rect x="223" y="176" width="66" height="89" rx="33" fill="#2D2D2E"/>
+    <rect x="232" y="186" width="48" height="57" rx="24" fill="#C0BFC6"/>
+    <g opacity="0.55" stroke="#F5F5F7" stroke-width="3.5" stroke-linecap="round">
+      <path d="M241 197H271"/>
+      <path d="M241 207H271"/>
+      <path d="M241 217H271"/>
+      <path d="M241 227H271"/>
     </g>
+    <path d="M242 249H270" stroke="#5C5B60" stroke-width="6" stroke-linecap="round"/>
+    <circle cx="256" cy="246" r="4.5" fill="#DC5560"/>
+    <path d="M229 306C229 290.536 241.536 278 257 278C272.464 278 285 290.536 285 306V313H229V306Z" fill="#424146"/>
+    <rect x="251" y="304" width="10" height="30" rx="5" fill="#353535"/>
+    <path d="M216 314H296" stroke="#232226" stroke-width="8" stroke-linecap="round"/>
+    <ellipse cx="256" cy="330" rx="51" ry="13" fill="#353535"/>
+    <ellipse cx="256" cy="333" rx="33" ry="6" fill="#646468" opacity="0.45"/>
   </g>
 </svg>

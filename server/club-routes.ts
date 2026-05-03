@@ -8,8 +8,11 @@ import type { InsertClub, ClubMemberRole, InsertClubInvitation, Club, UserRole }
 import { emailService } from './services/email-service.js';
 import crypto from 'node:crypto';
 import { logger } from './lib/logger.js';
+import { serializeClub, serializeClubList, serializeClubMembers } from './lib/client-serializers.js';
 import { getPublicBaseUrl } from './lib/public-base-url.js';
 import { sanitizeClubSettingsInput } from './lib/club-settings-sanitizer.js';
+import { storeOptimizedImageIfNeeded } from './lib/uploaded-image-storage.js';
+import { liveSessionsStore } from './lib/live-sessions-store.js';
 
 const router = express.Router();
 
@@ -74,19 +77,24 @@ async function findInvitationByToken(token: string) {
  * POST /api/clubs
  * Создание нового клуба (только для активных пользователей)
  */
-router.post('/', jwtAuth, requireActiveUser, async (req, res) => {
+  router.post('/', jwtAuth, requireActiveUser, async (req, res) => {
   try {
     if (!req.user) {
       return res.status(401).json({ message: 'Authentication required' });
     }
 
     const sanitizedSettings = sanitizeClubSettingsInput(req.body.settings);
+    const coverImage = await storeOptimizedImageIfNeeded(req.body.coverImage, {
+      type: 'background',
+      keyPrefix: `clubs/${req.user.userId}`,
+      filenamePrefix: 'cover',
+    });
 
     // Валидация данных
     const clubData: InsertClub & { ownerId: string; status: Club['status'] } = {
       title: req.body.title,
       description: req.body.description,
-      coverImage: req.body.coverImage,
+      coverImage,
       bookId: req.body.bookId, // необязательное - книга загружается отдельно
       ownerId: req.user.userId,
       type: req.body.type || 'standard',
@@ -170,7 +178,19 @@ router.post('/', jwtAuth, requireActiveUser, async (req, res) => {
  */
 router.get('/catalog', async (req, res) => {
   try {
-    const clubs = await storage.getAllClubs();
+    const rawLimit = typeof req.query.limit === 'string' ? Number.parseInt(req.query.limit, 10) : undefined;
+    const limit = Number.isFinite(rawLimit) && rawLimit && rawLimit > 0 ? rawLimit : undefined;
+    const rawOffset = typeof req.query.offset === 'string' ? Number.parseInt(req.query.offset, 10) : undefined;
+    const offset = Number.isFinite(rawOffset) && rawOffset !== undefined && rawOffset >= 0 ? rawOffset : undefined;
+    const searchQuery = typeof req.query.q === 'string' ? req.query.q.trim() : undefined;
+    const clubs = await storage.getPublicCatalogClubs(limit, offset, searchQuery);
+
+    // Поисковые запросы не кэшируем, общий каталог можно кэшировать.
+    if (searchQuery) {
+      res.setHeader('Cache-Control', 'no-store');
+    } else {
+      res.setHeader('Cache-Control', 'public, max-age=300, stale-while-revalidate=3600');
+    }
     res.json(clubs);
   } catch (error) {
     console.error('Error getting catalog clubs:', error);
@@ -189,7 +209,7 @@ router.get('/', jwtAuth, async (req, res) => {
     }
 
     const clubs = await storage.getClubsByUser(req.user.userId);
-    res.json(clubs);
+    res.json(serializeClubList(clubs));
   } catch (error) {
     console.error('Error getting clubs:', error);
     res.status(500).json({ message: 'Failed to get clubs' });
@@ -216,7 +236,7 @@ router.get('/:id', optionalJwtAuth, async (req, res) => {
         });
       }
 
-      return res.json(club);
+      return res.json(serializeClub(club, null));
     }
 
     // Проверяем доступ к приватному клубу
@@ -229,7 +249,8 @@ router.get('/:id', optionalJwtAuth, async (req, res) => {
       });
     }
 
-    res.json(club);
+    const membership = await storage.getUserClubMembership(club.id, req.user.userId);
+    res.json(serializeClub(club, membership?.role ?? null));
   } catch (error) {
     console.error('Error getting club:', error);
     res.status(500).json({ message: 'Failed to get club' });
@@ -258,11 +279,16 @@ router.put('/:id', jwtAuth, async (req, res) => {
     }
 
     const sanitizedSettings = sanitizeClubSettingsInput(req.body.settings);
+    const coverImage = await storeOptimizedImageIfNeeded(req.body.coverImage, {
+      type: 'background',
+      keyPrefix: `clubs/${club.id}`,
+      filenamePrefix: 'cover',
+    });
 
     const updates: Partial<InsertClub> = {
       title: req.body.title,
       description: req.body.description,
-      coverImage: req.body.coverImage,
+      coverImage,
       maxMembers: req.body.maxMembers,
       isPrivate: req.body.isPrivate,
       schedule: req.body.schedule,
@@ -339,18 +365,19 @@ router.get('/:id/members', jwtAuth, async (req, res) => {
       return res.status(404).json({ message: 'Club not found' });
     }
 
-    // Проверяем доступ к приватному клубу
-    const access = await canAccessPrivateClub(club, req.user.userId, req.user.role as UserRole);
-    if (!access.allowed) {
-      return res.status(403).json({ 
-        message: access.reason,
-        code: 'PRIVATE_CLUB_ACCESS_DENIED',
-        isPrivate: true
+    const userRole = req.user.role as UserRole;
+    const isSystemAdmin = userRole === 'admin' || userRole === 'moderator';
+    const membership = await storage.getUserClubMembership(club.id, req.user.userId);
+
+    if (!isSystemAdmin && !membership) {
+      return res.status(403).json({
+        message: 'Список участников доступен только участникам клуба',
+        code: 'CLUB_MEMBERSHIP_REQUIRED'
       });
     }
 
     const members = await storage.getClubMembersWithRoles(req.params.id);
-    res.json(members);
+    res.json(serializeClubMembers(members));
   } catch (error) {
     console.error('Error getting club members:', error);
     res.status(500).json({ message: 'Failed to get club members' });
@@ -684,6 +711,18 @@ router.post('/invitations/:token/accept', jwtAuth, async (req, res) => {
     const club = await storage.getClub(invitation.clubId);
     if (!club) {
       return res.status(404).json({ message: 'Club not found' });
+    }
+
+    const currentUser = await storage.getUser(req.user.userId);
+    if (!currentUser) {
+      return res.status(401).json({ message: 'Пользователь не найден' });
+    }
+
+    if (invitation.email && currentUser.email && invitation.email.toLowerCase() !== currentUser.email.toLowerCase()) {
+      return res.status(403).json({
+        message: 'Этот инвайт предназначен для другого email. Пожалуйста, войдите под приглашённым аккаунтом или зарегистрируйтесь.',
+        code: 'INVITE_EMAIL_MISMATCH'
+      });
     }
 
     // Проверяем, не заполнен ли клуб
@@ -1062,17 +1101,17 @@ router.post('/:clubId/transfer-ownership', jwtAuth, async (req, res) => {
     
     if (!isAdmin) {
       // Если не админ, проверяем что пользователь - владелец клуба
-      const [currentMember] = await storage.getClubMembersWithRoles(clubId)
-        .then(members => members.filter(m => m.id === currentUserId));
+      const currentMember = await storage.getClubMembersWithRoles(clubId)
+        .then(members => members.find(m => m.id === currentUserId));
 
-      if (!currentMember || currentMember.role !== 'owner') {
+      if (currentMember?.role !== 'owner') {
         return res.status(403).json({ message: 'Only club owner or admin can transfer ownership' });
       }
     }
 
     // Проверяем что новый владелец - участник клуба
-    const [newOwnerMember] = await storage.getClubMembersWithRoles(clubId)
-      .then(members => members.filter(m => m.id === newOwnerId));
+    const newOwnerMember = await storage.getClubMembersWithRoles(clubId)
+      .then(members => members.find(m => m.id === newOwnerId));
 
     if (!newOwnerMember) {
       return res.status(404).json({ message: 'New owner must be a club member' });
@@ -1115,6 +1154,29 @@ router.post('/:clubId/transfer-ownership', jwtAuth, async (req, res) => {
   } catch (error) {
     console.error('Error transferring ownership:', error);
     res.status(500).json({ message: 'Failed to transfer ownership' });
+  }
+});
+
+/**
+ * GET /api/clubs/:clubId/live-readers
+ * Список активных чтецов клуба.
+ * Источник истины для активных сессий - Redis, а очистка выполняется
+ * через stop/disconnect/heartbeat TTL, а не через хрупкий per-request
+ * опрос Icecast admin endpoint.
+ */
+router.get('/:clubId/live-readers', optionalJwtAuth, async (req, res) => {
+  try {
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.set('Pragma', 'no-cache');
+    res.set('Expires', '0');
+
+    const { clubId } = req.params;
+    const activeReaders = await liveSessionsStore.getByClub(clubId);
+
+    res.json({ readers: activeReaders });
+  } catch (error) {
+    logger.error({ error }, '[Clubs] Error fetching live readers');
+    res.status(500).json({ readers: [] });
   }
 });
 

@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { Button } from "../../ui/button";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
@@ -96,35 +97,46 @@ export function ClubChapterList({
   isVisible, 
   onClose 
 }: Readonly<ClubChapterListProps>) {
-  
+  const activeRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    if (isVisible) {
+      activeRef.current?.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+    }
+  }, [isVisible]);
+
   if (!isVisible) {
     return null;
   }
 
   return (
     <div className="space-y-0.5">
-      {chapters.map((chapter) => (
-        <Button
-          key={chapter.chapterNumber}
-          variant={currentChapter === chapter.chapterNumber ? "secondary" : "ghost"}
-          className="w-full justify-start text-left h-auto py-2 px-3"
-          onClick={() => {
-            onChapterSelect(chapter.chapterNumber);
-            onClose();
-          }}
-        >
-          <div className="flex flex-col items-start">
-            <span className="font-medium">
-              {chapter.title || `Глава ${chapter.chapterNumber}`}
-            </span>
-            {chapter.title && (
-              <span className="text-xs text-muted-foreground mt-1">
-                Глава {chapter.chapterNumber}
+      {chapters.map((chapter) => {
+        const isActive = currentChapter === chapter.chapterNumber;
+        return (
+          <Button
+            key={chapter.chapterNumber}
+            ref={isActive ? activeRef : undefined}
+            variant={isActive ? "secondary" : "ghost"}
+            className="w-full justify-start text-left h-auto py-2 px-3"
+            onClick={() => {
+              onChapterSelect(chapter.chapterNumber);
+              onClose();
+            }}
+          >
+            <div className="flex flex-col items-start">
+              <span className="font-medium">
+                {chapter.title || `Глава ${chapter.chapterNumber}`}
               </span>
-            )}
-          </div>
-        </Button>
-      ))}
+              {chapter.title && (
+                <span className="text-xs text-muted-foreground mt-1">
+                  Глава {chapter.chapterNumber}
+                </span>
+              )}
+            </div>
+          </Button>
+        );
+      })}
     </div>
   );
 }

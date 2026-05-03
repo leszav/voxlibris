@@ -1,5 +1,4 @@
 import { CheckCircle, Clock, WifiOff } from "lucide-react";
-import { useState, useEffect } from "react";
 
 interface SyncIndicatorProps {
   isSyncing?: boolean;
@@ -14,21 +13,7 @@ export function SyncIndicator({
   error,
   className = ""
 }: SyncIndicatorProps) {
-  const [isVisible, setIsVisible] = useState(false);
-
-  useEffect(() => {
-    if (isSyncing || error) {
-      setIsVisible(true);
-      const timer = setTimeout(() => {
-        if (!error) {
-          setIsVisible(false);
-        }
-      }, 2000);
-      return () => clearTimeout(timer);
-    }
-  }, [isSyncing, error]);
-
-  if (!isVisible && !isSyncing && !error) {
+  if (!isSyncing && !error && !lastSyncTime) {
     return null;
   }
 
@@ -77,12 +62,26 @@ export function SyncIndicator({
 }
 
 // Компактная версия для заголовка
-export function CompactSyncIndicator(props: SyncIndicatorProps) {
+export function CompactSyncIndicator({
+  className = "",
+  wrapperClassName = "",
+  onMouseEnter,
+  onMouseLeave,
+  ...props
+}: SyncIndicatorProps & {
+  wrapperClassName?: string;
+  onMouseEnter?: () => void;
+  onMouseLeave?: () => void;
+}) {
   return (
-    <div className="fixed top-20 right-4 z-50">
+    <div
+      className={`fixed top-20 right-4 z-50 transition-opacity duration-500 ${wrapperClassName}`}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
+    >
       <SyncIndicator 
         {...props}
-        className="bg-background/90 backdrop-blur-sm border rounded-md px-2 py-1 shadow-sm"
+        className={`bg-background/90 backdrop-blur-sm border rounded-md px-2 py-1 shadow-sm ${className}`}
       />
     </div>
   );

@@ -10,13 +10,13 @@ interface UseRealVUMeterOptions {
 
 export function useRealVUMeter({ stream, isActive }: UseRealVUMeterOptions) {
   const [level, setLevel] = useState(0);
-  const [bars, setBars] = useState<number[]>(Array(20).fill(0));
+  const [bars, setBars] = useState<number[]>(new Array(20).fill(0));
   const analyzerRef = useRef<AudioAnalyzer | null>(null);
   const animationFrameRef = useRef<number | null>(null);
 
   const resetVisualization = () => {
     setLevel(0);
-    setBars(Array(20).fill(0));
+    setBars(new Array(20).fill(0));
   };
   
   useEffect(() => {

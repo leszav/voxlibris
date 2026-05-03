@@ -40,8 +40,13 @@ export function ReaderProgressIndicators({
   panelAriaLabel = "Панель прогресса чтения",
 }: Readonly<ReaderProgressIndicatorsProps>) {
   const [progressVisible, setProgressVisible] = useState(false);
+  const [syncVisible, setSyncVisible] = useState(false);
   const progressTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const syncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const panelHoveredRef = useRef(false);
+  const syncHoveredRef = useRef(false);
+  const previousSyncingRef = useRef(isSyncing);
+  const previousLastSyncTimeRef = useRef(lastSyncTime);
 
   const showUser = hasProgressEntry(userProgress);
   const showGroup = hasProgressEntry(groupProgress);
@@ -54,6 +59,13 @@ export function ReaderProgressIndicators({
     }
   }, []);
 
+  const clearSyncHideTimeout = useCallback(() => {
+    if (syncTimeoutRef.current) {
+      clearTimeout(syncTimeoutRef.current);
+      syncTimeoutRef.current = null;
+    }
+  }, []);
+
   const scheduleHide = useCallback((delayMs = 700) => {
     clearHideTimeout();
     progressTimeoutRef.current = setTimeout(() => {
@@ -62,6 +74,15 @@ export function ReaderProgressIndicators({
       }
     }, delayMs);
   }, [clearHideTimeout]);
+
+  const scheduleSyncHide = useCallback((delayMs = 1800) => {
+    clearSyncHideTimeout();
+    syncTimeoutRef.current = setTimeout(() => {
+      if (!syncHoveredRef.current && !isSyncing && !error) {
+        setSyncVisible(false);
+      }
+    }, delayMs);
+  }, [clearSyncHideTimeout, error, isSyncing]);
 
   useEffect(() => {
     if (!hasAnyProgress) {
@@ -96,10 +117,59 @@ export function ReaderProgressIndicators({
   }, [hasAnyProgress, clearHideTimeout, scheduleHide]);
 
   useEffect(() => {
+    const syncJustFinished = previousSyncingRef.current && !isSyncing && !error;
+    const syncTimestampChanged =
+      typeof lastSyncTime === "number" &&
+      lastSyncTime !== previousLastSyncTimeRef.current;
+
+    if (error) {
+      clearSyncHideTimeout();
+      setSyncVisible(true);
+    } else if (isSyncing) {
+      clearSyncHideTimeout();
+      setSyncVisible(true);
+    } else if (syncJustFinished || syncTimestampChanged) {
+      setSyncVisible(true);
+      scheduleSyncHide(1800);
+    }
+
+    previousSyncingRef.current = isSyncing;
+    previousLastSyncTimeRef.current = lastSyncTime;
+  }, [clearSyncHideTimeout, error, isSyncing, lastSyncTime, scheduleSyncHide]);
+
+  useEffect(() => {
+    const cornerSizePx = 96;
+
+    const onMouseMove = (event: MouseEvent) => {
+      const inTopRightCorner =
+        event.clientX >= window.innerWidth - cornerSizePx &&
+        event.clientY <= cornerSizePx;
+
+      if (inTopRightCorner) {
+        clearSyncHideTimeout();
+        setSyncVisible(true);
+        return;
+      }
+
+      if (!syncHoveredRef.current && !isSyncing && !error) {
+        scheduleSyncHide(400);
+      }
+    };
+
+    window.addEventListener("mousemove", onMouseMove, { passive: true });
+
+    return () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      clearSyncHideTimeout();
+    };
+  }, [clearSyncHideTimeout, error, isSyncing, scheduleSyncHide]);
+
+  useEffect(() => {
     return () => {
       clearHideTimeout();
+      clearSyncHideTimeout();
     };
-  }, [clearHideTimeout]);
+  }, [clearHideTimeout, clearSyncHideTimeout]);
 
   const userProgressPercent = clampProgress(userProgress?.progress);
   const userChapter = normalizeChapter(userProgress?.currentChapter);
@@ -112,6 +182,16 @@ export function ReaderProgressIndicators({
         isSyncing={isSyncing}
         lastSyncTime={lastSyncTime || undefined}
         error={error || undefined}
+        wrapperClassName={syncVisible ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"}
+        onMouseEnter={() => {
+          syncHoveredRef.current = true;
+          setSyncVisible(true);
+          clearSyncHideTimeout();
+        }}
+        onMouseLeave={() => {
+          syncHoveredRef.current = false;
+          scheduleSyncHide(300);
+        }}
       />
 
       {hasAnyProgress && (

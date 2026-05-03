@@ -12,6 +12,7 @@ import {
   clubMembers,
   bookReadingStatus,
   analyticsEvents,
+  userProfiles,
 } from "../../shared/schema.js";
 import { eq, and, desc, isNull } from "drizzle-orm";
 import { sanitizeBookContent } from "../content-sanitizer.js";
@@ -21,6 +22,156 @@ import {
 import { logger } from "../lib/logger.js";
 
 const router = express.Router();
+
+interface ReaderPositionWithTimestamp {
+  timestamp?: number;
+}
+
+interface DatabaseErrorLike {
+  code?: string;
+}
+
+interface StoredReaderSettings {
+  fontSize: number;
+  fontFamily: string;
+  theme: "light" | "dark" | "sepia";
+  lineHeight: number;
+  textAlign: "left" | "justify";
+  contentWidth: number;
+}
+
+const DEFAULT_READER_SETTINGS: StoredReaderSettings = {
+  fontSize: 18,
+  fontFamily: "Georgia",
+  theme: "light",
+  lineHeight: 1.8,
+  textAlign: "justify",
+  contentWidth: 80,
+};
+
+const ALLOWED_FONT_FAMILIES = new Set([
+  "Georgia",
+  "Times New Roman",
+  "Arial",
+  "Verdana",
+  "system-ui",
+]);
+
+function clampNumber(value: unknown, min: number, max: number, fallback: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return fallback;
+  }
+
+  return Math.min(max, Math.max(min, value));
+}
+
+function normalizeReaderSettings(input: unknown): StoredReaderSettings {
+  const source = typeof input === "object" && input !== null
+    ? input as Partial<StoredReaderSettings>
+    : {};
+
+  const theme = source.theme === "dark" || source.theme === "sepia" || source.theme === "light"
+    ? source.theme
+    : DEFAULT_READER_SETTINGS.theme;
+
+  const textAlign = source.textAlign === "left" || source.textAlign === "justify"
+    ? source.textAlign
+    : DEFAULT_READER_SETTINGS.textAlign;
+
+  const fontFamily = typeof source.fontFamily === "string" && ALLOWED_FONT_FAMILIES.has(source.fontFamily)
+    ? source.fontFamily
+    : DEFAULT_READER_SETTINGS.fontFamily;
+
+  return {
+    fontSize: Math.round(clampNumber(source.fontSize, 12, 32, DEFAULT_READER_SETTINGS.fontSize)),
+    fontFamily,
+    theme,
+    lineHeight: Math.round(clampNumber(source.lineHeight, 1.2, 2.5, DEFAULT_READER_SETTINGS.lineHeight) * 10) / 10,
+    textAlign,
+    contentWidth: Math.round(clampNumber(source.contentWidth, 60, 95, DEFAULT_READER_SETTINGS.contentWidth)),
+  };
+}
+
+type DeviceMode = "desktop" | "mobile";
+
+function parseStoredReaderSettings(raw: string | null | undefined, deviceMode: DeviceMode = "desktop"): StoredReaderSettings {
+  if (!raw) {
+    return DEFAULT_READER_SETTINGS;
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+
+    // Новый формат: { desktop?: Settings, mobile?: Settings }
+    if (parsed && typeof parsed === "object" && parsed[deviceMode]) {
+      return normalizeReaderSettings(parsed[deviceMode]);
+    }
+
+    // Старый формат: просто объект настроек (обратная совместимость)
+    if (parsed && typeof parsed === "object" && "fontSize" in parsed) {
+      return normalizeReaderSettings(parsed);
+    }
+  } catch {
+    // ignore
+  }
+
+  return DEFAULT_READER_SETTINGS;
+}
+
+function mergeDeviceSettings(raw: string | null | undefined, deviceMode: DeviceMode, settings: StoredReaderSettings): string {
+  const existing: Record<string, unknown> = {};
+
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") {
+        // Старый формат: конвертируем в новый
+        if ("fontSize" in parsed) {
+          existing.desktop = parsed;
+        } else {
+          Object.assign(existing, parsed);
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  existing[deviceMode] = settings;
+  return JSON.stringify(existing);
+}
+
+function extractPositionTimestamp(raw: string | null | undefined): number | null {
+  if (!raw) return null;
+
+  try {
+    const parsed = JSON.parse(raw) as ReaderPositionWithTimestamp;
+    if (typeof parsed.timestamp === "number" && Number.isFinite(parsed.timestamp)) {
+      return parsed.timestamp;
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+function isStaleProgressUpdate(existingPosition: string | null, nextPosition: string): boolean {
+  const existingTimestamp = extractPositionTimestamp(existingPosition);
+  const nextTimestamp = extractPositionTimestamp(nextPosition);
+
+  if (existingTimestamp === null || nextTimestamp === null) {
+    return false;
+  }
+
+  return nextTimestamp < existingTimestamp;
+}
+
+function isUniqueViolation(error: unknown): boolean {
+  return typeof error === "object"
+    && error !== null
+    && (error as DatabaseErrorLike).code === "23505";
+}
 
 // Helper functions для уменьшения когнитивной сложности
 async function updateBookReadingStatus(userId: string, bookId: string, progress: number, clubId?: string | null) {
@@ -114,6 +265,117 @@ async function addToReadingHistory(userId: string, bookId: string, clubId?: stri
   }
 }
 
+router.get("/reader-settings", async (req: Request, res: Response) => {
+  try {
+    const userId = req.user?.id;
+
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const deviceMode = (req.query.deviceMode as DeviceMode) || "desktop";
+    const validDeviceMode: DeviceMode = deviceMode === "mobile" ? "mobile" : "desktop";
+
+    const [profile] = await db
+      .select({
+        readerSettings: userProfiles.readerSettings,
+      })
+      .from(userProfiles)
+      .where(eq(userProfiles.userId, userId))
+      .limit(1);
+
+    res.json({
+      settings: parseStoredReaderSettings(profile?.readerSettings, validDeviceMode),
+    });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error({ error: errorMessage }, "[Reader API] Error fetching reader settings");
+    res.status(500).json({ error: "Failed to fetch reader settings" });
+  }
+});
+
+router.put("/reader-settings", async (req: Request, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    const username = req.user?.username;
+
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const deviceMode = (req.query.deviceMode as DeviceMode) || "desktop";
+    const validDeviceMode: DeviceMode = deviceMode === "mobile" ? "mobile" : "desktop";
+
+    const settings = normalizeReaderSettings(req.body?.settings ?? req.body);
+
+    // Сначала загруем текущие настройки, чтобы сохранить настройки для других устройств
+    const [profile] = await db
+      .select({
+        readerSettings: userProfiles.readerSettings,
+      })
+      .from(userProfiles)
+      .where(eq(userProfiles.userId, userId))
+      .limit(1);
+
+    const serializedSettings = mergeDeviceSettings(profile?.readerSettings, validDeviceMode, settings);
+
+    await db
+      .insert(userProfiles)
+      .values({
+        userId,
+        displayName: username,
+        readerSettings: serializedSettings,
+      })
+      .onConflictDoUpdate({
+        target: userProfiles.userId,
+        set: {
+          readerSettings: serializedSettings,
+          updatedAt: new Date(),
+        },
+      });
+
+    res.json({ settings });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error({ error: errorMessage }, "[Reader API] Error saving reader settings");
+    res.status(500).json({ error: "Failed to save reader settings" });
+  }
+});
+
+router.get("/all-bookmarks", async (req: Request, res: Response) => {
+  try {
+    const userId = req.user?.id;
+
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const userBookmarks = await db
+      .select({
+        id: bookmarks.id,
+        userId: bookmarks.userId,
+        bookId: bookmarks.bookId,
+        chapterNumber: bookmarks.chapterNumber,
+        position: bookmarks.position,
+        title: bookmarks.title,
+        createdAt: bookmarks.createdAt,
+        bookTitle: personalBooks.title,
+        bookAuthor: personalBooks.author,
+        bookCoverUrl: personalBooks.coverUrl,
+      })
+      .from(bookmarks)
+      .leftJoin(personalBooks, eq(bookmarks.bookId, personalBooks.id))
+      .where(eq(bookmarks.userId, userId))
+      .orderBy(desc(bookmarks.createdAt));
+
+    res.json({ bookmarks: userBookmarks });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error({ error: errorMessage }, "[Reader API] Error fetching all bookmarks");
+    res.status(500).json({ error: "Failed to fetch bookmarks" });
+  }
+});
+
 /**
  * GET /api/v1/books/:id/content
  * Получение контента книги с санитизацией и дешифровкой
@@ -195,6 +457,59 @@ router.get("/:id/content", async (req: Request, res: Response) => {
  * PUT /api/v1/books/:id/progress
  * Обновление прогресса чтения (debounced на клиенте)
  */
+interface UpsertProgressParams {
+  userId: string;
+  bookId: string;
+  clubId: string | null;
+  currentChapter: number;
+  currentPosition: string;
+  progress: number;
+}
+
+async function upsertReadingProgress(params: UpsertProgressParams): Promise<void> {
+  const { userId, bookId, clubId, currentChapter, currentPosition, progress } = params;
+
+  const clubFilter = clubId ? eq(readingProgress.clubId, clubId) : isNull(readingProgress.clubId);
+  const progressFields = {
+    currentChapter,
+    currentPosition,
+    progress,
+    clubId,
+    lastReadAt: new Date(),
+    updatedAt: new Date(),
+  };
+
+  const [existing] = await db
+    .select({ id: readingProgress.id, currentPosition: readingProgress.currentPosition })
+    .from(readingProgress)
+    .where(and(eq(readingProgress.userId, userId), eq(readingProgress.bookId, bookId), clubFilter))
+    .orderBy(desc(readingProgress.updatedAt), desc(readingProgress.lastReadAt))
+    .limit(1);
+
+  if (existing) {
+    if (!isStaleProgressUpdate(existing.currentPosition, currentPosition)) {
+      await db.update(readingProgress).set(progressFields).where(eq(readingProgress.id, existing.id));
+    }
+    return;
+  }
+
+  try {
+    await db.insert(readingProgress).values({ userId, bookId, ...progressFields });
+  } catch (error) {
+    if (!isUniqueViolation(error)) throw error;
+    // Гонка вставки — повторяем UPDATE
+    const [race] = await db
+      .select({ id: readingProgress.id, currentPosition: readingProgress.currentPosition })
+      .from(readingProgress)
+      .where(and(eq(readingProgress.userId, userId), eq(readingProgress.bookId, bookId), clubFilter))
+      .orderBy(desc(readingProgress.updatedAt), desc(readingProgress.lastReadAt))
+      .limit(1);
+    if (race && !isStaleProgressUpdate(race.currentPosition, currentPosition)) {
+      await db.update(readingProgress).set(progressFields).where(eq(readingProgress.id, race.id));
+    }
+  }
+}
+
 router.put("/:id/progress", async (req: Request, res: Response) => {
   try {
     const { id: bookId } = req.params;
@@ -221,42 +536,31 @@ router.put("/:id/progress", async (req: Request, res: Response) => {
       return res.status(401).json({ error: "Unauthorized" });
     }
 
-    const [existingProgress] = await db
-      .select({ id: readingProgress.id })
+    const existingCheck = await db
+      .select({ id: readingProgress.id, currentPosition: readingProgress.currentPosition })
       .from(readingProgress)
       .where(and(
         eq(readingProgress.userId, userId),
         eq(readingProgress.bookId, bookId),
         normalizedClubId ? eq(readingProgress.clubId, normalizedClubId) : isNull(readingProgress.clubId),
       ))
+      .orderBy(desc(readingProgress.updatedAt), desc(readingProgress.lastReadAt))
       .limit(1);
 
-    if (existingProgress) {
-      await db
-        .update(readingProgress)
-        .set({
-          currentChapter: normalizedCurrentChapter,
-          currentPosition: normalizedCurrentPosition,
-          progress: normalizedProgress,
-          clubId: normalizedClubId,
-          lastReadAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .where(eq(readingProgress.id, existingProgress.id));
-    } else {
-      await db
-        .insert(readingProgress)
-        .values({
-          userId,
-          bookId,
-          clubId: normalizedClubId,
-          currentChapter: normalizedCurrentChapter,
-          currentPosition: normalizedCurrentPosition,
-          progress: normalizedProgress,
-          lastReadAt: new Date(),
-          updatedAt: new Date(),
-        });
+    const existingProgress = existingCheck[0];
+    if (existingProgress && isStaleProgressUpdate(existingProgress.currentPosition, normalizedCurrentPosition)) {
+      logger.warn({ bookId, userId, clubId: normalizedClubId }, "[Reader API] Ignoring stale progress update");
+      return res.json({ success: true, ignored: true, reason: "stale_progress_update" });
     }
+
+    await upsertReadingProgress({
+      userId,
+      bookId,
+      clubId: normalizedClubId,
+      currentChapter: normalizedCurrentChapter,
+      currentPosition: normalizedCurrentPosition,
+      progress: normalizedProgress,
+    });
 
     await updateBookReadingStatus(userId, bookId, normalizedProgress, normalizedClubId);
 
@@ -294,6 +598,7 @@ router.get("/:id/progress", async (req: Request, res: Response) => {
           eq(readingProgress.bookId, bookId)
         )
       )
+      .orderBy(desc(readingProgress.updatedAt), desc(readingProgress.lastReadAt))
       .limit(1);
 
     if (!progress) {

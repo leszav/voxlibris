@@ -11,16 +11,70 @@ export interface MicrophoneStatus {
   permissionStatus: MicrophonePermissionStatus;
 }
 
-export function useMicrophoneDetection() {
+function mapMicrophoneAccessError(error: Error, permissionStatus: MicrophonePermissionStatus): {
+  message: string;
+  permissionStatus: MicrophonePermissionStatus;
+} {
+  if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
+    return {
+      message: 'Доступ к микрофону запрещен. Разрешите доступ и обновите страницу.',
+      permissionStatus: 'denied',
+    };
+  }
+  if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') {
+    return {
+      message: 'Микрофон не найден. Подключите микрофон и обновите страницу.',
+      permissionStatus,
+    };
+  }
+  if (error.name === 'NotReadableError' || error.name === 'TrackStartError') {
+    return {
+      message: 'Микрофон используется другим приложением. Закройте другие приложения.',
+      permissionStatus,
+    };
+  }
+  if (error.name === 'OverconstrainedError') {
+    return {
+      message: 'Настройки микрофона не поддерживаются вашим устройством.',
+      permissionStatus,
+    };
+  }
+
+  return {
+    message: 'Не удалось получить доступ к микрофону',
+    permissionStatus,
+  };
+}
+
+async function readMicrophonePermissionStatus(): Promise<MicrophonePermissionStatus> {
+  if (!navigator.permissions) {
+    return 'unknown';
+  }
+
+  try {
+    const permission = await navigator.permissions.query({ name: 'microphone' as PermissionName });
+    if (import.meta.env.DEV) {
+      console.warn('[MicDetection] Permission status:', permission.state);
+    }
+    return permission.state;
+  } catch (err) {
+    if (import.meta.env.DEV) {
+      console.warn('[MicDetection] Cannot check permissions:', err);
+    }
+    return 'unknown';
+  }
+}
+
+export function useMicrophoneDetection(enabled: boolean = true) {
   const [status, setStatus] = useState<MicrophoneStatus>({
     isAvailable: false,
-    isLoading: true,
+    isLoading: enabled,
     error: null,
     permissionStatus: 'unknown'
   });
   const detectRetryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const detectMicrophone = async () => {
+  const detectMicrophone = async (): Promise<boolean> => {
     try {
       setStatus(prev => ({ ...prev, isLoading: true, error: null }));
 
@@ -30,21 +84,7 @@ export function useMicrophoneDetection() {
       }
 
       // Проверяем разрешения
-      let permissionStatus: MicrophonePermissionStatus = 'unknown';
-      
-      if (navigator.permissions) {
-        try {
-          const permission = await navigator.permissions.query({ name: 'microphone' as PermissionName });
-          permissionStatus = permission.state;
-          if (import.meta.env.DEV) {
-            console.warn('[MicDetection] Permission status:', permissionStatus);
-          }
-        } catch (err) {
-          if (import.meta.env.DEV) {
-            console.warn('[MicDetection] Cannot check permissions:', err);
-          }
-        }
-      }
+      const permissionStatus = await readMicrophonePermissionStatus();
 
       // Если разрешение уже запрещено, не пытаемся получить доступ
       if (permissionStatus === 'denied') {
@@ -54,7 +94,7 @@ export function useMicrophoneDetection() {
           error: 'Доступ к микрофону запрещен. Разрешите доступ в настройках браузера.',
           permissionStatus
         });
-        return;
+        return false;
       }
 
       // Пытаемся получить список устройств
@@ -94,36 +134,28 @@ export function useMicrophoneDetection() {
           console.warn('[MicDetection] Microphone is available');
         }
 
+        return true;
+
       } catch (micError) {
         if (stream) {
           stream.getTracks().forEach(track => track.stop());
         }
 
         const error = micError as Error;
-        let errorMessage = 'Не удалось получить доступ к микрофону';
-        let newPermissionStatus: MicrophonePermissionStatus = permissionStatus;
-
-        if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
-          errorMessage = 'Доступ к микрофону запрещен. Разрешите доступ и обновите страницу.';
-          newPermissionStatus = 'denied';
-        } else if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') {
-          errorMessage = 'Микрофон не найден. Подключите микрофон и обновите страницу.';
-        } else if (error.name === 'NotReadableError' || error.name === 'TrackStartError') {
-          errorMessage = 'Микрофон используется другим приложением. Закройте другие приложения.';
-        } else if (error.name === 'OverconstrainedError') {
-          errorMessage = 'Настройки микрофона не поддерживаются вашим устройством.';
-        }
+        const mappedError = mapMicrophoneAccessError(error, permissionStatus);
 
         setStatus({
           isAvailable: false,
           isLoading: false,
-          error: errorMessage,
-          permissionStatus: newPermissionStatus
+          error: mappedError.message,
+          permissionStatus: mappedError.permissionStatus,
         });
 
         if (import.meta.env.DEV) {
           console.error('[MicDetection] Microphone access failed:', error);
         }
+
+        return false;
       }
 
     } catch (err) {
@@ -138,15 +170,30 @@ export function useMicrophoneDetection() {
       if (import.meta.env.DEV) {
         console.error('[MicDetection] Detection failed:', error);
       }
+
+      return false;
     }
   };
 
-  const retryDetection = () => {
-    detectMicrophone();
-  };
+  const retryDetection = async () => detectMicrophone();
 
   // Автоматическое детектирование при монтировании
   useEffect(() => {
+    if (!enabled) {
+      setStatus({
+        isAvailable: false,
+        isLoading: false,
+        error: null,
+        permissionStatus: 'unknown'
+      });
+
+      return () => {
+        if (detectRetryTimeoutRef.current) {
+          clearTimeout(detectRetryTimeoutRef.current);
+        }
+      };
+    }
+
     detectMicrophone();
 
     // Слушаем изменения устройств
@@ -157,7 +204,9 @@ export function useMicrophoneDetection() {
       if (detectRetryTimeoutRef.current) {
         clearTimeout(detectRetryTimeoutRef.current);
       }
-      detectRetryTimeoutRef.current = setTimeout(detectMicrophone, 1000); // Небольшая задержка
+      detectRetryTimeoutRef.current = setTimeout(() => {
+        void detectMicrophone();
+      }, 1000); // Небольшая задержка
     };
 
     const mediaDevices = navigator.mediaDevices;
@@ -177,7 +226,7 @@ export function useMicrophoneDetection() {
         clearTimeout(detectRetryTimeoutRef.current);
       }
     };
-  }, []);
+  }, [enabled]);
 
   return {
     ...status,

@@ -6,12 +6,14 @@ import Color from "@tiptap/extension-color";
 import Link from "@tiptap/extension-link";
 import TextAlign from "@tiptap/extension-text-align";
 import { cn } from "@/lib/utils";
-import { modalPrompt } from "@/hooks/use-toast";
+import { modalPrompt, useToast } from "@/hooks/use-toast";
+import { SpoilerBlock } from "@/components/ui/spoiler-block-extension";
+import { SpoilerMark } from "@/components/ui/spoiler-mark-extension";
 import {
   Bold, Italic, Strikethrough,
   List, ListOrdered, Quote, Undo, Redo,
   AlignLeft, AlignCenter, AlignRight,
-  Link as LinkIcon, ChevronDown,
+  Link as LinkIcon, ChevronDown, EyeOff,
   Heading1
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -32,6 +34,7 @@ interface RichTextEditorProps {
   readonly className?: string;
   readonly value?: string;
   readonly maxLength?: number;
+  readonly enableSpoilerBlocks?: boolean;
 }
 
 interface MenuButtonProps {
@@ -87,7 +90,8 @@ function HeadingDropdown({ editor }: HeadingDropdownProps): React.ReactElement {
 }
 
 export const RichTextEditor = React.forwardRef<RichTextEditorRef, RichTextEditorProps>(
-  ({ initialValue, onChange, className = "", value, maxLength = 3000 }, ref) => {
+  ({ initialValue, onChange, className = "", value, maxLength = 3000, enableSpoilerBlocks = false }, ref) => {
+    const { toast } = useToast();
     const editor = useEditor({
       extensions: [
         StarterKit.configure({
@@ -107,6 +111,8 @@ export const RichTextEditor = React.forwardRef<RichTextEditorRef, RichTextEditor
         TextAlign.configure({
           types: ["heading", "paragraph"],
         }),
+        SpoilerMark,
+        SpoilerBlock,
       ],
       content: value || initialValue || "",
       editorProps: {
@@ -157,6 +163,75 @@ export const RichTextEditor = React.forwardRef<RichTextEditorRef, RichTextEditor
       return null;
     }
 
+    const buildSpoilerBlockContent = () => {
+      const { from, to, empty } = editor.state.selection;
+
+      if (empty) {
+        return null;
+      }
+
+      const selectedText = editor.state.doc
+        .textBetween(from, to, "\n\n")
+        .trim();
+
+      if (!selectedText) {
+        return null;
+      }
+
+      const paragraphs = selectedText
+        .split(/\n{2,}/)
+        .map((paragraph) => paragraph.replace(/\n+/g, " ").trim())
+        .filter((paragraph) => paragraph.length > 0)
+        .map((paragraph) => ({
+          type: "paragraph",
+          content: [{ type: "text", text: paragraph }],
+        }));
+
+      return paragraphs.length > 0 ? paragraphs : null;
+    };
+
+    const isInlineSpoilerSelection = () => {
+      const { from, to, empty } = editor.state.selection;
+      if (empty) {
+        return false;
+      }
+
+      const selectedText = editor.state.doc.textBetween(from, to, "\n\n");
+      return !selectedText.includes("\n");
+    };
+
+    const insertSpoiler = () => {
+      const { empty } = editor.state.selection;
+
+      if (empty) {
+        toast({
+          title: "Сначала выделите текст",
+          description: "Спойлер можно создать только для уже выделенного фрагмента текста.",
+        });
+        return;
+      }
+
+      if (isInlineSpoilerSelection()) {
+        editor.chain().focus().toggleMark("spoiler").run();
+        return;
+      }
+
+      const spoilerContent = buildSpoilerBlockContent();
+      if (!spoilerContent) {
+        toast({
+          title: "Не удалось скрыть текст",
+          description: "Попробуйте выделить цельный фрагмент текста ещё раз.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      editor.chain().focus().insertContent({
+        type: "spoilerBlock",
+        content: spoilerContent,
+      }).run();
+    };
+
     // Получаем текущую длину текста
     const currentLength = editor.getText().length;
     const isOverLimit = currentLength > maxLength;
@@ -205,7 +280,18 @@ export const RichTextEditor = React.forwardRef<RichTextEditorRef, RichTextEditor
             color: hsl(var(--primary));
             text-decoration: underline;
           }
-        `}</style>
+          .ProseMirror [data-spoiler="true"] {
+            border-radius: 0.35rem;
+            background: linear-gradient(90deg, rgba(148, 163, 184, 0.35), rgba(203, 213, 225, 0.5), rgba(148, 163, 184, 0.35));
+            color: transparent;
+            text-shadow: none;
+          }
+          .ProseMirror [data-spoiler-block="true"] {
+            border-radius: 0.85rem;
+            background: linear-gradient(90deg, rgba(148, 163, 184, 0.18), rgba(203, 213, 225, 0.28), rgba(148, 163, 184, 0.18));
+            padding: 0.2rem 0.35rem;
+          }
+          `}</style>
         <div className="flex items-center gap-1 p-2 border-b bg-muted/50 flex-wrap">
           <HeadingDropdown editor={editor} />
           <MenuButton onClick={() => editor.chain().focus().toggleBold().run()} active={editor.isActive("bold")} title="Жирный (Ctrl+B)">
@@ -241,6 +327,11 @@ export const RichTextEditor = React.forwardRef<RichTextEditorRef, RichTextEditor
           <MenuButton onClick={() => editor.chain().focus().toggleBlockquote().run()} active={editor.isActive("blockquote")} title="Цитата">
             <Quote className="w-4 h-4" />
           </MenuButton>
+          {enableSpoilerBlocks && (
+            <MenuButton onClick={insertSpoiler} title="Скрыть выделенный текст">
+              <EyeOff className="w-4 h-4" />
+            </MenuButton>
+          )}
           <div className="w-px h-6 bg-border mx-1" />
           <MenuButton onClick={() => editor.chain().focus().setTextAlign("left").run()} active={editor.isActive({ textAlign: "left" })} title="По левому краю">
             <AlignLeft className="w-4 h-4" />

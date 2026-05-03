@@ -38,11 +38,14 @@ import { setupReadingSessionsHandlers } from "./websocket/reading-sessions.js";
 import { scheduler } from "./services/scheduler.js";
 import readingSessionsRoutes from "./routes/reading-sessions.js";
 import reactionsRoutes from "./routes/reactions.js";
+import { registerIO } from "./lib/socket-registry.js";
 import questionsRoutes from "./routes/questions.js";
 import scheduleRoutes from "./routes/schedule.js";
+import studioStreamRouter from "./routes/studio-stream.js";
 import { logger } from "./lib/logger.js";
 import { loadFeatureFlags } from "./lib/feature-flags.js";
 import { responseCompression } from "./lib/response-compression.js";
+import { createIcecastLiveProxy } from "./lib/icecast-live-proxy.js";
 
 export const app = express();
 
@@ -50,6 +53,11 @@ export const app = express();
 // trust proxy: 1 — trust only first hop, предотвращает spoofing от пользователей
 app.set('trust proxy', 1);
 const httpServer = createServer(app);
+
+// Studio ingest использует long-lived streaming POST, который не завершает body
+// до ручной остановки эфира. У Node.js по умолчанию requestTimeout = 300s,
+// из-за чего такие запросы обрываются примерно через 5 минут.
+httpServer.requestTimeout = 0;
 
 // CORS: allowed origins (used by Express, Socket.IO, and WebSocket servers)
 const allowedOrigins = process.env.ALLOWED_ORIGINS
@@ -64,6 +72,7 @@ const io = new SocketIOServer(httpServer, {
 	},
 	transports: ["websocket", "polling"],
 });
+registerIO(io);
 
 // Utility functions
 export function log(message: string, source = "express") {
@@ -142,6 +151,9 @@ app.use(
 					imgSrc: ["'self'", "data:", "https:"],
 					scriptSrc: ["'self'", "https://mc.yandex.ru", "https://mc.yandex.com"],
 					connectSrc: ["'self'", "wss:", "https:"],
+					// blob: — для воспроизведения mic-check записи (createObjectURL)
+					// https://radio.voxlibris.ru — для воспроизведения Icecast потока слушателями
+					mediaSrc: ["'self'", "blob:", "https://radio.voxlibris.ru"],
 				frameSrc: ["'none'"],
 				objectSrc: ["'none'"],
 				baseUri: ["'self'"],
@@ -675,6 +687,12 @@ app.use(express.urlencoded({ extended: false, limit: process.env.URLENCODED_BODY
 // Cookie parser для работы с JWT токенами в cookies
 app.use(cookieParser());
 
+// ===== Icecast Live Stream Proxy =====
+// Проксируем /live/* запросы на Icecast для слушателей
+// Это должно быть ПЕРЕД всеми другими middleware, чтобы не попадать в rate-limiting
+app.get('/live/:sessionId', createIcecastLiveProxy());
+app.head('/live/:sessionId', createIcecastLiveProxy());
+
 // Setup JWT-based authentication routes
 // Применить rate limiting middleware
 app.use("/api/auth/login", authLimiter);
@@ -683,7 +701,12 @@ app.use("/api/auth/forgot-password", authLimiter);
 app.use("/api/auth/reset-password", authLimiter);
 app.use("/api/auth/resend-confirmation", resendConfirmationLimiter);
 app.use("/api/auth", speedLimiter);
-app.use("/api", anonymousBurstLimiter);
+// Studio stream — долгоживущий запрос, монтируем ДО rate-limiters для /api
+	// Собственный rate-limit: 1 активный поток на пользователя обеспечивается
+	// логикой сессии на уровне приложения (один reader_id = один mount point)
+	app.use("/api/studio/stream", studioStreamRouter);
+
+	app.use("/api", anonymousBurstLimiter);
 app.use("/api", anonymousReadLimiter);
 app.use("/api", anonymousWriteLimiter);
 app.use("/api", expensiveLimiter);

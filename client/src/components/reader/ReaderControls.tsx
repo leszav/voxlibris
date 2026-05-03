@@ -1,25 +1,15 @@
-import { useState, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../ui/button";
 import { Slider } from "../ui/slider";
 import { Sun, Moon, Type, AlignJustify } from "lucide-react";
-
-export interface ReaderSettings {
-  fontSize: number;
-  fontFamily: string;
-  theme: "light" | "dark" | "sepia";
-  lineHeight: number;
-  textAlign: "left" | "justify";
-  contentWidth: number;
-}
-
-const DEFAULT_SETTINGS: ReaderSettings = {
-  fontSize: 18,
-  fontFamily: "Georgia",
-  theme: "light",
-  lineHeight: 1.8,
-  textAlign: "justify",
-  contentWidth: 80,
-};
+import {
+  applyReaderSettings,
+  DEFAULT_READER_SETTINGS,
+  normalizeReaderSettings,
+  type ReaderSettings,
+} from "@/lib/reader-settings";
+import { useIsMobile } from "@/hooks/use-mobile";
+import { SyncStatusIndicator } from "./SyncStatusIndicator";
 
 const FONT_FAMILIES = [
   { value: "Georgia", label: "Georgia" },
@@ -30,62 +20,98 @@ const FONT_FAMILIES = [
 ];
 
 interface ReaderControlsProps {
-  readonly bookId: string;
+  readonly settings: ReaderSettings;
+  readonly onSettingsChange: (settings: ReaderSettings) => void;
+  readonly onPreviewSettings?: (settings: ReaderSettings) => void;
+  readonly onResetSettings?: () => void;
+  /** @deprecated Use SyncStatusIndicator component instead */
+  readonly isSaving?: boolean;
 }
 
-export function ReaderControls({ bookId: _bookId }: ReaderControlsProps) {
-  const [settings, setSettings] = useState<ReaderSettings>(() => {
-    const saved = localStorage.getItem("readerSettings");
-    return saved ? JSON.parse(saved) : DEFAULT_SETTINGS;
-  });
+export function ReaderControls({
+  settings,
+  onSettingsChange,
+  onPreviewSettings,
+  onResetSettings,
+  isSaving: _isSaving = false,
+}: ReaderControlsProps) {
+  const [localSettings, setLocalSettings] = useState<ReaderSettings>(() => normalizeReaderSettings(settings));
+  const commitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isMobile = useIsMobile();
 
-  // Применение настроек при монтировании компонента
-  useEffect(() => {
-    const saved = localStorage.getItem("readerSettings");
-    const initialSettings = saved ? JSON.parse(saved) : DEFAULT_SETTINGS;
-    applySettings(initialSettings);
-  }, []);
+  const commitSettings = useCallback((nextSettings: ReaderSettings, delayMs = 180) => {
+    if (commitTimeoutRef.current) {
+      clearTimeout(commitTimeoutRef.current);
+    }
 
-  // Сохранение настроек
+    commitTimeoutRef.current = setTimeout(() => {
+      onSettingsChange(nextSettings);
+      commitTimeoutRef.current = null;
+    }, delayMs);
+  }, [onSettingsChange]);
+
   useEffect(() => {
-    localStorage.setItem("readerSettings", JSON.stringify(settings));
-    applySettings(settings);
+    const normalizedIncoming = normalizeReaderSettings(settings);
+    setLocalSettings(normalizedIncoming);
+    applyReaderSettings(normalizedIncoming, "personal");
   }, [settings]);
 
-  // Применение настроек к документу
-  const applySettings = (settings: ReaderSettings) => {
-    const root = document.documentElement;
-    root.style.setProperty("--reader-font-size", `${settings.fontSize}px`);
-    root.style.setProperty("--reader-font-family", settings.fontFamily);
-    root.style.setProperty("--reader-line-height", settings.lineHeight.toString());
-    root.style.setProperty("--reader-text-align", settings.textAlign);
-    root.style.setProperty("--reader-content-width", `${settings.contentWidth}%`);
+  useEffect(() => {
+    return () => {
+      if (commitTimeoutRef.current) {
+        clearTimeout(commitTimeoutRef.current);
+      }
+    };
+  }, []);
 
-    // Тема - применяем через data-атрибут для всей страницы
-    (root.dataset as Record<string, string>).readerTheme = settings.theme;
-    
-    // Удаляем старые классы и добавляем новые
-    document.body.classList.remove("reader-light", "reader-dark", "reader-sepia");
-    document.body.classList.add(`reader-${settings.theme}`);
-  };
-
-  // Cleanup при размонтировании НЕ удаляем CSS переменные
-  // Они должны сохраняться между открытиями панели настроек
-  // и очищаются только при уходе со страницы ридера
-
-  // Мемоизация для оптимизации
   const updateSetting = useMemo(
     () => (key: keyof ReaderSettings, value: ReaderSettings[typeof key]) => {
-      setSettings((prev) => ({ ...prev, [key]: value }));
+      setLocalSettings((prev) => {
+        const nextSettings = normalizeReaderSettings({ ...prev, [key]: value });
+        if (onPreviewSettings) {
+          onPreviewSettings(nextSettings);
+        } else {
+          applyReaderSettings(nextSettings, "personal");
+        }
+        commitSettings(nextSettings);
+        return nextSettings;
+      });
     },
-    []
+    [commitSettings, onPreviewSettings]
   );
+
+  const handleReset = useCallback(() => {
+    const nextSettings = normalizeReaderSettings(DEFAULT_READER_SETTINGS);
+    setLocalSettings(nextSettings);
+
+    if (onResetSettings) {
+      onResetSettings();
+      return;
+    }
+
+    if (onPreviewSettings) {
+      onPreviewSettings(nextSettings);
+    } else {
+      applyReaderSettings(nextSettings, "personal");
+    }
+
+    onSettingsChange(nextSettings);
+  }, [onPreviewSettings, onResetSettings, onSettingsChange]);
 
   return (
     <div className="space-y-6">
-      <h3 className="font-semibold text-lg mb-4">Настройки чтения</h3>
+      <div className="space-y-1">
+        <div className="flex items-center justify-between">
+          <h3 className="font-semibold text-lg">Настройки чтения</h3>
+          <SyncStatusIndicator showText size="sm" />
+        </div>
+        {isMobile && (
+          <p className="text-xs text-muted-foreground">
+            На телефоне используются отдельные настройки этого устройства. При первом открытии применяются 12px / 1.2 / 95%, дальше вы настраиваете их отдельно от десктопа.
+          </p>
+        )}
+      </div>
 
-      {/* Размер шрифта */}
       <div className="space-y-2">
         <div className="flex items-center justify-between">
           <label htmlFor="font-size-slider" className="text-sm flex items-center">
@@ -93,12 +119,12 @@ export function ReaderControls({ bookId: _bookId }: ReaderControlsProps) {
             Размер шрифта
           </label>
           <span className="text-sm text-muted-foreground">
-            {settings.fontSize}px
+            {localSettings.fontSize}px
           </span>
         </div>
         <Slider
           id="font-size-slider"
-          value={[settings.fontSize]}
+          value={[localSettings.fontSize]}
           onValueChange={(value) => updateSetting("fontSize", value[0])}
           min={12}
           max={32}
@@ -107,14 +133,13 @@ export function ReaderControls({ bookId: _bookId }: ReaderControlsProps) {
         />
       </div>
 
-      {/* Шрифт */}
       <div className="space-y-2">
         <span className="text-sm">Шрифт</span>
         <div className="grid grid-cols-2 gap-2">
           {FONT_FAMILIES.map((font) => (
             <Button
               key={font.value}
-              variant={settings.fontFamily === font.value ? "secondary" : "outline"}
+              variant={localSettings.fontFamily === font.value ? "secondary" : "outline"}
               size="sm"
               onClick={() => updateSetting("fontFamily", font.value)}
               className="text-xs"
@@ -125,7 +150,6 @@ export function ReaderControls({ bookId: _bookId }: ReaderControlsProps) {
         </div>
       </div>
 
-      {/* Межстрочный интервал */}
       <div className="space-y-2">
         <div className="flex items-center justify-between">
           <label htmlFor="line-height-slider" className="text-sm flex items-center">
@@ -133,12 +157,12 @@ export function ReaderControls({ bookId: _bookId }: ReaderControlsProps) {
             Интервал
           </label>
           <span className="text-sm text-muted-foreground">
-            {settings.lineHeight.toFixed(1)}
+            {localSettings.lineHeight.toFixed(1)}
           </span>
         </div>
         <Slider
           id="line-height-slider"
-          value={[settings.lineHeight]}
+          value={[localSettings.lineHeight]}
           onValueChange={(value) => updateSetting("lineHeight", value[0])}
           min={1.2}
           max={2.5}
@@ -147,17 +171,16 @@ export function ReaderControls({ bookId: _bookId }: ReaderControlsProps) {
         />
       </div>
 
-      {/* Ширина текста */}
       <div className="space-y-2">
         <div className="flex items-center justify-between">
           <label htmlFor="content-width-slider" className="text-sm">Ширина текста</label>
           <span className="text-sm text-muted-foreground">
-            {settings.contentWidth}%
+            {localSettings.contentWidth}%
           </span>
         </div>
         <Slider
           id="content-width-slider"
-          value={[settings.contentWidth]}
+          value={[localSettings.contentWidth]}
           onValueChange={(value) => updateSetting("contentWidth", value[0])}
           min={60}
           max={95}
@@ -166,12 +189,11 @@ export function ReaderControls({ bookId: _bookId }: ReaderControlsProps) {
         />
       </div>
 
-      {/* Тема */}
       <div className="space-y-2">
         <span className="text-sm">Тема</span>
         <div className="flex gap-2">
           <Button
-            variant={settings.theme === "light" ? "secondary" : "outline"}
+            variant={localSettings.theme === "light" ? "secondary" : "outline"}
             size="sm"
             onClick={() => updateSetting("theme", "light")}
             className="flex-1"
@@ -180,7 +202,7 @@ export function ReaderControls({ bookId: _bookId }: ReaderControlsProps) {
             Светлая
           </Button>
           <Button
-            variant={settings.theme === "dark" ? "secondary" : "outline"}
+            variant={localSettings.theme === "dark" ? "secondary" : "outline"}
             size="sm"
             onClick={() => updateSetting("theme", "dark")}
             className="flex-1"
@@ -189,7 +211,7 @@ export function ReaderControls({ bookId: _bookId }: ReaderControlsProps) {
             Темная
           </Button>
           <Button
-            variant={settings.theme === "sepia" ? "secondary" : "outline"}
+            variant={localSettings.theme === "sepia" ? "secondary" : "outline"}
             size="sm"
             onClick={() => updateSetting("theme", "sepia")}
             className="flex-1 text-xs"
@@ -199,12 +221,11 @@ export function ReaderControls({ bookId: _bookId }: ReaderControlsProps) {
         </div>
       </div>
 
-      {/* Выравнивание */}
       <div className="space-y-2">
         <span className="text-sm">Выравнивание</span>
         <div className="flex gap-2">
           <Button
-            variant={settings.textAlign === "left" ? "secondary" : "outline"}
+            variant={localSettings.textAlign === "left" ? "secondary" : "outline"}
             size="sm"
             onClick={() => updateSetting("textAlign", "left")}
             className="flex-1 text-xs"
@@ -212,7 +233,7 @@ export function ReaderControls({ bookId: _bookId }: ReaderControlsProps) {
             По левому краю
           </Button>
           <Button
-            variant={settings.textAlign === "justify" ? "secondary" : "outline"}
+            variant={localSettings.textAlign === "justify" ? "secondary" : "outline"}
             size="sm"
             onClick={() => updateSetting("textAlign", "justify")}
             className="flex-1 text-xs"
@@ -222,15 +243,16 @@ export function ReaderControls({ bookId: _bookId }: ReaderControlsProps) {
         </div>
       </div>
 
-      {/* Сброс */}
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={() => setSettings(DEFAULT_SETTINGS)}
-        className="w-full mt-4"
-      >
-        Сбросить настройки
-      </Button>
+      {onResetSettings && (
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleReset}
+          className="w-full mt-4"
+        >
+          Сбросить настройки
+        </Button>
+      )}
     </div>
   );
 }

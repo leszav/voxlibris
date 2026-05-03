@@ -100,11 +100,11 @@ export default function CreateClub() {
 
   return (
     <MainLayout>
-      <div className="container max-w-2xl py-8 px-4">
+      <div className="container max-w-2xl px-4 py-6 sm:px-6 md:py-8">
         <Button
           variant="ghost"
           onClick={() => setLocation("/clubs")}
-          className="mb-6"
+          className="mb-5 w-full justify-center sm:mb-6 sm:w-auto"
         >
           <ArrowLeft className="mr-2 h-4 w-4" />
           Назад к клубам
@@ -151,13 +151,13 @@ export default function CreateClub() {
                   value={formData.maxMembers}
                   onChange={(e) => setFormData({ ...formData, maxMembers: Number.parseInt(e.target.value, 10) })}
                 />
-                <p className="text-sm text-muted-foreground flex items-center gap-1">
+                <p className="flex items-start gap-1 text-sm text-muted-foreground">
                   <Users className="h-3 w-3" />
                   Рекомендуется 10-50 участников для комфортного общения
                 </p>
               </div>
 
-              <div className="flex items-center justify-between space-x-2">
+              <div className="flex flex-col gap-3 rounded-lg border p-4 sm:flex-row sm:items-center sm:justify-between">
                 <div className="space-y-0.5">
                   <Label htmlFor="isPrivate">Приватный клуб</Label>
                   <p className="text-sm text-muted-foreground">
@@ -171,7 +171,7 @@ export default function CreateClub() {
                 />
               </div>
 
-              <div className="flex gap-4 pt-4">
+              <div className="flex flex-col gap-3 pt-2 sm:flex-row sm:gap-4 sm:pt-4">
                 <Button
                   type="button"
                   variant="outline"
@@ -209,15 +209,15 @@ export default function CreateClub() {
 
       {/* Success Dialog - разные сообщения для pending и одобренных клубов */}
       <Dialog open={successDialog.open} onOpenChange={handleSuccessDialogClose}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="max-w-[calc(100vw-2rem)] sm:max-w-md">
           <DialogHeader>
-            <div className="flex items-center mb-2">
+            <div className="mb-2 flex items-start gap-3">
               {successDialog.isPending ? (
-                <div className="w-12 h-12 rounded-full bg-amber-100 flex items-center justify-center mr-3">
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-amber-100">
                   <Clock className="h-6 w-6 text-amber-600" />
                 </div>
               ) : (
-                <div className="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center mr-3">
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-green-100">
                   <CheckCircle className="h-6 w-6 text-green-600" />
                 </div>
               )}

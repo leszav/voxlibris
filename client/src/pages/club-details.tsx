@@ -12,11 +12,14 @@ import {
   LogOut,
   MessageCircle,
   MoreHorizontal,
+  Star,
   Trash2,
   Users,
+  Layers,
 } from "lucide-react";
 import { Link, useLocation, useRoute } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
+import { cn } from "@/lib/utils";
 import { ClubSettingsModal } from "@/components/club/club-settings-modal";
 import { EditClubBookDialog } from "@/components/club/EditClubBookDialog";
 import { InvitationsList } from "@/components/club/invitations-list";
@@ -27,6 +30,11 @@ import { BookDescriptionDialog } from "@/components/club/BookDescriptionDialog";
 import { TransferOwnershipDialog } from "@/components/club/TransferOwnershipDialog";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { ChatWidget } from "@/components/chat/ChatWidget";
+import { LiveReadersBubble, ActiveReadersModal } from "@/components/studio/LiveReadersBubble";
+import { ListenerOverlay } from "@/components/studio/ListenerOverlay";
+import { useLiveReaders } from "@/hooks/use-live-readers";
+import { useClubLiveListening } from "@/hooks/use-club-live-listening";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -37,12 +45,14 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { VoxLibrisUpload } from "@/components/ui/voxlibris-upload";
 import { useAuth } from "@/hooks/use-auth";
-import { useDeleteClubBook } from "@/hooks/use-books-v2";
-import { useClub, useClubMembers, useRemoveMember, type ClubMemberWithUser } from "@/hooks/use-clubs";
+import { useClubBooks, useDeleteClubBook, useSetActiveBook, type ClubBook } from "@/hooks/use-books-v2";
+import { useClub, useClubMembers, useRemoveMember, type ClubDetailsResponse, type ClubMemberWithUser } from "@/hooks/use-clubs";
 import { modalConfirm, useToast } from "@/hooks/use-toast";
 import { getAccessToken } from "@/lib/token-store";
 import DOMPurify from "dompurify";
@@ -62,7 +72,7 @@ interface ClubSettings {
   shortDescription?: string;
 }
 
-type ClubWithOptionalBook = ClubWithDetails & { book?: ClubWithDetails["book"] | null };
+type ClubWithOptionalBook = ClubDetailsResponse & { book?: ClubDetailsResponse["book"] | null };
 
 // Вспомогательная функция для получения варианта badge по роли
 const getMemberRoleBadgeVariant = (role: ClubMemberRole): "default" | "secondary" | "outline" => {
@@ -108,7 +118,7 @@ const parseSchedule = (schedule: string | null): ScheduleItem[] => {
 
 const ClubNotFound = () => (
   <MainLayout>
-    <div className="container py-12 px-6 md:px-12 text-center">
+    <div className="container px-4 py-8 text-center sm:px-6 md:px-12 md:py-12">
       <p className="text-muted-foreground">Клуб не найден</p>
     </div>
   </MainLayout>
@@ -116,7 +126,7 @@ const ClubNotFound = () => (
 
 const ClubLoading = () => (
   <MainLayout>
-    <div className="container py-12 px-6 md:px-12">
+    <div className="container px-4 py-8 sm:px-6 md:px-12 md:py-12">
       <div className="flex items-center justify-center py-12">
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
         <span className="ml-2 text-muted-foreground">Загружаем клуб...</span>
@@ -127,7 +137,7 @@ const ClubLoading = () => (
 
 const ClubAuthRequired = () => (
   <MainLayout>
-    <div className="container py-12 px-6 md:px-12 flex justify-center">
+    <div className="container flex justify-center px-4 py-8 sm:px-6 md:px-12 md:py-12">
       <Card className="max-w-md w-full">
         <CardHeader className="text-center">
           <div className="mx-auto mb-4 h-12 w-12 rounded-full bg-blue-100 flex items-center justify-center">
@@ -181,10 +191,10 @@ function useClubErrorHandling(error: unknown, setLocation: (path: string) => voi
     errorMessage.includes("приглашение");
   
   if (isPrivateClubError) {
-    return (
-      <MainLayout>
-        <div className="container py-12 px-6 md:px-12 flex justify-center">
-          <Card className="max-w-md w-full">
+      return (
+        <MainLayout>
+          <div className="container flex justify-center px-4 py-8 sm:px-6 md:px-12 md:py-12">
+            <Card className="max-w-md w-full">
             <CardHeader className="text-center">
               <div className="mx-auto mb-4 h-12 w-12 rounded-full bg-amber-100 flex items-center justify-center">
                 <Lock className="h-6 w-6 text-amber-600" />
@@ -211,7 +221,7 @@ function useClubErrorHandling(error: unknown, setLocation: (path: string) => voi
   
   return (
     <MainLayout>
-      <div className="container py-12 px-6 md:px-12 text-center">
+      <div className="container px-4 py-8 text-center sm:px-6 md:px-12 md:py-12">
         <p className="text-red-600 mb-2">Ошибка загрузки клуба</p>
         <p className="text-sm text-muted-foreground">{errorMessage}</p>
       </div>
@@ -219,11 +229,10 @@ function useClubErrorHandling(error: unknown, setLocation: (path: string) => voi
   );
 }
 
-function useClubPermissions(members: ClubMemberWithUser[], user: User | null) {
-  const currentUserMember = members.find((m) => m.id === user?.id);
-  const isOwner = currentUserMember?.role === "owner";
-  const isModerator = currentUserMember?.role === "moderator";
-  const isMember = !!currentUserMember;
+function useClubPermissions(currentUserRole: ClubMemberRole | null | undefined, user: User | null) {
+  const isOwner = currentUserRole === "owner";
+  const isModerator = currentUserRole === "moderator";
+  const isMember = Boolean(currentUserRole);
   
   const canRemove = (memberRole: string, memberId: string) => {
     if (!user?.id || memberId === user.id) return false;
@@ -232,7 +241,7 @@ function useClubPermissions(members: ClubMemberWithUser[], user: User | null) {
     return false;
   };
   
-  return { isOwner, isModerator, isMember, canRemove, currentUserMember };
+  return { isOwner, isModerator, isMember, canRemove };
 }
 
 function useClubActions({
@@ -385,7 +394,7 @@ interface ClubHeaderProps {
 
 function ClubHeader({ club, members, isOwner, isMember, removeMemberMutation, handleLeaveClub, setLocation, user, onOwnershipTransferred }: ClubHeaderProps) {
   return (
-    <div className="relative h-48 md:h-64 lg:h-80 w-full overflow-hidden">
+    <div className="relative min-h-[18rem] w-full overflow-hidden md:min-h-[22rem] lg:min-h-[26rem]">
       {club.coverImage ? (
         <img
           src={club.coverImage}
@@ -397,22 +406,22 @@ function ClubHeader({ club, members, isOwner, isMember, removeMemberMutation, ha
       )}
       <div className="absolute inset-0 bg-gradient-to-br from-primary/10 to-accent/10 opacity-50" />
 
-      <div className="container relative h-full flex flex-col justify-between py-8 px-6 md:px-12">
+      <div className="container relative flex h-full flex-col justify-between px-4 py-6 sm:px-6 md:px-12 md:py-8">
         <div>
           <Button
             variant="ghost"
             size="sm"
             onClick={() => setLocation("/clubs")}
-            className="text-white hover:bg-white/20"
+            className="h-9 w-full justify-center text-white hover:bg-white/20 sm:w-auto"
           >
             <ArrowLeft className="mr-2 h-4 w-4" />
             Назад к моим клубам
           </Button>
         </div>
 
-        <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
-          <div className="space-y-4 max-w-2xl">
-            <div className="flex gap-2 items-center">
+        <div className="flex flex-col gap-5 md:flex-row md:items-end md:justify-between md:gap-6">
+          <div className="max-w-2xl space-y-4">
+            <div className="flex flex-wrap items-center gap-2">
               {club.isPrivate && (
                 <Badge
                   variant="secondary"
@@ -431,10 +440,10 @@ function ClubHeader({ club, members, isOwner, isMember, removeMemberMutation, ha
                 </Badge>
               ))}
             </div>
-            <h1 className="text-3xl md:text-5xl font-serif font-bold text-white shadow-sm">
+            <h1 className="text-3xl font-serif font-bold text-white shadow-sm sm:text-4xl md:text-5xl">
               {club.title}
             </h1>
-            <div className="flex items-center gap-4 text-white/80 text-sm">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-white/80">
               <span className="flex items-center gap-1">
                 <Users className="w-4 h-4" /> {club.memberCount || members.length}/
                 {club.maxMembers} Участников
@@ -446,7 +455,7 @@ function ClubHeader({ club, members, isOwner, isMember, removeMemberMutation, ha
             </div>
           </div>
 
-          <div className="flex gap-3">
+          <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:flex-wrap md:justify-end">
             {isMember && (
               <>
                 {isOwner && (
@@ -467,7 +476,7 @@ function ClubHeader({ club, members, isOwner, isMember, removeMemberMutation, ha
                   <Button
                     size="lg"
                     variant="outline"
-                    className="bg-white/10 text-white border-white/20 hover:bg-white/20"
+                    className="w-full bg-white/10 text-white border-white/20 hover:bg-white/20 sm:w-auto"
                     onClick={handleLeaveClub}
                     disabled={removeMemberMutation.isPending}
                   >
@@ -508,25 +517,25 @@ function CurrentBookCard({ club, clubId, isOwner, isMember, handleDeleteBook, de
   const [showDescriptionDialog, setShowDescriptionDialog] = useState(false);
 
   return (
-    <div className="bg-card rounded-xl border p-6 shadow-sm">
-      <h3 className="font-serif font-bold text-xl mb-4">Текущая книга</h3>
+    <div className="rounded-xl border bg-card p-4 shadow-sm sm:p-6">
+      <h3 className="mb-4 font-serif text-lg font-bold sm:text-xl">Текущая книга</h3>
       {club.book ? (
         <div className="space-y-4">
-          <div className="flex gap-4">
-            <div className="w-20 md:w-24 shrink-0 rounded-md overflow-hidden shadow-md">
+          <div className="flex flex-col gap-4 sm:flex-row">
+            <div className="w-full max-w-[7rem] shrink-0 overflow-hidden rounded-md shadow-md sm:w-20 md:w-24">
               {club.book.coverUrl ? (
                 <img
                   src={club.book.coverUrl}
                   alt={club.book.title}
-                  className="w-full h-full object-cover"
+                  className="h-full w-full object-cover"
                 />
               ) : (
-                <div className="w-full h-32 bg-muted flex items-center justify-center">
+                <div className="flex h-32 w-full items-center justify-center bg-muted">
                   <BookOpen className="w-8 h-8 text-muted-foreground" />
                 </div>
               )}
             </div>
-            <div className="space-y-2 flex-1">
+            <div className="flex-1 space-y-2">
               <h4 className="font-semibold leading-tight">{club.book.title}</h4>
               <p className="text-sm text-muted-foreground">{club.book.author}</p>
               {club.book.description && (
@@ -561,7 +570,7 @@ function CurrentBookCard({ club, clubId, isOwner, isMember, handleDeleteBook, de
               </Button>
             )}
             {isOwner && (
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                 <EditClubBookDialog
                   book={{
                     id: club.book.id,
@@ -583,7 +592,7 @@ function CurrentBookCard({ club, clubId, isOwner, isMember, handleDeleteBook, de
                   clubId={clubId}
                   onSave={() => globalThis.location.reload()}
                 >
-                  <Button variant="outline" className="flex-1">
+                  <Button variant="outline" className="w-full sm:flex-1">
                     <Edit2 className="w-4 h-4 mr-2" />
                     Редактировать
                   </Button>
@@ -597,7 +606,7 @@ function CurrentBookCard({ club, clubId, isOwner, isMember, handleDeleteBook, de
                 />
                 <Button
                   variant="outline"
-                  className="flex-1"
+                  className="w-full sm:flex-1"
                   onClick={handleDeleteBook}
                   disabled={deleteBookMutation.isPending}
                 >
@@ -647,81 +656,300 @@ interface MembersListCardProps {
   readonly clubId: string;
   readonly clubTitle: string;
   readonly members: ClubMemberWithUser[];
+  readonly memberCount: number;
   readonly membersLoading: boolean;
+  readonly canViewMembers: boolean;
   readonly isOwner: boolean;
   readonly isModerator: boolean;
   readonly canRemove: (role: string, memberId: string) => boolean;
   readonly handleRemoveMember: (memberId: string, username: string) => void;
 }
 
-function MembersListCard({ clubId, clubTitle, members, membersLoading, isOwner, isModerator, canRemove, handleRemoveMember }: MembersListCardProps) {
+function MembersListCard({ clubId, clubTitle, members, memberCount, membersLoading, canViewMembers, isOwner, isModerator, canRemove, handleRemoveMember }: MembersListCardProps) {
   return (
-    <div className="bg-card rounded-xl border p-6 shadow-sm">
-      <h3 className="font-serif font-bold text-xl mb-4 flex items-center justify-between">
+    <div className="rounded-xl border bg-card p-4 shadow-sm sm:p-6">
+      <h3 className="mb-4 flex flex-col gap-3 font-serif text-lg font-bold sm:flex-row sm:items-center sm:justify-between sm:text-xl">
         <span>Участники</span>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 self-start sm:self-auto">
           <Badge variant="outline" className="font-sans font-normal text-xs">
-            {membersLoading ? "Загрузка..." : `${members.length} участников`}
+            {membersLoading ? "Загрузка..." : `${memberCount} участников`}
           </Badge>
-          {(isOwner || isModerator) && (
+          {canViewMembers && (isOwner || isModerator) && (
             <InviteMemberModal clubId={clubId} clubTitle={clubTitle} />
           )}
         </div>
       </h3>
-      <div className="space-y-4">
-        {membersLoading ? (
-          <div className="flex items-center justify-center py-4">
-            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-            <span className="ml-2 text-sm text-muted-foreground">
-              Загружаем участников...
-            </span>
-          </div>
-        ) : (
-          members.map((member) => (
-            <div key={member.id} className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <Avatar>
-                  <AvatarFallback className="bg-primary/10 text-primary font-bold">
-                    {member.username.substring(0, 2).toUpperCase()}
-                  </AvatarFallback>
-                </Avatar>
-                <div>
-                  <p className="text-sm font-medium">{member.username}</p>
-                  <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                    <span>
-                      Присоединился {new Date(member.joinedAt).toLocaleDateString()}
-                    </span>
+      {canViewMembers ? (
+        <div className="space-y-4">
+          {membersLoading ? (
+            <div className="flex items-center justify-center py-4">
+              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+              <span className="ml-2 text-sm text-muted-foreground">
+                Загружаем участников...
+              </span>
+            </div>
+          ) : (
+            <div className="max-h-[28rem] space-y-4 overflow-y-auto pr-1 sm:max-h-[32rem]">
+              {members.map((member) => (
+                <div key={member.id} className="flex flex-col gap-3 rounded-xl border border-border/60 p-3 2xl:flex-row 2xl:items-center 2xl:justify-between 2xl:border-0 2xl:p-0">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <Avatar>
+                      <AvatarFallback className="bg-primary/10 text-primary font-bold">
+                        {member.username.substring(0, 2).toUpperCase()}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium">{member.username}</p>
+                      <div className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
+                        <span>
+                          Присоединился {new Date(member.joinedAt).toLocaleDateString()}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 self-start">
+                    <Badge variant={getMemberRoleBadgeVariant(member.role)} className="shrink-0">
+                      {member.role === "owner" && "Владелец"}
+                      {member.role === "moderator" && "Модератор"}
+                      {member.role === "member" && "Участник"}
+                    </Badge>
+                    {(isOwner || isModerator) && canRemove(member.role, member.id) && (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button size="icon" variant="ghost" className="h-8 w-8">
+                            <MoreHorizontal className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem
+                            className="text-destructive"
+                            onClick={() => handleRemoveMember(member.id, member.username)}
+                          >
+                            <Trash2 className="h-4 w-4 mr-2" /> Удалить из клуба
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    )}
                   </div>
                 </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="rounded-xl border border-dashed bg-muted/30 px-4 py-5 text-sm text-muted-foreground">
+          Список участников доступен только участникам клуба и модераторам.
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Component: Club Library Tab
+interface ClubLibraryTabProps {
+  readonly clubId: string;
+  readonly activeBookId: string | null | undefined;
+  readonly isOwner: boolean;
+  readonly isMember: boolean;
+  readonly setLocation: (path: string) => void;
+}
+
+function ClubLibraryTab({ clubId, activeBookId, isOwner, isMember, setLocation }: ClubLibraryTabProps) {
+  const { data: books = [], isLoading } = useClubBooks(clubId);
+  const [search, setSearch] = useState("");
+  const [genreFilter, setGenreFilter] = useState<string>("all");
+  const [sort, setSort] = useState<"title_asc" | "title_desc" | "author_asc" | "created_desc" | "genre_asc">("created_desc");
+  const [groupByGenre, setGroupByGenre] = useState<"none" | "primary_genre">("none");
+  const setActiveBook = useSetActiveBook(clubId);
+  const deleteBookMutation = useDeleteClubBook(clubId);
+  const { toast } = useToast();
+
+  const genreOptions = Array.from(
+    new Map(
+      books
+        .filter((book) => book.primaryGenre)
+        .map((book) => [book.primaryGenre!.code, book.primaryGenre!.label]),
+    ).entries(),
+  ).sort((a, b) => a[1].localeCompare(b[1], "ru"));
+
+  const formatBookGenres = (book: ClubBook) => {
+    const labels = (book.genres || []).map((genre) => genre.label).filter(Boolean);
+    if (labels.length > 0) {
+      return labels.join(", ");
+    }
+
+    return book.primaryGenre?.label || book.genre || "";
+  };
+
+  const filteredBooks = books
+    .filter((book) => {
+      const q = search.trim().toLowerCase();
+      if (!q) return true;
+      const title = book.title.toLowerCase();
+      const author = book.author.toLowerCase();
+      const genre = formatBookGenres(book).toLowerCase();
+      return title.includes(q) || author.includes(q) || genre.includes(q);
+    })
+    .filter((book) => {
+      if (genreFilter === "all") return true;
+      if (genreFilter === "none") return !book.primaryGenre;
+      return book.primaryGenre?.code === genreFilter || (book.genres || []).some((genre) => genre.code === genreFilter);
+    })
+    .sort((left, right) => {
+      if (sort === "created_desc") {
+        return new Date(right.uploadedAt).getTime() - new Date(left.uploadedAt).getTime();
+      }
+      if (sort === "title_asc") return left.title.localeCompare(right.title, "ru");
+      if (sort === "title_desc") return right.title.localeCompare(left.title, "ru");
+      if (sort === "author_asc") return left.author.localeCompare(right.author, "ru");
+      const leftGenre = formatBookGenres(left);
+      const rightGenre = formatBookGenres(right);
+      return leftGenre.localeCompare(rightGenre, "ru");
+    });
+
+  const groupedBooks = groupByGenre === "primary_genre"
+    ? Array.from(
+        filteredBooks.reduce((acc, book) => {
+          const key = book.primaryGenre?.code || "none";
+          const label = book.primaryGenre?.label || "Без жанра";
+          const existing = acc.get(key) || { label, items: [] as ClubBook[] };
+          existing.items.push(book);
+          acc.set(key, existing);
+          return acc;
+        }, new Map<string, { label: string; items: ClubBook[] }>()),
+      ).map(([key, value]) => ({ key, label: value.label, books: value.items }))
+    : [{ key: "all", label: "Все книги", books: filteredBooks }];
+
+  const handleSetActive = async (bookId: string) => {
+    setActiveBook.mutate(bookId, {
+      onSuccess: () => toast({ title: "Активная книга изменена" }),
+      onError: () => toast({ title: "Ошибка", description: "Не удалось изменить активную книгу", variant: "destructive" }),
+    });
+  };
+
+  const handleDelete = async (book: ClubBook) => {
+    const confirmed = await modalConfirm(`Удалить книгу «${book.title}»?`);
+    if (!confirmed) return;
+    deleteBookMutation.mutate(book.id, {
+      onError: () => toast({ title: "Ошибка", description: "Не удалось удалить книгу", variant: "destructive" }),
+    });
+  };
+
+  if (isLoading) {
+    return <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>;
+  }
+
+  if (books.length === 0) {
+    return (
+      <div className="text-center py-12 text-muted-foreground">
+        <BookOpen className="w-12 h-12 mx-auto mb-4 opacity-20" />
+        <p>В библиотеке клуба пока нет книг</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <Card>
+        <CardContent className="p-4 space-y-3">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <Input
+              placeholder="Поиск: название, автор, жанр"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+
+            <Select value={genreFilter} onValueChange={setGenreFilter}>
+              <SelectTrigger><SelectValue placeholder="Жанр" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Все жанры</SelectItem>
+                <SelectItem value="none">Без жанра</SelectItem>
+                {genreOptions.map(([code, label]) => (
+                  <SelectItem key={code} value={code}>{label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Select value={sort} onValueChange={(value) => setSort(value as typeof sort)}>
+              <SelectTrigger><SelectValue placeholder="Сортировка" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="created_desc">Сначала новые</SelectItem>
+                <SelectItem value="title_asc">Название: А-Я</SelectItem>
+                <SelectItem value="title_desc">Название: Я-А</SelectItem>
+                <SelectItem value="author_asc">Автор: А-Я</SelectItem>
+                <SelectItem value="genre_asc">По жанру</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Select value={groupByGenre} onValueChange={(value) => setGroupByGenre(value as typeof groupByGenre)}>
+              <SelectTrigger><SelectValue placeholder="Группировка" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">Без группировки</SelectItem>
+                <SelectItem value="primary_genre">По основному жанру</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </CardContent>
+      </Card>
+
+      {groupedBooks.map((group) => (
+      <div key={group.key} className="space-y-2">
+        {groupByGenre === "primary_genre" && (
+          <div className="flex items-center gap-2">
+            <Layers className="w-4 h-4 text-muted-foreground" />
+            <h4 className="font-semibold">{group.label}</h4>
+          </div>
+        )}
+      {group.books.map((book) => {
+        const isActive = book.id === activeBookId;
+        return (
+          <div key={book.id} className={`flex gap-3 rounded-lg border p-3 ${isActive ? "border-primary/40 bg-primary/5" : "bg-card"}`}>
+            <div className="w-12 h-16 shrink-0 overflow-hidden rounded">
+              {book.coverUrl ? (
+                <img src={book.coverUrl} alt={book.title} className="h-full w-full object-cover" />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center bg-muted">
+                  <BookOpen className="w-5 h-5 text-muted-foreground" />
+                </div>
+              )}
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="font-medium text-sm leading-tight truncate">{book.title}</p>
+                  <p className="text-xs text-muted-foreground truncate">{book.author}</p>
+                  {formatBookGenres(book) && (
+                    <p className="text-xs text-muted-foreground mt-1">Жанры: {formatBookGenres(book)}</p>
+                  )}
+                </div>
+                {isActive && <Badge variant="outline" className="text-xs shrink-0 border-primary/40 text-primary">Активная</Badge>}
               </div>
-              <div className="flex items-center gap-2">
-                <Badge variant={getMemberRoleBadgeVariant(member.role)}>
-                  {member.role === "owner" && "Владелец"}
-                  {member.role === "moderator" && "Модератор"}
-                  {member.role === "member" && "Участник"}
-                </Badge>
-                {(isOwner || isModerator) && canRemove(member.role, member.id) && (
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button size="icon" variant="ghost" className="h-8 w-8">
-                        <MoreHorizontal className="h-4 w-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem
-                        className="text-destructive"
-                        onClick={() => handleRemoveMember(member.id, member.username)}
-                      >
-                        <Trash2 className="h-4 w-4 mr-2" /> Удалить из клуба
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+              <div className="flex flex-wrap gap-2 mt-2">
+                {isMember && (
+                  <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setLocation(`/clubs/${clubId}/books/${book.id}/read`)}>
+                    <BookOpen className="w-3 h-3 mr-1" />
+                    Читать
+                  </Button>
+                )}
+                {isOwner && !isActive && (
+                  <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => handleSetActive(book.id)} disabled={setActiveBook.isPending}>
+                    <Star className="w-3 h-3 mr-1" />
+                    Сделать активной
+                  </Button>
+                )}
+                {isOwner && (
+                  <Button size="sm" variant="outline" className="h-7 text-xs text-destructive hover:text-destructive" onClick={() => handleDelete(book)} disabled={deleteBookMutation.isPending}>
+                    <Trash2 className="w-3 h-3 mr-1" />
+                    Удалить
+                  </Button>
                 )}
               </div>
             </div>
-          ))
-        )}
+          </div>
+        );
+      })}
       </div>
+      ))}
     </div>
   );
 }
@@ -734,12 +962,41 @@ interface ClubContentTabsProps {
   readonly currentUserId: string;
   readonly settings: ClubSettings;
   readonly scheduleItems: ScheduleItem[];
+  readonly activeBookId: string | null | undefined;
+  readonly setLocation: (path: string) => void;
 }
 
-function ClubContentTabs({ clubId, isMember, isOwner, currentUserId, settings, scheduleItems }: ClubContentTabsProps) {
+function ClubContentTabs({ clubId, isMember, isOwner, currentUserId, settings, scheduleItems, activeBookId, setLocation }: ClubContentTabsProps) {
+  const isMobile = useIsMobile();
+  const [activeTab, setActiveTab] = useState("about");
+  const tabOptions = [
+    { value: "about", label: "О клубе" },
+    { value: "reading-plan", label: "План чтения" },
+    { value: "discussion", label: "Обсуждение" },
+    { value: "schedule", label: "Расписание" },
+    ...(isMember ? [{ value: "library", label: "Библиотека" }] : []),
+  ];
+
   return (
-    <Tabs defaultValue="about" className="w-full">
-      <TabsList className="w-full justify-start border-b rounded-none h-auto p-0 bg-transparent gap-2 sm:gap-6 overflow-x-auto whitespace-nowrap">
+    <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+      {isMobile ? (
+        <div className="mb-4 sm:hidden">
+          <Select value={activeTab} onValueChange={setActiveTab}>
+            <SelectTrigger className="h-11 w-full rounded-xl">
+              <SelectValue placeholder="Выберите раздел клуба" />
+            </SelectTrigger>
+            <SelectContent>
+              {tabOptions.map((tab) => (
+                <SelectItem key={tab.value} value={tab.value}>
+                  {tab.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      ) : null}
+
+      <TabsList className="hidden h-auto w-full justify-start gap-6 overflow-x-auto whitespace-nowrap border-b rounded-none bg-transparent px-0 py-0 sm:flex">
         <TabsTrigger
           value="about"
           className="rounded-none border-b-2 border-transparent data-[state=active]:border-accent data-[state=active]:bg-transparent data-[state=active]:shadow-none py-3 px-1 font-medium"
@@ -764,6 +1021,14 @@ function ClubContentTabs({ clubId, isMember, isOwner, currentUserId, settings, s
         >
           Расписание
         </TabsTrigger>
+        {isMember && (
+          <TabsTrigger
+            value="library"
+            className="rounded-none border-b-2 border-transparent data-[state=active]:border-accent data-[state=active]:bg-transparent data-[state=active]:shadow-none py-3 px-1 font-medium"
+          >
+            Библиотека
+          </TabsTrigger>
+        )}
       </TabsList>
 
       <TabsContent value="reading-plan" className="pt-6 animate-in slide-in-from-bottom-2">
@@ -851,7 +1116,7 @@ function ClubContentTabs({ clubId, isMember, isOwner, currentUserId, settings, s
               return (
                 <div
                   key={item.id}
-                  className={`flex items-center gap-4 p-4 border rounded-lg bg-card ${isPast ? "opacity-60" : ""}`}
+                  className={`flex flex-col gap-4 rounded-lg border bg-card p-4 sm:flex-row sm:items-center ${isPast ? "opacity-60" : ""}`}
                 >
                   <div
                     className={`w-12 h-12 rounded-lg flex flex-col items-center justify-center font-bold leading-none ${isPast ? "bg-muted text-muted-foreground" : "bg-primary/10 text-primary"}`}
@@ -873,7 +1138,7 @@ function ClubContentTabs({ clubId, isMember, isOwner, currentUserId, settings, s
                     </div>
                   </div>
                   {!isPast && (
-                    <Button size="sm" variant="secondary">
+                    <Button size="sm" variant="secondary" className="w-full sm:w-auto">
                       Напомнить
                     </Button>
                   )}
@@ -888,20 +1153,34 @@ function ClubContentTabs({ clubId, isMember, isOwner, currentUserId, settings, s
           )}
         </div>
       </TabsContent>
+
+      <TabsContent value="library" className="pt-6 animate-in slide-in-from-bottom-2">
+        <ClubLibraryTab
+          clubId={clubId}
+          activeBookId={activeBookId}
+          isOwner={isOwner}
+          isMember={isMember}
+          setLocation={setLocation}
+        />
+      </TabsContent>
     </Tabs>
   );
 }
 
 export default function ClubDetails() {
+  const isMobile = useIsMobile();
   const [, params] = useRoute("/clubs/:id");
   const clubId = params?.id || "";
   const [, setLocation] = useLocation();
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
+  const [liveModalOpen, setLiveModalOpen] = useState(false);
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const canLoadClubData = !!clubId && !authLoading;
-  const canLoadMembersData = !!clubId && isAuthenticated && !authLoading;
   const { data: clubData, isLoading, error } = useClub(clubId, canLoadClubData);
+  const viewerMembershipRole = clubData?.viewerMembershipRole ?? null;
+  const canViewMembers = Boolean(viewerMembershipRole) || ['admin', 'moderator'].includes(user?.role ?? '');
+  const canLoadMembersData = !!clubId && isAuthenticated && !authLoading && canViewMembers;
   const { data: membersData, isLoading: membersLoading } = useClubMembers(clubId, canLoadMembersData);
   const removeMemberMutation = useRemoveMember();
   const deleteBookMutation = useDeleteClubBook(clubId);
@@ -910,7 +1189,7 @@ export default function ClubDetails() {
   const errorComponent = useClubErrorHandling(error, setLocation);
   
   const members = Array.isArray(membersData) ? membersData : [];
-  const permissions = useClubPermissions(members, user);
+  const permissions = useClubPermissions(viewerMembershipRole, user);
   const { isOwner, isModerator, isMember, canRemove } = permissions;
 
   const { handleRemoveMember, handleDeleteBook, handleLeaveClub, handleCleanupChat } = useClubActions({
@@ -924,6 +1203,26 @@ export default function ClubDetails() {
     deleteBookMutation
   });
 
+  // Live-чтецы (хук вызывается безусловно, bookId может быть пустым)
+  const activeBookId = clubData?.bookId ?? "";
+  const { readers, flashCount } = useLiveReaders({
+    clubId,
+    bookId: activeBookId,
+    listeningToSessionId: null,
+  });
+  const {
+    listeningState,
+    listeningReader,
+    startListening,
+    stopListening,
+  } = useClubLiveListening({
+    clubId,
+    bookId: activeBookId,
+    bookTitle: clubData?.book?.title ?? "",
+    bookAuthor: clubData?.book?.author ?? undefined,
+    coverUrl: clubData?.book?.coverUrl ?? null,
+  });
+
   // Теперь обрабатываем условия после всех хуков
   if (!clubId) return <ClubNotFound />;
   if (authLoading) return <ClubLoading />;
@@ -933,7 +1232,7 @@ export default function ClubDetails() {
   if (!clubData) {
     return (
       <MainLayout>
-        <div className="container py-12 px-6 md:px-12 text-center">
+        <div className="container px-4 py-8 text-center sm:px-6 md:px-12 md:py-12">
           <p className="text-muted-foreground">Клуб не найден</p>
         </div>
       </MainLayout>
@@ -957,69 +1256,120 @@ export default function ClubDetails() {
 
   return (
     <MainLayout>
-      <ClubHeader 
-        club={club}
-        members={members}
-        isOwner={isOwner}
-        isMember={isMember}
-        removeMemberMutation={removeMemberMutation}
-        handleLeaveClub={handleLeaveClub}
-        setLocation={setLocation}
-        user={user}
-        onOwnershipTransferred={() => {
-          queryClient.invalidateQueries({ queryKey: ["/api/clubs", clubId] });
-          queryClient.invalidateQueries({ queryKey: ["/api/clubs", clubId, "members"] });
-          globalThis.location.reload();
-        }}
-      />
+      <div className={cn("transition-[filter] duration-300", listeningState && "blur-sm pointer-events-none select-none")}>
+        <ClubHeader 
+          club={club}
+          members={members}
+          isOwner={isOwner}
+          isMember={isMember}
+          removeMemberMutation={removeMemberMutation}
+          handleLeaveClub={handleLeaveClub}
+          setLocation={setLocation}
+          user={user}
+          onOwnershipTransferred={() => {
+            queryClient.invalidateQueries({ queryKey: ["/api/clubs", clubId] });
+            queryClient.invalidateQueries({ queryKey: ["/api/clubs", clubId, "members"] });
+            globalThis.location.reload();
+          }}
+        />
 
-      <div className="container py-8 px-4 md:px-12 grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6 md:gap-8 lg:gap-12">
-        <div className="lg:col-span-1 space-y-8">
-          <CurrentBookCard
-            club={club}
-            clubId={clubId}
-            isOwner={isOwner}
-            isMember={isMember}
-            handleDeleteBook={handleDeleteBook}
-            deleteBookMutation={deleteBookMutation}
-            setLocation={setLocation}
-          />
+        <div className="container grid grid-cols-1 gap-4 px-4 py-6 sm:gap-6 sm:px-6 md:px-12 md:py-8 lg:grid-cols-3 lg:gap-8 xl:gap-12">
+          <div className="order-1 space-y-6 lg:col-span-1 lg:space-y-8">
+            <CurrentBookCard
+              club={club}
+              clubId={clubId}
+              isOwner={isOwner}
+              isMember={isMember}
+              handleDeleteBook={handleDeleteBook}
+              deleteBookMutation={deleteBookMutation}
+              setLocation={setLocation}
+            />
 
-          <MembersListCard
-            clubId={clubId}
-            clubTitle={club.title}
-            members={members}
-            membersLoading={membersLoading}
-            isOwner={isOwner}
-            isModerator={isModerator}
-            canRemove={canRemove}
-            handleRemoveMember={handleRemoveMember}
-          />
+            <MembersListCard
+              clubId={clubId}
+              clubTitle={club.title}
+              members={members}
+              memberCount={club.memberCount || members.length}
+              membersLoading={membersLoading}
+              canViewMembers={canViewMembers}
+              isOwner={isOwner}
+              isModerator={isModerator}
+              canRemove={canRemove}
+              handleRemoveMember={handleRemoveMember}
+            />
 
-          {(isOwner || isModerator) && (
-            <div className="mt-6 space-y-3">
-              <InvitationsList clubId={clubId} isOwner={isOwner} />
-            </div>
-          )}
+            {(isOwner || isModerator) && (
+              <div className="space-y-3">
+                <InvitationsList clubId={clubId} isOwner={isOwner} />
+              </div>
+            )}
+          </div>
+
+          <div className="order-2 lg:col-span-2">
+            <ClubContentTabs
+              clubId={clubId}
+              isMember={isMember}
+              isOwner={isOwner}
+              currentUserId={user?.id || ''}
+              settings={settings}
+              scheduleItems={scheduleItems}
+              activeBookId={club.bookId}
+              setLocation={setLocation}
+            />
+          </div>
         </div>
 
-        <div className="lg:col-span-2">
-          <ClubContentTabs
-            clubId={clubId}
-            isMember={isMember}
-            isOwner={isOwner}
-            currentUserId={user?.id || ''}
-            settings={settings}
-            scheduleItems={scheduleItems}
+        {isAuthenticated && isMember && (
+          <ChatWidget 
+            clubId={club.id} 
+            onCleanupDeleted={() => handleCleanupChat(0)}
+            canCleanup={isOwner}
+            mobileBottomOffsetPx={88}
+            mobileTopOffsetPx={76}
           />
-        </div>
+        )}
+
+        {isAuthenticated && isMember && activeBookId && (
+          <div className={cn(
+            "fixed z-30 transition-transform duration-300 ease-out",
+            isMobile
+              ? "bottom-[calc(env(safe-area-inset-bottom)+9rem)] right-3 translate-x-0 pr-0"
+              : "bottom-20 right-0 translate-x-[calc(100%-4rem)] pr-4 hover:translate-x-0 focus-within:translate-x-0",
+          )}>
+            <LiveReadersBubble
+              readers={readers}
+              flashCount={flashCount}
+              onOpenModal={() => setLiveModalOpen(true)}
+              compact={isMobile}
+            />
+          </div>
+        )}
       </div>
 
-      {isAuthenticated && isMember && (
-        <ChatWidget 
-          clubId={club.id} 
-          onCleanupDeleted={() => handleCleanupChat(0)}
-          canCleanup={isOwner}
+      {isAuthenticated && isMember && activeBookId && (
+        <ActiveReadersModal
+          open={liveModalOpen}
+          onClose={() => setLiveModalOpen(false)}
+          readers={readers}
+          listeningToSessionId={listeningReader?.sessionId ?? null}
+          onPlay={async (reader) => {
+            await startListening(reader);
+          }}
+          onStop={async () => {
+            stopListening();
+          }}
+        />
+      )}
+
+      {listeningState && (
+        <ListenerOverlay
+          reader={listeningState.reader}
+          bookTitle={listeningState.bookTitle}
+          bookAuthor={listeningState.bookAuthor}
+          coverUrl={listeningState.coverUrl}
+          isPaused={Boolean(listeningState.reader.isPaused)}
+          onStop={() => stopListening()}
+          onStreamEnded={() => stopListening({ stopPlayback: false })}
         />
       )}
     </MainLayout>

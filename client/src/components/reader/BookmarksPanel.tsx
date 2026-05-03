@@ -9,40 +9,72 @@ import { formatDistanceToNow } from "date-fns";
 import { ru } from "date-fns/locale";
 
 interface BookmarksPanelProps {
-  bookId: string;
+  bookId?: string;
   bookmarks: Bookmark[];
   onNavigateToBookmark?: (bookmark: Bookmark) => void;
+  onCreateBookmark?: (input: {
+    chapterNumber?: number;
+    position: string;
+    title?: string;
+  }) => void;
+  onDeleteBookmark?: (bookmarkId: string) => void;
+  isCreatingBookmark?: boolean;
+  getCurrentBookmarkDraft?: () => {
+    chapterNumber?: number;
+    position: string;
+  } | null;
 }
 
-export function BookmarksPanel({ bookId, bookmarks, onNavigateToBookmark }: Readonly<BookmarksPanelProps>) {
+export function BookmarksPanel({
+  bookId,
+  bookmarks,
+  onNavigateToBookmark,
+  onCreateBookmark,
+  onDeleteBookmark,
+  isCreatingBookmark = false,
+  getCurrentBookmarkDraft,
+}: Readonly<BookmarksPanelProps>) {
   const [isAdding, setIsAdding] = useState(false);
   const [newTitle, setNewTitle] = useState("");
+  const safeBookId = bookId || "";
 
-  const { mutate: addBookmark, isPending: isAddingBookmark } = useAddBookmark(bookId);
-  const { mutate: deleteBookmark } = useDeleteBookmark(bookId);
+  const { mutate: addBookmark, isPending: isAddingBookmarkFallback } = useAddBookmark(safeBookId);
+  const { mutate: deleteBookmark } = useDeleteBookmark(safeBookId);
+  const isAddingBookmark = onCreateBookmark ? isCreatingBookmark : isAddingBookmarkFallback;
+  const canCreateBookmarks = typeof onCreateBookmark === "function" || !!bookId;
+  const canDeleteBookmarks = typeof onDeleteBookmark === "function" || !!bookId;
 
   const handleAdd = () => {
-    if (!newTitle.trim()) return;
+    if (!newTitle.trim() || !canCreateBookmarks) return;
 
-    // Получаем текущую позицию (в реальности - из ContentRenderer через контекст)
-    const currentPosition = JSON.stringify({
-      scrollTop: 0,
-      // В реальном приложении здесь будет актуальная позиция
-    });
+    const currentBookmarkDraft = getCurrentBookmarkDraft?.() ?? {
+      chapterNumber: 1,
+      position: JSON.stringify({ scrollTop: 0 }),
+    };
 
-    addBookmark(
-      {
-        position: currentPosition,
-        title: newTitle,
-        chapterNumber: 1,
+    if (!currentBookmarkDraft) {
+      return;
+    }
+
+    const payload = {
+      title: newTitle,
+      chapterNumber: currentBookmarkDraft.chapterNumber,
+      position: currentBookmarkDraft.position,
+    };
+
+    if (onCreateBookmark) {
+      onCreateBookmark(payload);
+      setNewTitle("");
+      setIsAdding(false);
+      return;
+    }
+
+    addBookmark(payload, {
+      onSuccess: () => {
+        setNewTitle("");
+        setIsAdding(false);
       },
-      {
-        onSuccess: () => {
-          setNewTitle("");
-          setIsAdding(false);
-        },
-      }
-    );
+    });
   };
 
   const handleDelete = async (bookmarkId: string) => {
@@ -55,6 +87,10 @@ export function BookmarksPanel({ bookId, bookmarks, onNavigateToBookmark }: Read
     });
 
     if (confirmed) {
+      if (onDeleteBookmark) {
+        onDeleteBookmark(bookmarkId);
+        return;
+      }
       deleteBookmark(bookmarkId);
     }
   };
@@ -69,13 +105,15 @@ export function BookmarksPanel({ bookId, bookmarks, onNavigateToBookmark }: Read
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h3 className="font-semibold text-lg">Закладки</h3>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => setIsAdding(!isAdding)}
-        >
-          {isAdding ? "Отмена" : <Plus className="w-4 h-4" />}
-        </Button>
+        {canCreateBookmarks && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setIsAdding(!isAdding)}
+          >
+            {isAdding ? "Отмена" : <Plus className="w-4 h-4" />}
+          </Button>
+        )}
       </div>
 
       {/* Форма добавления */}
@@ -118,10 +156,12 @@ export function BookmarksPanel({ bookId, bookmarks, onNavigateToBookmark }: Read
                 <div className="flex-1">
                   <Button
                     variant="ghost"
-                    className="h-auto p-0 font-medium text-sm mb-1 hover:text-primary transition-colors"
+                    className="h-auto w-full justify-start p-0 font-medium text-sm mb-1 hover:text-primary transition-colors whitespace-normal text-left"
                     onClick={() => handleNavigate(bookmark)}
                   >
-                    {bookmark.title || "Без названия"}
+                    <span className="line-clamp-2 break-words">
+                      {bookmark.title || "Без названия"}
+                    </span>
                   </Button>
                   {bookmark.chapterNumber && (
                     <p className="text-xs text-muted-foreground">
@@ -146,15 +186,17 @@ export function BookmarksPanel({ bookId, bookmarks, onNavigateToBookmark }: Read
                   >
                     <Navigation className="w-4 h-4" />
                   </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8"
-                    onClick={() => handleDelete(bookmark.id)}
-                    title="Удалить закладку"
-                  >
-                    <Trash2 className="w-4 h-4 text-destructive" />
-                  </Button>
+                  {canDeleteBookmarks && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8"
+                      onClick={() => handleDelete(bookmark.id)}
+                      title="Удалить закладку"
+                    >
+                      <Trash2 className="w-4 h-4 text-destructive" />
+                    </Button>
+                  )}
                 </div>
               </div>
             </div>

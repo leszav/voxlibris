@@ -16,7 +16,7 @@ export function ContentRenderer({ content }: ContentRendererProps) {
         "strong", "em", "u", "s", "blockquote", "pre", "code",
         "ul", "ol", "li", "a", "img", "hr"
       ],
-      ALLOWED_ATTR: ["class", "id", "href", "src", "alt", "title", "loading"],
+      ALLOWED_ATTR: ["class", "id", "href", "src", "alt", "title", "loading", "style"],
       ALLOW_DATA_ATTR: false,
       RETURN_DOM: false,
       RETURN_DOM_FRAGMENT: false,
@@ -31,7 +31,6 @@ export function ContentRenderer({ content }: ContentRendererProps) {
         fontSize: "var(--reader-font-size, 18px)",
         fontFamily: "var(--reader-font-family, Georgia)",
         lineHeight: "var(--reader-line-height, 1.8)",
-        textAlign: "justify" as const,
       }}
       dangerouslySetInnerHTML={{ __html: sanitizedContent }}
     />

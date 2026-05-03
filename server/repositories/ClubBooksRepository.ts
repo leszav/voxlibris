@@ -5,6 +5,7 @@ import {
   clubBookmarks,
   clubReadingPlans,
   readingProgress,
+  bookReadingStatus,
   bookAccessLogs,
   analyticsEvents,
   type ClubBook,
@@ -154,6 +155,13 @@ export class ClubBooksRepository extends BaseRepository {
           .where(and(eq(readingProgress.bookId, id), isNotNull(readingProgress.clubId)));
 
         await tx
+          .delete(bookReadingStatus)
+          .where(and(
+            eq(bookReadingStatus.bookId, id),
+            eq(bookReadingStatus.bookType, 'club')
+          ));
+
+        await tx
           .delete(bookAccessLogs)
           .where(and(eq(bookAccessLogs.bookId, id), eq(bookAccessLogs.bookType, "club")))
           .catch((error: unknown) => {
@@ -227,6 +235,13 @@ export class ClubBooksRepository extends BaseRepository {
         await tx
           .delete(readingProgress)
           .where(and(eq(readingProgress.bookId, id), isNotNull(readingProgress.clubId)));
+
+        await tx
+          .delete(bookReadingStatus)
+          .where(and(
+            eq(bookReadingStatus.bookId, id),
+            eq(bookReadingStatus.bookType, 'club')
+          ));
 
         // Удаляем логи доступа к книге (если таблица существует)
         await tx

@@ -1,0 +1,157 @@
+{
+  "version": 1,
+  "items": {
+    "attached_assets/generated_images/abstract_sound_wave_visualization_background.png": {
+      "sourceSha256": "a4d63baa893749bc115650331acc36654643a2b10e9cc35c681df21455c71279",
+      "variants": {
+        "avif": {
+          "path": "attached_assets/generated_images/abstract_sound_wave_visualization_background.avif",
+          "sha256": "65f78c096583717e9c08d3bb74ab97933d3631b3f61906131c03a1c551e8c34e"
+        },
+        "webp": {
+          "path": "attached_assets/generated_images/abstract_sound_wave_visualization_background.webp",
+          "sha256": "5a4f893816c2e75b6b50c95862d2479786c5f4c630ef4f06bdd74a3da404ceda"
+        }
+      }
+    },
+    "attached_assets/generated_images/classic_novel_book_cover_design.png": {
+      "sourceSha256": "238e748b15fd6cb7b0110832499596a3eddbb28ff6fb4852c0449117d3f4b4a3",
+      "variants": {
+        "avif": {
+          "path": "attached_assets/generated_images/classic_novel_book_cover_design.avif",
+          "sha256": "920529f4e0b5d7e789a00eb076947eff7bc15b8b5633ef79e57d971a98cce93f"
+        },
+        "webp": {
+          "path": "attached_assets/generated_images/classic_novel_book_cover_design.webp",
+          "sha256": "c2ed5b43a97db951267defe5ace429292bdfacd7772fdd80b0b75aabf8e6d76f"
+        }
+      }
+    },
+    "attached_assets/generated_images/cozy_library_atmosphere_with_warm_lighting.png": {
+      "sourceSha256": "7bbbce34c40bbde6e5e9aaa6bd22b1428e809043c55cadba0e729c1e064f5a25",
+      "variants": {
+        "avif": {
+          "path": "attached_assets/generated_images/cozy_library_atmosphere_with_warm_lighting.avif",
+          "sha256": "83c60d3c5e98f547a1845b0ac7f93822e072034fce59c45a3cb6aaffb696e721"
+        },
+        "webp": {
+          "path": "attached_assets/generated_images/cozy_library_atmosphere_with_warm_lighting.webp",
+          "sha256": "c3ce53b32ee689faa69aaa90b8a1bce5745b820c8d678bf1cab50423153c0492"
+        }
+      }
+    },
+    "attached_assets/generated_images/modern_fiction_book_cover_design.png": {
+      "sourceSha256": "5457fc7a921f443104514ce81a9361a5f950bacbedd8ec7f852e9c51fb012be9",
+      "variants": {
+        "avif": {
+          "path": "attached_assets/generated_images/modern_fiction_book_cover_design.avif",
+          "sha256": "e812df773211618ed31d5dda523a2d70ad53880b10c661640bb3adeb6887440b"
+        },
+        "webp": {
+          "path": "attached_assets/generated_images/modern_fiction_book_cover_design.webp",
+          "sha256": "6e89106a1499636ef777b63b05b30fab221452ed7166fc476904d62a83ee1021"
+        }
+      }
+    },
+    "attached_assets/generated_images/mystery_thriller_book_cover_design.png": {
+      "sourceSha256": "59dd747f4436fa302e7f7796d9bc961ca7a6b1516e038da4298a22b3ae80b5e3",
+      "variants": {
+        "avif": {
+          "path": "attached_assets/generated_images/mystery_thriller_book_cover_design.avif",
+          "sha256": "65bcabba91c82598259d62afcf40fc995e571f18e783185e06ac67b7211f81a4"
+        },
+        "webp": {
+          "path": "attached_assets/generated_images/mystery_thriller_book_cover_design.webp",
+          "sha256": "9ccd6043f0947eb12704fe79fdff2056da9f423a391675c74443b5ab3c1a7101"
+        }
+      }
+    },
+    "attached_assets/generated_images/professional_home_recording_studio_setup.png": {
+      "sourceSha256": "6764155bdebf62c297901925cd5405cc49beac53711e32fd2526991a4e06ef60",
+      "variants": {
+        "avif": {
+          "path": "attached_assets/generated_images/professional_home_recording_studio_setup.avif",
+          "sha256": "2b7fa7b493a2df43bff11ce4b1b8daa036edeff9592b299513a1024a1a946b62"
+        },
+        "webp": {
+          "path": "attached_assets/generated_images/professional_home_recording_studio_setup.webp",
+          "sha256": "d07ca13a5f5fa11b88880df7025d65d242d76f5a8fd17d390bf92a8c0a6420e5"
+        }
+      }
+    },
+    "client/public/apple-touch-icon.png": {
+      "sourceSha256": "872b902adf2f4b8a0b7e560375a38eea4715372d36ebb552319d2a533168d2ee",
+      "variants": {}
+    },
+    "client/public/favicon-96x96.png": {
+      "sourceSha256": "5e460fcd297c2813b40d67b39d2d877c91ef3c41987197f03b3c346500a5cb84",
+      "variants": {}
+    },
+    "client/public/favicon.png": {
+      "sourceSha256": "50a498d598d7a55a814608e669f49820367d6bf805156c8cd7c30bcbbd031f65",
+      "variants": {
+        "webp": {
+          "path": "client/public/favicon.webp",
+          "sha256": "c7c9a591b9f9aba1f0c627b82aa95030488922bd49c7b2cfc92e793ebc09e858"
+        }
+      }
+    },
+    "client/public/images/ymetrika_logo.png": {
+      "sourceSha256": "9f52dfc421493675aaa8ede4b1e90ea0dcb566cbc43e24a804c16ca93652bad6",
+      "variants": {}
+    },
+    "client/public/og-image.png": {
+      "sourceSha256": "4f49cfd5031974cb1528caaa6989d35fadddb8caa4863539f2c548d39d4a9157",
+      "variants": {
+        "avif": {
+          "path": "client/public/og-image.avif",
+          "sha256": "7fd73d2e5f2fb5ff0562399deabd974c9d27431917a70953e6ef279feba5f0c6"
+        },
+        "webp": {
+          "path": "client/public/og-image.webp",
+          "sha256": "f64e5288046861e9b7b6212df3335c5dfdf75e97f8541d50d4273295339bd700"
+        }
+      }
+    },
+    "client/public/opengraph.jpg": {
+      "sourceSha256": "7e79bbcae74a737e478670b61fa6e5f54acb5cdba41cc5af8ece4224b3f3a50a",
+      "variants": {
+        "webp": {
+          "path": "client/public/opengraph.webp",
+          "sha256": "57cb4869201685454c6dcd9c5387c3744e1e83cd1563c6266e28d1dcdd74edf1"
+        }
+      }
+    },
+    "client/public/pwa-192x192.png": {
+      "sourceSha256": "b8bc64f14e0b0c987eec3dc545fa9ca006d3ac13a849fce552912cd57a292af3",
+      "variants": {
+        "webp": {
+          "path": "client/public/pwa-192x192.webp",
+          "sha256": "555c33f0663a7e2a2afca9c23b0ed5acaa33e78ac2b75f629c0d09871ee65f85"
+        }
+      }
+    },
+    "client/public/pwa-512x512.png": {
+      "sourceSha256": "2ead4738984170e69f065728dc6c3052d9a3c372dc5c69a5e1a2b1cb9fcf5628",
+      "variants": {
+        "webp": {
+          "path": "client/public/pwa-512x512.webp",
+          "sha256": "c7c9a591b9f9aba1f0c627b82aa95030488922bd49c7b2cfc92e793ebc09e858"
+        }
+      }
+    },
+    "client/public/web-app-manifest-192x192.png": {
+      "sourceSha256": "e03cc4a5cfa45307e069f399c6a44592da7a7f3533b784daad25237b87018df2",
+      "variants": {}
+    },
+    "client/public/web-app-manifest-512x512.png": {
+      "sourceSha256": "29b7b0fb631cb7cf483afb3611f130d2a3375b71b80afb0a0a8562d313d982fc",
+      "variants": {
+        "webp": {
+          "path": "client/public/web-app-manifest-512x512.webp",
+          "sha256": "c7c9a591b9f9aba1f0c627b82aa95030488922bd49c7b2cfc92e793ebc09e858"
+        }
+      }
+    }
+  }
+}

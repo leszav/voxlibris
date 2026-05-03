@@ -88,6 +88,14 @@ export function ClubUploadWizard({ clubId, onSuccess, onCancel }: Readonly<ClubU
         setDuplicates([]);
     };
 
+    const handleGenreChange = (value: string) => {
+        setMetadata((current) => ({
+            ...current,
+            genre: value,
+            genres: value.trim() ? [value.trim()] : [],
+        }));
+    };
+
     if (step === 'processing') {
         return (
             <div className="flex flex-col items-center justify-center p-8 space-y-4">
@@ -199,6 +207,18 @@ export function ClubUploadWizard({ clubId, onSuccess, onCancel }: Readonly<ClubU
                         </div>
 
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                                <Label htmlFor="genre">Жанр</Label>
+                                <Input
+                                    id="genre"
+                                    value={metadata.genre || ''}
+                                    placeholder="Например: Киберпанк, Социальная НФ"
+                                    onChange={(e) => handleGenreChange(e.target.value)}
+                                />
+                                <p className="text-xs text-muted-foreground">
+                                    Несколько жанров указывайте через запятую.
+                                </p>
+                            </div>
                             <div className="space-y-2">
                                 <Label htmlFor="readingOrder">Порядок чтения (опционально)</Label>
                                 <Input

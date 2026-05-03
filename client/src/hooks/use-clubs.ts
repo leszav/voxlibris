@@ -5,7 +5,7 @@ import type {
   ClubMemberRole,
   ClubWithDetails,
 } from "@shared/schema";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, useInfiniteQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 
 export type { ClubInvitationWithInviter } from "@shared/schema";
@@ -69,13 +69,46 @@ export interface ClubProgress {
   };
 }
 
+export interface ClubDetailsResponse extends ClubWithDetails {
+  viewerMembershipRole?: ClubMemberRole | null;
+}
+
+export interface PublicCatalogClub {
+  id: string;
+  title: string;
+  description: string | null;
+  coverImage: string | null;
+  bookTitle: string | null;
+  author: string | null;
+  bookCoverUrl: string | null;
+  type: string;
+  isPrivate: boolean;
+  isLive: boolean;
+  memberCount: number;
+  maxMembers: number;
+  tags: string[];
+}
+
 // Получить все клубы для каталога (не требует аутентификации)
-export function useCatalogClubs() {
+export function useCatalogClubs(limit?: number, searchQuery?: string) {
+  const normalizedSearch = typeof searchQuery === "string" ? searchQuery.trim() : "";
+
   return useQuery({
-    queryKey: ["catalog-clubs"],
-    queryFn: async (): Promise<ClubWithDetails[]> => {
-      // Используем простой fetch без авторизации для публичного эндпоинта
-      const res = await fetch("/api/clubs/catalog");
+    queryKey: ["catalog-clubs", limit ?? "all", normalizedSearch || "no-query"],
+    queryFn: async (): Promise<PublicCatalogClub[]> => {
+      const params = new URLSearchParams();
+
+      if (typeof limit === "number" && Number.isFinite(limit) && limit > 0) {
+        params.set("limit", String(Math.trunc(limit)));
+      }
+
+      if (normalizedSearch) {
+        params.set("q", normalizedSearch);
+      }
+
+      const queryString = params.toString();
+      const url = queryString ? `/api/clubs/catalog?${queryString}` : "/api/clubs/catalog";
+      const res = await fetch(url);
       if (!res.ok) {
         throw new Error("Failed to fetch clubs");
       }
@@ -84,6 +117,38 @@ export function useCatalogClubs() {
     refetchInterval: 1000 * 60 * 60 * 24, // Обновлять раз в сутки (24 часа)
     refetchIntervalInBackground: false, // Не обновлять в фоне
     staleTime: 1000 * 60 * 60 * 23, // Считать данные устаревшими через 23 часа
+  });
+}
+
+export const CATALOG_PAGE_SIZE = 12;
+
+/**
+ * Бесконечная прокрутка каталога клубов.
+ * pageSize должен быть кратен количеству колонок грида, чтобы
+ * строки всегда были полными. Передавайте cols * ROWS_PER_LOAD.
+ * При изменении pageSize (ресайз окна) queryKey меняется и запрос сбрасывается.
+ */
+export function useInfiniteCatalogClubs(searchQuery?: string, pageSize = CATALOG_PAGE_SIZE) {
+  const normalizedSearch = typeof searchQuery === "string" ? searchQuery.trim() : "";
+
+  return useInfiniteQuery({
+    queryKey: ["catalog-clubs-infinite", normalizedSearch || "no-query", pageSize],
+    initialPageParam: 0,
+    queryFn: async ({ pageParam }): Promise<PublicCatalogClub[]> => {
+      const params = new URLSearchParams({
+        limit: String(pageSize),
+        offset: String(pageParam),
+      });
+      if (normalizedSearch) params.set("q", normalizedSearch);
+      const res = await fetch(`/api/clubs/catalog?${params}`);
+      if (!res.ok) throw new Error("Failed to fetch clubs");
+      return res.json();
+    },
+    getNextPageParam: (lastPage, _allPages, lastPageParam) => {
+      if (lastPage.length < pageSize) return undefined;
+      return (lastPageParam as number) + pageSize;
+    },
+    staleTime: 1000 * 60 * 5,
   });
 }
 
@@ -106,8 +171,8 @@ export function useUserClubs() {
 export function useClub(clubId: string, enabled: boolean = true) {
   return useQuery({
     queryKey: ["club", clubId],
-    queryFn: async (): Promise<ClubWithDetails> => {
-      return apiRequest<ClubWithDetails>(`/api/clubs/${clubId}`);
+    queryFn: async (): Promise<ClubDetailsResponse> => {
+      return apiRequest<ClubDetailsResponse>(`/api/clubs/${clubId}`);
     },
     enabled: !!clubId && enabled,
   });

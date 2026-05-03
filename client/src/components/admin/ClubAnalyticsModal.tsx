@@ -19,8 +19,8 @@ import {
   CartesianGrid,
   Tooltip,
   BarChart,
-  Bar,
 } from "recharts";
+import { Bar } from "recharts/es6/cartesian/Bar";
 
 interface ClubAnalyticsModalProps {
   clubId: string | null;

@@ -21,6 +21,14 @@ const MAX_GAIN = 3;
 const MIN_DBFS = -65;
 const MAX_DBFS = -6;
 const DB_EPSILON = 1e-7;
+const MEDIA_RECORDER_MIME_CANDIDATES = [
+  'audio/webm;codecs=opus',
+  'audio/webm',
+  'audio/mp4;codecs=mp4a.40.2',
+  'audio/mp4',
+  'audio/ogg;codecs=opus',
+  'audio/ogg',
+];
 
 function clamp(value: number, min: number = 0, max: number = 100): number {
   return Math.max(min, Math.min(max, value));
@@ -63,6 +71,27 @@ function mapMicError(error: unknown): string {
   return error.message || 'Не удалось получить доступ к микрофону';
 }
 
+function getPreferredMediaRecorderMimeType(): string | undefined {
+  if (!globalThis.MediaRecorder?.isTypeSupported) {
+    return undefined;
+  }
+
+  return MEDIA_RECORDER_MIME_CANDIDATES.find((mimeType) => MediaRecorder.isTypeSupported(mimeType));
+}
+
+function resolveRecordedBlobMimeType(recorder: MediaRecorder, chunks: Blob[]): string {
+  if (recorder.mimeType) {
+    return recorder.mimeType;
+  }
+
+  const firstChunkType = chunks.find((chunk) => chunk.type)?.type;
+  if (firstChunkType) {
+    return firstChunkType;
+  }
+
+  return 'audio/webm';
+}
+
 export function useMicrophoneCheck() {
   const [isInitializing, setIsInitializing] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
@@ -94,6 +123,24 @@ export function useMicrophoneCheck() {
   const recordingNoiseSamplesRef = useRef<number[]>([]);
   const isRecordingRef = useRef(false);
   const recordingStopTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const playbackAudioRef = useRef<HTMLAudioElement | null>(null);
+  const playbackUrlRef = useRef<string | null>(null);
+
+  const cleanupPlayback = useCallback(() => {
+    if (playbackAudioRef.current) {
+      playbackAudioRef.current.onended = null;
+      playbackAudioRef.current.onerror = null;
+      playbackAudioRef.current.pause();
+      playbackAudioRef.current = null;
+    }
+
+    if (playbackUrlRef.current) {
+      URL.revokeObjectURL(playbackUrlRef.current);
+      playbackUrlRef.current = null;
+    }
+
+    setIsPlaying(false);
+  }, []);
 
   const applyGainLevel = useCallback((value: number) => {
     const normalized = clamp(value, MIN_GAIN, MAX_GAIN);
@@ -215,7 +262,7 @@ export function useMicrophoneCheck() {
         throw new Error('Ваш браузер не поддерживает доступ к микрофону');
       }
 
-      if (!window.MediaRecorder) {
+      if (!globalThis.MediaRecorder) {
         throw new Error('Браузер не поддерживает запись аудио');
       }
 
@@ -294,7 +341,10 @@ export function useMicrophoneCheck() {
     let status: MicrophoneCheckResult['status'];
     let message: string;
 
-    if (noiseLevel > 42) {
+    if (volumeLevel < 2) {
+      status = 'needs-adjustment';
+      message = 'Сигнал с микрофона не поступает. Проверьте, что микрофон включен и выбран в системе.';
+    } else if (noiseLevel > 42) {
       status = 'needs-adjustment';
       message = 'Слышно много фонового шума. Такой уровень может быть некомфортным для слушателей.';
     } else if (volumeLevel < 14) {
@@ -332,7 +382,10 @@ export function useMicrophoneCheck() {
     recordingVolumeSamplesRef.current = [];
     recordingNoiseSamplesRef.current = [];
 
-    const mediaRecorder = new MediaRecorder(recordingStream);
+    const preferredMimeType = getPreferredMediaRecorderMimeType();
+    const mediaRecorder = preferredMimeType
+      ? new MediaRecorder(recordingStream, { mimeType: preferredMimeType })
+      : new MediaRecorder(recordingStream);
     mediaRecorderRef.current = mediaRecorder;
 
     mediaRecorder.ondataavailable = (event) => {
@@ -343,7 +396,9 @@ export function useMicrophoneCheck() {
 
     return await new Promise<Blob>((resolve, reject) => {
       mediaRecorder.onstop = () => {
-        resolve(new Blob(audioChunksRef.current, { type: 'audio/webm' }));
+        resolve(new Blob(audioChunksRef.current, {
+          type: resolveRecordedBlobMimeType(mediaRecorder, audioChunksRef.current),
+        }));
       };
 
       mediaRecorder.onerror = () => {
@@ -391,44 +446,60 @@ export function useMicrophoneCheck() {
     }
   }, [analyzeCurrentRecording, initializeMicrophone, isInitialized, recordTestFragment]);
 
+  const stopRecording = useCallback(() => {
+    const recorder = mediaRecorderRef.current;
+    if (recorder?.state !== 'recording') {
+      return;
+    }
+
+    if (recordingStopTimeoutRef.current) {
+      clearTimeout(recordingStopTimeoutRef.current);
+      recordingStopTimeoutRef.current = null;
+    }
+
+    recorder.stop();
+  }, []);
+
   const playRecording = useCallback(async (audioBlob: Blob) => {
+    cleanupPlayback();
     setIsPlaying(true);
 
     const audioUrl = URL.createObjectURL(audioBlob);
     const audio = new Audio(audioUrl);
+    playbackAudioRef.current = audio;
+    playbackUrlRef.current = audioUrl;
 
-    const cleanupAudio = () => {
-      setIsPlaying(false);
-      URL.revokeObjectURL(audioUrl);
-    };
-
-    audio.onended = cleanupAudio;
+    audio.onended = cleanupPlayback;
     audio.onerror = () => {
-      cleanupAudio();
+      cleanupPlayback();
       setError('Не удалось воспроизвести тестовую запись');
     };
 
     try {
       await audio.play();
     } catch (err) {
-      cleanupAudio();
+      cleanupPlayback();
       const message = err instanceof Error ? err.message : 'Неизвестная ошибка';
       setError(`Не удалось воспроизвести тестовую запись: ${message}`);
     }
-  }, []);
+  }, [cleanupPlayback]);
+
+  const stopPlayback = useCallback(() => {
+    cleanupPlayback();
+  }, [cleanupPlayback]);
 
   const stopTest = useCallback(() => {
     if (mediaRecorderRef.current?.state === 'recording') {
       mediaRecorderRef.current.stop();
     }
 
+    cleanupPlayback();
     isRecordingRef.current = false;
     cleanupMonitoring();
     setIsInitializing(false);
     setIsInitialized(false);
     setIsRecording(false);
-    setIsPlaying(false);
-  }, [cleanupMonitoring]);
+  }, [cleanupMonitoring, cleanupPlayback]);
 
   useEffect(() => stopTest, [stopTest]);
 
@@ -444,7 +515,9 @@ export function useMicrophoneCheck() {
     gainLevel,
     initializeMicrophone,
     runFullTest,
+    stopRecording,
     playRecording,
+    stopPlayback,
     stopTest,
     setGainLevel: updateGainLevel,
     testDurationMs: TEST_DURATION_MS,

@@ -54,7 +54,7 @@ export default function ConfirmEmail() {
 
   if (status === "loading") {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background px-4">
+      <div className="flex min-h-[100dvh] items-start justify-center bg-background px-4 py-8 sm:items-center sm:py-10">
         <Card className="w-full max-w-md">
           <CardContent className="pt-6 text-center">
             <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4" />
@@ -67,8 +67,8 @@ export default function ConfirmEmail() {
 
   if (status === "success") {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background px-4">
-        <div className="w-full max-w-md space-y-6">
+      <div className="flex min-h-[100dvh] items-start justify-center bg-background px-4 py-8 sm:items-center sm:py-10">
+        <div className="w-full max-w-md space-y-5 sm:space-y-6">
           <div className="text-center space-y-2">
             <div className="flex items-center justify-center gap-2 font-serif text-2xl font-bold text-primary">
               <Mic className="h-6 w-6 text-accent" />
@@ -109,8 +109,8 @@ export default function ConfirmEmail() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background px-4">
-      <div className="w-full max-w-md space-y-6">
+    <div className="flex min-h-[100dvh] items-start justify-center bg-background px-4 py-8 sm:items-center sm:py-10">
+      <div className="w-full max-w-md space-y-5 sm:space-y-6">
         <div className="text-center space-y-2">
           <div className="flex items-center justify-center gap-2 font-serif text-2xl font-bold text-primary">
             <Mic className="h-6 w-6 text-accent" />
@@ -134,7 +134,7 @@ export default function ConfirmEmail() {
               </p>
             </div>
 
-            <div className="flex gap-3">
+            <div className="flex flex-col gap-3 sm:flex-row">
               <Link href="/" className="flex-1">
                 <Button className="w-full" variant="outline">
                   На главную

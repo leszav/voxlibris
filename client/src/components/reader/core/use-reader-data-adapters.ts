@@ -53,7 +53,8 @@ export function usePersonalReaderAdapter({
   clubId?: string;
 }) {
   const safeBookId = bookId || "";
-  const { data: progress, isLoading: progressLoading } = useReadingProgress(safeBookId);
+  const progressQuery = useReadingProgress(safeBookId);
+  const { data: progress, isLoading: progressLoading } = progressQuery;
   const { data: content, isLoading: contentLoading } = useBookContent(
     safeBookId,
     currentChapter || 1,
@@ -101,6 +102,7 @@ export function usePersonalReaderAdapter({
   return {
     progress: progress ?? null,
     progressLoading,
+    refetchProgress: progressQuery.refetch,
     contentLoading,
     bookData,
     currentChapterContent,
@@ -185,6 +187,7 @@ export function useClubReaderAdapter({
     progressLoading: progressQuery.isLoading,
     userProgress: progressQuery.data?.userProgress ?? null,
     clubProgress: progressQuery.data?.clubProgress ?? null,
+    refetchProgress: progressQuery.refetch,
     outlineContent,
     chapterContent,
     contentLoading: chapterContentQuery.isLoading,

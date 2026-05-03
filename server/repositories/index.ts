@@ -3,6 +3,7 @@ import { BookRepository } from './BookRepository.js';
 import { ClubRepository } from './ClubRepository.js';
 import { PersonalBooksRepository } from './PersonalBooksRepository.js';
 import { ClubBooksRepository } from './ClubBooksRepository.js';
+import { GenresRepository } from './GenresRepository.js';
 import { ReadingRepository } from './ReadingRepository.js';
 import { ModerationRepository } from './ModerationRepository.js';
 import { AnalyticsRepository } from './AnalyticsRepository.js';
@@ -21,7 +22,7 @@ import { ClubSubscriptionsRepository } from './ClubSubscriptionsRepository.js';
 import { ReadingScheduleRepository } from './ReadingScheduleRepository.js';
 import { SessionRecordingsRepository } from './SessionRecordingsRepository.js';
 import { ReaderQualityRatingsRepository } from './ReaderQualityRatingsRepository.js';
-import type { ReadingSessionWithDetails, InvitationStatus } from '../../shared/schema.js';
+import type { BookType, GenreSource, ReadingSessionWithDetails, InvitationStatus } from '../../shared/schema.js';
 
 /**
  * Интерфейс для обратной совместимости со старым IStorage
@@ -52,6 +53,7 @@ export class RepositoryContainer {
   private _clubs?: ClubRepository;
   private _personalBooks?: PersonalBooksRepository;
   private _clubBooks?: ClubBooksRepository;
+  private _genres?: GenresRepository;
   private _reading?: ReadingRepository;
   private _moderation?: ModerationRepository;
   private _analytics?: AnalyticsRepository;
@@ -95,6 +97,11 @@ export class RepositoryContainer {
   get clubBooks(): ClubBooksRepository {
     this._clubBooks ??= new ClubBooksRepository();
     return this._clubBooks;
+  }
+
+  get genres(): GenresRepository {
+    this._genres ??= new GenresRepository();
+    return this._genres;
   }
 
   get reading(): ReadingRepository {
@@ -380,6 +387,10 @@ class StorageAdapter implements Partial<IStorage> {
     return this.repos.users.updateUserPassword(userId, passwordHash);
   }
 
+  async updateUserEmail(userId: string, email: string, confirmationToken: string) {
+    return this.repos.users.updateUserEmail(userId, email, confirmationToken);
+  }
+
   async updateUserLastActivity(userId: string) {
     return this.repos.users.updateUserLastActivity(userId);
   }
@@ -392,7 +403,7 @@ class StorageAdapter implements Partial<IStorage> {
     return this.repos.users.updateUserEmailConfirmation(userId, confirmed);
   }
 
-  async updateUserConfirmationToken(userId: string, token: string) {
+  async updateUserConfirmationToken(userId: string, token: string | null) {
     return this.repos.users.updateUserConfirmationToken(userId, token);
   }
 
@@ -516,6 +527,10 @@ class StorageAdapter implements Partial<IStorage> {
 
   async getAllClubs() {
     return this.repos.clubs.getClubs(); // Alias для совместимости
+  }
+
+  async getPublicCatalogClubs(limit?: number, offset?: number, searchQuery?: string) {
+    return this.repos.clubs.getPublicCatalogClubs(limit, offset, searchQuery);
   }
 
   async getClub(id: string) {
@@ -717,6 +732,42 @@ class StorageAdapter implements Partial<IStorage> {
 
   async createClubBook(book: Parameters<ClubBooksRepository['createClubBook']>[0]) {
     return this.repos.clubBooks.createClubBook(book);
+  }
+
+  async getActiveGenres(search?: string) {
+    return this.repos.genres.getActiveGenres(search);
+  }
+
+  async getGenresAdmin(search?: string) {
+    return this.repos.genres.getGenresAdmin(search);
+  }
+
+  async getGenreByCode(code: string) {
+    return this.repos.genres.getGenreByCode(code);
+  }
+
+  async createGenre(payload: Parameters<GenresRepository['createGenre']>[0]) {
+    return this.repos.genres.createGenre(payload);
+  }
+
+  async updateGenre(code: string, payload: Parameters<GenresRepository['updateGenre']>[1]) {
+    return this.repos.genres.updateGenre(code, payload);
+  }
+
+  async getGenresByCodes(codes: string[]) {
+    return this.repos.genres.getGenresByCodes(codes);
+  }
+
+  async getBookGenres(bookType: BookType, bookId: string) {
+    return this.repos.genres.getBookGenres(bookType, bookId);
+  }
+
+  async replaceBookGenres(
+    bookType: BookType,
+    bookId: string,
+    items: Array<{ genreId: string; source: GenreSource; isPrimary: boolean; confidence?: number | null }>,
+  ) {
+    return this.repos.genres.replaceBookGenres(bookType, bookId, items);
   }
 
   async getClubBook(id: string) {

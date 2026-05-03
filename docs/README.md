@@ -12,6 +12,7 @@
 - [Архитектура](02-architecture/README.md)
   - [Общая архитектура](02-architecture/overview.md)
   - [Системная диаграмма](02-architecture/system-diagram.md)
+  - [Карта зависимостей репозитория](02-architecture/repository-dependency-map.md)
   - [ADR](02-architecture/adr/README.md)
     - [0001 - Выбор Drizzle ORM](02-architecture/adr/adr-001-drizzle-orm-choice.md)
     - [0002 - Использование WebSocket для реального времени](02-architecture/adr/adr-002-websocket-for-realtime.md)

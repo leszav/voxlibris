@@ -13,7 +13,9 @@ export type AnalyticsEventType =
   | 'book_complete'
   | 'club_join'
   | 'club_leave'
-  | 'book_upload';
+  | 'book_upload'
+  | 'pwa_install'
+  | 'pwa_homescreen_open';
 
 interface AnalyticsEventData {
   eventType: AnalyticsEventType;
@@ -147,10 +149,11 @@ export function useAnalytics() {
   }, [trackEvent]);
 
   // Вступление в клуб
-  const trackClubJoin = useCallback((clubId: string) => {
+  const trackClubJoin = useCallback((clubId: string, metadata?: Record<string, unknown>) => {
     trackEvent({
       eventType: 'club_join',
       clubId,
+      metadata,
     });
   }, [trackEvent]);
 
@@ -167,6 +170,20 @@ export function useAnalytics() {
     trackEvent({
       eventType: 'book_upload',
       bookId,
+      metadata,
+    });
+  }, [trackEvent]);
+
+  const trackPwaInstall = useCallback((metadata?: Record<string, unknown>) => {
+    trackEvent({
+      eventType: 'pwa_install',
+      metadata,
+    });
+  }, [trackEvent]);
+
+  const trackPwaHomescreenOpen = useCallback((metadata?: Record<string, unknown>) => {
+    trackEvent({
+      eventType: 'pwa_homescreen_open',
       metadata,
     });
   }, [trackEvent]);
@@ -241,6 +258,8 @@ export function useAnalytics() {
     trackClubJoin,
     trackClubLeave,
     trackBookUpload,
+    trackPwaInstall,
+    trackPwaHomescreenOpen,
     startReadingSession,
     stopReadingSession,
   };

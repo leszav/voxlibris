@@ -1,4 +1,4 @@
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, type RefObject } from "react";
 
 interface KeyboardShortcut {
   key: string;
@@ -7,6 +7,28 @@ interface KeyboardShortcut {
   altKey?: boolean;
   action: () => void;
   description: string;
+  /** Если true, действие выполняется только когда скролл в начале страницы */
+  requireAtTop?: boolean;
+  /** Если true, действие выполняется только когда скролл в конце страницы */
+  requireAtBottom?: boolean;
+  /** Ссылка на контейнер скролла для проверки позиции */
+  scrollContainerRef?: RefObject<HTMLElement | null>;
+  /**
+   * Порог (px) для isAtBottom. По умолчанию 20.
+   * Увеличьте, если контейнер имеет bottom-padding (например, pb-32=128px
+   * при активной панели студии), иначе isAtBottom никогда не сработает.
+   */
+  bottomThreshold?: number;
+}
+
+function isAtTop(container: HTMLElement | null | undefined, threshold = 20): boolean {
+  if (!container) return false;
+  return container.scrollTop <= threshold;
+}
+
+function isAtBottom(container: HTMLElement | null | undefined, threshold = 20): boolean {
+  if (!container) return false;
+  return container.scrollTop + container.clientHeight >= container.scrollHeight - threshold;
 }
 
 export function useKeyboardShortcuts(shortcuts: KeyboardShortcut[]) {
@@ -24,6 +46,14 @@ export function useKeyboardShortcuts(shortcuts: KeyboardShortcut[]) {
       const altMatches = !!shortcut.altKey === event.altKey;
 
       if (keyMatches && ctrlMatches && shiftMatches && altMatches) {
+        // Проверка позиции скролла
+        if (shortcut.requireAtTop && !isAtTop(shortcut.scrollContainerRef?.current)) {
+          continue;
+        }
+        if (shortcut.requireAtBottom && !isAtBottom(shortcut.scrollContainerRef?.current, shortcut.bottomThreshold)) {
+          continue;
+        }
+
         event.preventDefault();
         event.stopPropagation();
         shortcut.action();

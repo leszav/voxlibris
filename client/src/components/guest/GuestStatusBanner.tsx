@@ -173,7 +173,10 @@ export function GuestStatusBanner() {
   const [location, setLocation] = useLocation();
   const { isAuthenticated } = useAuth();
   const { toast } = useToast();
-  const { isLoading, isGuestAccessEnabled, guest, book, error, expiresInDays, hasBook, init, restore } = useGuest();
+  const [shouldBootstrapGuest, setShouldBootstrapGuest] = useState(false);
+  const { isLoading, isGuestAccessEnabled, guest, book, error, expiresInDays, hasBook, init, restore } = useGuest({
+    autoInit: shouldBootstrapGuest,
+  });
   const [showRestore, setShowRestore] = useState(false);
   const [restoreCode, setRestoreCode] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
@@ -186,6 +189,36 @@ export function GuestStatusBanner() {
       setShowRestore(true);
     }
   }, [location]);
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      return;
+    }
+
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    let idleId: number | null = null;
+
+    const enableGuestBootstrap = () => {
+      setShouldBootstrapGuest(true);
+    };
+
+    if (typeof window !== "undefined" && typeof window.requestIdleCallback === "function") {
+      idleId = window.requestIdleCallback(() => {
+        enableGuestBootstrap();
+      }, { timeout: 3000 });
+    } else {
+      timeoutId = setTimeout(enableGuestBootstrap, 2000);
+    }
+
+    return () => {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+      if (idleId !== null && typeof window !== "undefined" && typeof window.cancelIdleCallback === "function") {
+        window.cancelIdleCallback(idleId);
+      }
+    };
+  }, [isAuthenticated]);
 
   async function handleGuestStart() {
     setActionError(null);
@@ -261,6 +294,8 @@ export function GuestStatusBanner() {
   }, [guest?.accessCode, toast]);
 
   if (isAuthenticated || isGuestAccessEnabled === false) return null;
+
+  if (!shouldBootstrapGuest) return null;
 
   if (isLoading && isGuestAccessEnabled === null) return null;
 

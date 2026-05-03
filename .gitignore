@@ -94,6 +94,10 @@ server/public/
 server/storage.ts.backup
 vite.config.ts.*
 
+# Runtime uploads (created automatically on first use)
+uploads/*
+!uploads/.gitkeep
+
 # Database
 *.sqlite
 *.sqlite3
@@ -157,7 +161,6 @@ scripts/ollama-*.sh
 # Code quality configs (project-specific)
 .sonarignore
 biome.json
-eslint.config.js
 sonar-project.properties
 
 # Git hooks (local development only)

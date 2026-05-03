@@ -1,6 +1,17 @@
 import { BaseRepository } from './BaseRepository.js';
 import { eq, desc, and, count, sql, ne, inArray } from 'drizzle-orm';
-import { clubs, clubMembers, clubInvitations, users, clubBooks, tags, clubTags } from '../../shared/schema.js';
+import {
+  clubs,
+  clubMembers,
+  clubInvitations,
+  users,
+  clubBooks,
+  tags,
+  clubTags,
+  bookReadingStatus,
+  bookAccessLogs,
+  analyticsEvents,
+} from '../../shared/schema.js';
 import type {
   Club,
   InsertClub,
@@ -13,6 +24,30 @@ import type {
   ClubWithDetails
 } from '../../shared/schema.js';
 import { logger } from '../lib/logger.js';
+import type { ClientPublicCatalogClub } from '../lib/client-serializers.js';
+
+function matchesCatalogSearch(
+  club: { title: string; description: string | null; bookTitle: string | null; author: string | null },
+  q: string,
+): boolean {
+  return club.title.toLowerCase().includes(q)
+    || (club.description ?? '').toLowerCase().includes(q)
+    || (club.bookTitle ?? '').toLowerCase().includes(q)
+    || (club.author ?? '').toLowerCase().includes(q);
+}
+
+function buildTagsMap(tagRows: Array<{ clubId: string; slug: string }>): Map<string, string[]> {
+  const map = new Map<string, string[]>();
+  for (const row of tagRows) {
+    const existing = map.get(row.clubId);
+    if (existing) {
+      existing.push(row.slug);
+    } else {
+      map.set(row.clubId, [row.slug]);
+    }
+  }
+  return map;
+}
 
 /**
  * Club Domain Repository - единственная ответственность: управление клубами
@@ -49,14 +84,19 @@ export class ClubRepository extends BaseRepository {
         .where(inArray(clubMembers.clubId, clubIds))
         .groupBy(clubMembers.clubId),
       includeBook
-        ? this.db
-            .select()
-            .from(clubBooks)
-            .where(and(
-              inArray(clubBooks.clubId, clubIds),
-              eq(clubBooks.isDeleted, false),
-            ))
-            .orderBy(desc(clubBooks.uploadedAt))
+        ? (() => {
+            const activeBookIds = clubsData
+              .map((c) => c.bookId)
+              .filter((id): id is string => id !== null && id !== undefined);
+            if (activeBookIds.length === 0) return Promise.resolve([] as (typeof clubBooks.$inferSelect)[]);
+            return this.db
+              .select()
+              .from(clubBooks)
+              .where(and(
+                inArray(clubBooks.id, activeBookIds),
+                eq(clubBooks.isDeleted, false),
+              ));
+          })()
         : Promise.resolve([] as (typeof clubBooks.$inferSelect)[]),
       includeTags
         ? this.db
@@ -75,11 +115,9 @@ export class ClubRepository extends BaseRepository {
       memberCounts.map((entry) => [entry.clubId, Number(entry.count || 0)]),
     );
 
-    const latestBookMap = new Map<string, typeof clubBooks.$inferSelect>();
+    const activeBookMap = new Map<string, typeof clubBooks.$inferSelect>();
     for (const book of latestBooks) {
-      if (!latestBookMap.has(book.clubId)) {
-        latestBookMap.set(book.clubId, book);
-      }
+      activeBookMap.set(book.id, book);
     }
 
     const tagsMap = new Map<string, string[]>();
@@ -92,13 +130,16 @@ export class ClubRepository extends BaseRepository {
       }
     }
 
-    return clubsData.map((club) => ({
-      ...club,
-      book: includeBook ? latestBookMap.get(club.id) || null : null,
-      owner: ownersMap.get(club.ownerId) || null,
-      memberCount: memberCountMap.get(club.id) || 0,
-      tags: includeTags ? (tagsMap.get(club.id) || []) : [],
-    })) as ClubWithDetails[];
+    return clubsData.map((club) => {
+      const activeBook = includeBook && club.bookId ? activeBookMap.get(club.bookId) ?? null : null;
+      return {
+        ...club,
+        book: activeBook,
+        owner: ownersMap.get(club.ownerId) || null,
+        memberCount: memberCountMap.get(club.id) || 0,
+        tags: includeTags ? (tagsMap.get(club.id) || []) : [],
+      };
+    }) as ClubWithDetails[];
   }
 
   
@@ -118,6 +159,120 @@ export class ClubRepository extends BaseRepository {
       return this.enrichClubList(clubsData);
     } catch (error) {
       this.logError('getClubs', error);
+      return [];
+    }
+  }
+
+  async getPublicCatalogClubs(limit?: number, offset?: number, searchQuery?: string): Promise<ClientPublicCatalogClub[]> {
+    try {
+      const PAGE_SIZE = 12;
+      const normalizedLimit = typeof limit === 'number' && Number.isFinite(limit) && limit > 0
+        ? Math.min(Math.trunc(limit), 100)
+        : PAGE_SIZE;
+      const normalizedOffset = typeof offset === 'number' && Number.isFinite(offset) && offset >= 0
+        ? Math.trunc(offset)
+        : 0;
+      const normalizedSearch = typeof searchQuery === 'string' ? searchQuery.trim().toLowerCase() : '';
+
+      let query = this.db
+        .select({
+          id: clubs.id,
+          title: clubs.title,
+          description: clubs.description,
+          coverImage: clubs.coverImage,
+          type: clubs.type,
+          isPrivate: clubs.isPrivate,
+          isLive: clubs.isLive,
+          maxMembers: clubs.maxMembers,
+        })
+        .from(clubs)
+        .where(ne(clubs.status, 'pending'))
+        .orderBy(desc(clubs.popularityScore), desc(clubs.createdAt))
+        .$dynamic();
+
+      // Для поискового запроса сначала получаем полный набор и фильтруем по клубу/книге/автору,
+      // затем срезаем нужную страницу. Без поиска — SQL LIMIT/OFFSET.
+      if (!normalizedSearch) {
+        query = query.limit(normalizedLimit).offset(normalizedOffset);
+      }
+
+      const result = await query;
+      if (result.length === 0) {
+        return [];
+      }
+
+      // Загружаем кол-во участников и теги параллельно
+      const clubIds = result.map((c) => c.id);
+      const [memberCountRows, tagRows] = await Promise.all([
+        this.db
+          .select({ clubId: clubMembers.clubId, cnt: count() })
+          .from(clubMembers)
+          .where(and(inArray(clubMembers.clubId, clubIds), eq(clubMembers.isActive, true)))
+          .groupBy(clubMembers.clubId),
+        this.db
+          .select({ clubId: clubTags.clubId, slug: tags.slug })
+          .from(clubTags)
+          .innerJoin(tags, eq(clubTags.tagId, tags.id))
+          .where(inArray(clubTags.clubId, clubIds)),
+      ]);
+
+      const memberCountMap = new Map(memberCountRows.map((r) => [r.clubId, Number(r.cnt)]));
+      const tagsMap = buildTagsMap(tagRows);
+
+      const latestBooks = await this.db
+        .select({
+          clubId: clubBooks.clubId,
+          title: clubBooks.title,
+          author: clubBooks.author,
+          coverUrl: clubBooks.coverUrl,
+        })
+        .from(clubBooks)
+        .where(and(
+          inArray(clubBooks.clubId, clubIds),
+          eq(clubBooks.isDeleted, false),
+        ))
+        .orderBy(desc(clubBooks.uploadedAt));
+
+      const latestBookMap = new Map<string, { title: string | null; author: string | null; coverUrl: string | null }>();
+      for (const book of latestBooks) {
+        if (!latestBookMap.has(book.clubId)) {
+          latestBookMap.set(book.clubId, {
+            title: book.title ?? null,
+            author: book.author ?? null,
+            coverUrl: book.coverUrl ?? null,
+          });
+        }
+      }
+
+      const catalogClubs = result.map((club) => ({
+        id: club.id,
+        title: club.title,
+        description: club.description ?? null,
+        coverImage: club.coverImage ?? null,
+        bookTitle: latestBookMap.get(club.id)?.title ?? null,
+        author: latestBookMap.get(club.id)?.author ?? null,
+        bookCoverUrl: latestBookMap.get(club.id)?.coverUrl ?? null,
+        type: club.type,
+        isPrivate: club.isPrivate,
+        isLive: club.isLive,
+        memberCount: memberCountMap.get(club.id) ?? 0,
+        maxMembers: club.maxMembers,
+        tags: tagsMap.get(club.id) ?? [],
+      }));
+
+      const filtered = normalizedSearch
+        ? catalogClubs.filter((club) => matchesCatalogSearch(club, normalizedSearch))
+        : catalogClubs;
+
+      // При поиске применяем offset/limit в JS (т.к. фильтрация происходила в JS)
+      if (normalizedSearch) {
+        return filtered.slice(normalizedOffset, normalizedOffset + normalizedLimit);
+      }
+
+      // Без поиска offset/limit уже применён в SQL
+      return filtered;
+    } catch (error) {
+      this.logError('getPublicCatalogClubs', error);
       return [];
     }
   }
@@ -200,7 +355,7 @@ export class ClubRepository extends BaseRepository {
       // Возвращаем клуб со всеми данными
       return {
         ...club,
-        book: books[0] || null,
+        book: books.find(b => b.id === club.bookId) || null,
         books: books,
         owner: owner || null,
         memberCount: Number(memberCount),
@@ -330,15 +485,49 @@ export class ClubRepository extends BaseRepository {
     this.validateRequired(id, 'id');
     
     try {
-      // Сначала удаляем все связанные данные
-      await this.db.delete(clubInvitations).where(eq(clubInvitations.clubId, id));
-      await this.db.delete(clubMembers).where(eq(clubMembers.clubId, id));
-      
-      // Затем удаляем сам клуб
-      const result = await this.db
-        .delete(clubs)
-        .where(eq(clubs.id, id))
-        .returning();
+      const result = await this.db.transaction(async (tx) => {
+        const clubBookRows = await tx
+          .select({ id: clubBooks.id })
+          .from(clubBooks)
+          .where(eq(clubBooks.clubId, id));
+
+        const clubBookIds = clubBookRows.map((row) => row.id);
+
+        if (clubBookIds.length > 0) {
+          await tx
+            .delete(bookReadingStatus)
+            .where(and(
+              inArray(bookReadingStatus.bookId, clubBookIds),
+              eq(bookReadingStatus.bookType, 'club')
+            ));
+
+          await tx
+            .delete(bookAccessLogs)
+            .where(and(
+              inArray(bookAccessLogs.bookId, clubBookIds),
+              eq(bookAccessLogs.bookType, 'club')
+            ))
+            .catch((error: unknown) => {
+              const pgError = error as { code?: string };
+              if (pgError?.code === '42P01') return;
+              throw error;
+            });
+
+          await tx
+            .delete(analyticsEvents)
+            .where(inArray(analyticsEvents.bookId, clubBookIds));
+        }
+
+        // Сначала удаляем все связанные данные
+        await tx.delete(clubInvitations).where(eq(clubInvitations.clubId, id));
+        await tx.delete(clubMembers).where(eq(clubMembers.clubId, id));
+        
+        // Затем удаляем сам клуб
+        return await tx
+          .delete(clubs)
+          .where(eq(clubs.id, id))
+          .returning();
+      });
       
       return result.length > 0;
     } catch (error) {

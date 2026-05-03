@@ -1,7 +1,10 @@
 import { Router, Request, Response } from 'express';
+import { eq, sql } from 'drizzle-orm';
 import { storage } from '../repositories/index.js';
 import { sessionAnalyticsService } from '../services/session-analytics-service.js';
 import { logger } from '../lib/logger.js';
+import { db } from '../db.js';
+import { readerRatings } from '../../shared/schema.js';
 
 const router = Router();
 
@@ -116,11 +119,22 @@ router.get('/sessions/:sessionId/analytics', async (req: Request, res: Response)
     const listenerCities = JSON.parse(analytics.listenerCities || '{}');
     const deviceTypes = JSON.parse(analytics.deviceTypes || '{}');
     const retention = JSON.parse(analytics.retention || '{}');
+    const [ratingSummary] = await db
+      .select({
+        averageRating: sql<number | null>`avg(${readerRatings.rating})`,
+        ratingCount: sql<number>`count(${readerRatings.id})`,
+      })
+      .from(readerRatings)
+      .where(eq(readerRatings.sessionId, sessionId));
 
     res.json({
       success: true,
       analytics: {
         ...analytics,
+        sessionRating: {
+          averageRating: ratingSummary?.averageRating ? Number(ratingSummary.averageRating) : null,
+          ratingCount: Number(ratingSummary?.ratingCount ?? 0),
+        },
         listenerRegions,
         listenerCities,
         deviceTypes,

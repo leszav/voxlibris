@@ -230,10 +230,6 @@ function BookActionsMenu({ book }: Readonly<{ book: Book }>) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin-books'] });
       setShowDeleteDialog(false);
-      void modalAlert({
-        title: "Книга удалена",
-        description: "Книга была удалена из системы",
-      });
     },
     onError: (error: Error) => {
       void modalAlert({
@@ -252,28 +248,15 @@ function BookActionsMenu({ book }: Readonly<{ book: Book }>) {
       if (variables.status === 'blocked') {
         setShowBlockDialog(false);
         setBlockReason("");
-        void modalAlert({
-          title: "Книга заблокирована",
-          description: variables.source === 'books'
-            ? "Книга заблокирована"
-            : "Книга заблокирована, пользователь уведомлен по email",
-        });
         return;
       }
 
       if (variables.status === 'active' && book.status === 'pending') {
-        void modalAlert({
-          title: "Книга одобрена",
-          description: "Книга переведена в активный статус",
-        });
         return;
       }
 
       if (variables.status === 'active') {
-        void modalAlert({
-          title: "Книга разблокирована",
-          description: "Книга снова доступна",
-        });
+        return;
       }
     },
     onError: (error: Error) => {
@@ -624,14 +607,8 @@ export default function AdminBooks() {
   const guestStatusMutation = useMutation({
     mutationFn: ({ bookId, status, notes }: { bookId: string; status: "approved" | "rejected"; notes?: string }) =>
       updateGuestBookStatus(bookId, status, notes),
-    onSuccess: (_data, variables) => {
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin-guest-books"] });
-      void modalAlert({
-        title: variables.status === "rejected" ? "Книга заблокирована" : "Книга разрешена",
-        description: variables.status === "rejected"
-          ? "Гостевая книга заблокирована для чтения"
-          : "Гостевая книга разрешена",
-      });
     },
     onError: (mutationError: Error) => {
       void modalAlert({
@@ -646,10 +623,6 @@ export default function AdminBooks() {
     mutationFn: (bookId: string) => deleteGuestBookAdmin(bookId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin-guest-books"] });
-      void modalAlert({
-        title: "Гостевая книга удалена",
-        description: "Книга удалена из гостевой библиотеки",
-      });
     },
     onError: (mutationError: Error) => {
       void modalAlert({
@@ -798,20 +771,12 @@ export default function AdminBooks() {
                   <SelectItem value="blocked">Заблокированные</SelectItem>
                 </SelectContent>
               </Select>
-              <Select value={filters.genre} onValueChange={handleGenreChange}>
-                <SelectTrigger className="w-48">
-                  <SelectValue placeholder="Жанр" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Все жанры</SelectItem>
-                  <SelectItem value="fiction">Художественная литература</SelectItem>
-                  <SelectItem value="non-fiction">Научная литература</SelectItem>
-                  <SelectItem value="mystery">Детектив</SelectItem>
-                  <SelectItem value="romance">Романтика</SelectItem>
-                  <SelectItem value="science-fiction">Научная фантастика</SelectItem>
-                  <SelectItem value="fantasy">Фэнтези</SelectItem>
-                </SelectContent>
-              </Select>
+              <Input
+                value={filters.genre === 'all' ? '' : filters.genre}
+                onChange={(e) => handleGenreChange(e.target.value || 'all')}
+                placeholder="Фильтр по жанру"
+                className="w-full md:w-48"
+              />
             </div>
           </CardContent>
         </Card>

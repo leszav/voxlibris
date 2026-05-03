@@ -13,6 +13,7 @@ interface SaveNowOptions {
 
 interface UseDebouncedReaderProgressSaveOptions {
   scrollContainerRef: RefObject<HTMLElement | null>;
+  contentAreaRef?: RefObject<HTMLElement | null>;
   currentChapter: number | null;
   totalChapters: number;
   onSave: (payload: ReaderProgressPayload) => void;
@@ -22,16 +23,260 @@ interface UseDebouncedReaderProgressSaveOptions {
 
 interface UseRestoreReaderScrollOptions {
   scrollContainerRef: RefObject<HTMLElement | null>;
+  contentAreaRef?: RefObject<HTMLElement | null>;
   currentChapter: number | null;
   currentPositionRaw?: string | null;
   contentReady: boolean;
+  onProgrammaticScroll?: (holdMs?: number) => void;
+  isProgrammaticScroll?: () => boolean;
   delayMs?: number;
   retryAttempts?: number;
   retryDelayMs?: number;
 }
 
+interface RestoreReaderScrollPositionOptions {
+  scrollContainerRef: RefObject<HTMLElement | null>;
+  contentAreaRef?: RefObject<HTMLElement | null>;
+  currentChapter: number | null;
+  currentPositionRaw?: string | null;
+  onProgrammaticScroll?: (holdMs?: number) => void;
+  delayMs?: number;
+  retryAttempts?: number;
+  retryDelayMs?: number;
+}
+
+function isScrollIntentKey(event: KeyboardEvent): boolean {
+  if (event.ctrlKey || event.altKey || event.metaKey) {
+    return false;
+  }
+
+  return (
+    event.key === " " ||
+    event.code === "Space" ||
+    event.key === "PageDown" ||
+    event.key === "PageUp" ||
+    event.key === "ArrowDown" ||
+    event.key === "ArrowUp" ||
+    event.key === "Home" ||
+    event.key === "End"
+  );
+}
+
+type CaretDocument = Document & {
+  caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
+  caretRangeFromPoint?: (x: number, y: number) => Range | null;
+};
+
+function getTopLeftTextOffset(scrollContainer: HTMLElement, contentArea: HTMLElement): number | null {
+  const scrollRect = scrollContainer.getBoundingClientRect();
+  const contentRect = contentArea.getBoundingClientRect();
+  const x = Math.max(contentRect.left + 8, scrollRect.left + 8);
+  const y = scrollRect.top + 8;
+  const caretDocument = document as CaretDocument;
+
+  let node: Node | null = null;
+  let offset = 0;
+
+  if (typeof caretDocument.caretPositionFromPoint === "function") {
+    const position = caretDocument.caretPositionFromPoint(x, y);
+    if (position) {
+      node = position.offsetNode;
+      offset = position.offset;
+    }
+  } else if (typeof caretDocument.caretRangeFromPoint === "function") {
+    const range = caretDocument.caretRangeFromPoint(x, y);
+    if (range) {
+      node = range.startContainer;
+      offset = range.startOffset;
+    }
+  }
+
+  if (!node || !contentArea.contains(node instanceof HTMLElement ? node : node.parentElement)) {
+    return null;
+  }
+
+  const range = document.createRange();
+  range.setStart(contentArea, 0);
+  range.setEnd(node, offset);
+  return range.toString().length;
+}
+
+function findTextNodeByOffset(root: HTMLElement, textOffset: number): { node: Text; offset: number } | null {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let remaining = Math.max(0, textOffset);
+  let current = walker.nextNode();
+
+  while (current) {
+    if (current.nodeType === Node.TEXT_NODE) {
+      const textNode = current as Text;
+      const len = textNode.data.length;
+      if (remaining <= len) {
+        return { node: textNode, offset: Math.min(remaining, len) };
+      }
+      remaining -= len;
+    }
+    current = walker.nextNode();
+  }
+
+  return null;
+}
+
+function restoreByTextOffset(
+  scrollContainer: HTMLElement,
+  contentArea: HTMLElement,
+  textOffset: number,
+): boolean {
+  const target = findTextNodeByOffset(contentArea, textOffset);
+  if (!target) {
+    return false;
+  }
+
+  const range = document.createRange();
+  range.setStart(target.node, target.offset);
+  range.setEnd(target.node, target.offset);
+  const rect = range.getClientRects()[0] ?? range.getBoundingClientRect();
+  if (!rect || rect.height <= 0) {
+    return false;
+  }
+
+  const scrollRect = scrollContainer.getBoundingClientRect();
+  const desiredTop = scrollRect.top + 8;
+  const delta = rect.top - desiredTop;
+  if (!Number.isFinite(delta)) {
+    return false;
+  }
+
+  scrollContainer.scrollTop += delta;
+  return true;
+}
+
+function scheduleReaderScrollRestore({
+  scrollContainerRef,
+  contentAreaRef,
+  currentChapter,
+  currentPositionRaw,
+  onProgrammaticScroll,
+  delayMs = 300,
+  retryAttempts = 4,
+  retryDelayMs = 150,
+}: RestoreReaderScrollPositionOptions): () => void {
+  let restoreTimeout: ReturnType<typeof setTimeout> | null = null;
+  let retryTimeout: ReturnType<typeof setTimeout> | null = null;
+
+  if (currentChapter === null || !currentPositionRaw) {
+    return () => {
+      if (restoreTimeout) {
+        clearTimeout(restoreTimeout);
+      }
+      if (retryTimeout) {
+        clearTimeout(retryTimeout);
+      }
+    };
+  }
+
+  const position = parseReaderPosition(currentPositionRaw);
+  if (!position || !canRestorePositionForChapter(position, currentChapter)) {
+    return () => {
+      if (restoreTimeout) {
+        clearTimeout(restoreTimeout);
+      }
+      if (retryTimeout) {
+        clearTimeout(retryTimeout);
+      }
+    };
+  }
+
+  const normalizedSavedScrollTop = Math.max(0, position.scrollTop);
+  const savedScrollable = typeof position.scrollHeight === "number" && typeof position.clientHeight === "number"
+    ? Math.max(1, position.scrollHeight - position.clientHeight)
+    : null;
+  let attemptsLeft = retryAttempts;
+  let userInteracted = false;
+  const container = scrollContainerRef.current;
+
+  const detachInteractionListeners = () => {
+    if (!container) {
+      document.removeEventListener("keydown", handleKeyDown);
+      return;
+    }
+
+    container.removeEventListener("wheel", markUserInteraction);
+    container.removeEventListener("touchstart", markUserInteraction);
+    container.removeEventListener("pointerdown", markUserInteraction);
+    document.removeEventListener("keydown", handleKeyDown);
+  };
+
+  const markUserInteraction = () => {
+    userInteracted = true;
+    detachInteractionListeners();
+  };
+
+  const handleKeyDown = (event: KeyboardEvent) => {
+    if (isScrollIntentKey(event)) {
+      markUserInteraction();
+    }
+  };
+
+  container?.addEventListener("wheel", markUserInteraction, { passive: true });
+  container?.addEventListener("touchstart", markUserInteraction, { passive: true });
+  container?.addEventListener("pointerdown", markUserInteraction, { passive: true });
+  document.addEventListener("keydown", handleKeyDown);
+
+  const restorePosition = () => {
+    if (userInteracted) return;
+
+    if (!container) return;
+
+    const contentArea = contentAreaRef?.current ?? null;
+    if (
+      contentArea &&
+      typeof position.textOffset === "number" &&
+      (onProgrammaticScroll?.(Math.max(400, retryDelayMs + 120)), true) &&
+      restoreByTextOffset(container, contentArea, position.textOffset)
+    ) {
+      return;
+    }
+
+    let targetScrollTop = normalizedSavedScrollTop;
+
+    if (savedScrollable !== null) {
+      targetScrollTop = Math.round(
+        Math.min(1, normalizedSavedScrollTop / savedScrollable) *
+          Math.max(1, container.scrollHeight - container.clientHeight)
+      );
+    }
+
+    onProgrammaticScroll?.(Math.max(400, retryDelayMs + 120));
+    container.scrollTop = targetScrollTop;
+    const restored = Math.abs(container.scrollTop - targetScrollTop) <= 2;
+
+    if (!restored && attemptsLeft > 0) {
+      attemptsLeft -= 1;
+      retryTimeout = setTimeout(restorePosition, retryDelayMs);
+    }
+  };
+
+  restoreTimeout = setTimeout(restorePosition, delayMs);
+
+  return () => {
+    if (restoreTimeout) {
+      clearTimeout(restoreTimeout);
+    }
+    if (retryTimeout) {
+      clearTimeout(retryTimeout);
+    }
+
+    detachInteractionListeners();
+  };
+}
+
+export function restoreReaderScrollPosition(options: RestoreReaderScrollPositionOptions): () => void {
+  return scheduleReaderScrollRestore(options);
+}
+
 export function useDebouncedReaderProgressSave({
   scrollContainerRef,
+  contentAreaRef,
   currentChapter,
   totalChapters,
   onSave,
@@ -63,10 +308,11 @@ export function useDebouncedReaderProgressSave({
       scrollHeight: container.scrollHeight,
       clientHeight: container.clientHeight,
       progressOverride: options?.progressOverride,
+      textOffset: contentAreaRef?.current ? getTopLeftTextOffset(container, contentAreaRef.current) ?? undefined : undefined,
     });
 
     onSave(payload);
-  }, [enabled, scrollContainerRef, currentChapter, totalChapters, onSave]);
+  }, [enabled, scrollContainerRef, contentAreaRef, currentChapter, totalChapters, onSave]);
 
   const scheduleSave = useCallback(() => {
     if (!enabled) return;
@@ -92,74 +338,87 @@ export function useDebouncedReaderProgressSave({
 
 export function useRestoreReaderScroll({
   scrollContainerRef,
+  contentAreaRef,
   currentChapter,
   currentPositionRaw,
   contentReady,
+  onProgrammaticScroll,
+  isProgrammaticScroll,
   delayMs = 300,
   retryAttempts = 4,
   retryDelayMs = 150,
 }: UseRestoreReaderScrollOptions) {
-  useEffect(() => {
-    let restoreTimeout: ReturnType<typeof setTimeout> | null = null;
-    let retryTimeout: ReturnType<typeof setTimeout> | null = null;
+  const restoredChaptersRef = useRef<Set<number>>(new Set());
+  const interactedChaptersRef = useRef<Set<number>>(new Set());
+  const cleanupRef = useRef<(() => void) | null>(null);
 
-    if (!contentReady || currentChapter === null || !currentPositionRaw) {
-      return () => {
-        if (restoreTimeout) {
-          clearTimeout(restoreTimeout);
-        }
-        if (retryTimeout) {
-          clearTimeout(retryTimeout);
-        }
-      };
+  useEffect(() => {
+    if (currentChapter === null) {
+      return;
+    }
+
+    const container = scrollContainerRef.current;
+    if (!container) {
+      return;
+    }
+
+    const markInteracted = () => {
+      if (isProgrammaticScroll?.()) {
+        return;
+      }
+      interactedChaptersRef.current.add(currentChapter);
+    };
+
+    container.addEventListener("scroll", markInteracted, { passive: true });
+
+    return () => {
+      container.removeEventListener("scroll", markInteracted);
+    };
+  }, [currentChapter, scrollContainerRef]);
+
+  useEffect(() => {
+    if (currentChapter === null) return;
+
+    if (restoredChaptersRef.current.has(currentChapter)) {
+      return;
+    }
+
+    if (interactedChaptersRef.current.has(currentChapter)) {
+      restoredChaptersRef.current.add(currentChapter);
+      return;
+    }
+
+    if (!contentReady || !currentPositionRaw) {
+      return;
     }
 
     const position = parseReaderPosition(currentPositionRaw);
     if (!position || !canRestorePositionForChapter(position, currentChapter)) {
-      return () => {
-        if (restoreTimeout) {
-          clearTimeout(restoreTimeout);
-        }
-        if (retryTimeout) {
-          clearTimeout(retryTimeout);
-        }
-      };
+      restoredChaptersRef.current.add(currentChapter);
+      return;
     }
 
-    const targetScrollTop = Math.max(0, position.scrollTop);
-    let attemptsLeft = retryAttempts;
+    restoredChaptersRef.current.add(currentChapter);
+    if (cleanupRef.current) {
+      cleanupRef.current();
+    }
+    cleanupRef.current = scheduleReaderScrollRestore({
+      scrollContainerRef,
+      contentAreaRef,
+      currentChapter,
+      currentPositionRaw,
+      onProgrammaticScroll,
+      delayMs,
+      retryAttempts,
+      retryDelayMs,
+    });
+  }, [contentReady, currentChapter, currentPositionRaw, scrollContainerRef, contentAreaRef, onProgrammaticScroll, delayMs, retryAttempts, retryDelayMs]);
 
-    const restorePosition = () => {
-      const container = scrollContainerRef.current;
-      if (!container) return;
-
-      container.scrollTop = targetScrollTop;
-      const restored = Math.abs(container.scrollTop - targetScrollTop) <= 2;
-
-      // Повторяем восстановление, если верстка еще не стабилизировалась.
-      if (!restored && attemptsLeft > 0) {
-        attemptsLeft -= 1;
-        retryTimeout = setTimeout(restorePosition, retryDelayMs);
-      }
-    };
-
-    restoreTimeout = setTimeout(restorePosition, delayMs);
-
+  useEffect(() => {
     return () => {
-      if (restoreTimeout) {
-        clearTimeout(restoreTimeout);
-      }
-      if (retryTimeout) {
-        clearTimeout(retryTimeout);
+      if (cleanupRef.current) {
+        cleanupRef.current();
       }
     };
-  }, [
-    contentReady,
-    currentChapter,
-    currentPositionRaw,
-    scrollContainerRef,
-    delayMs,
-    retryAttempts,
-    retryDelayMs,
-  ]);
+  }, []);
 }

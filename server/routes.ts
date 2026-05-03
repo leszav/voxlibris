@@ -6,6 +6,7 @@ import { fileStorage } from "./file-storage.js";
 import { emailService } from "./services/email-service.js";
 import personalBooksRouter from "./personal-books-routes.js";
 import clubBooksRouter from "./club-books-routes.js";
+import genresRouter from "./genres-routes.js";
 import accessRouter from "./access-routes.js";
 import clubDiscussionsRouter from "./club-discussions-routes.js";
 import scheduleRouter from "./routes/schedule.js";
@@ -16,7 +17,14 @@ import readerQualityRouter from "./routes/reader-quality.js";
 import { jwtAuth, requireActiveUser } from "./jwt-middleware.js";
 import { logger } from "./lib/logger.js";
 import { getPublicBaseUrl } from "./lib/public-base-url.js";
+import { storeOptimizedImageIfNeeded } from "./lib/uploaded-image-storage.js";
+import {
+  clearStudioStreamClosureIntent,
+  setStudioStreamClosureIntent,
+} from "./lib/studio-stream-intent-store.js";
+import { sessionAnalyticsService } from "./services/session-analytics-service.js";
 import { db } from "./db.js";
+import { getIO } from "./lib/socket-registry.js";
 import {
   analyticsEvents,
   insertClubSchema,
@@ -169,6 +177,7 @@ export async function registerRoutes(
 
   // ===== NEW VOXLIBRIS UPLOAD API (Phase 2) =====
   app.use('/api/v1/user/books', personalBooksRouter);
+  app.use('/api/v1/genres', genresRouter);
   app.use('/api/v1', clubBooksRouter);
   app.use('/api/v1', accessRouter);
   
@@ -490,40 +499,16 @@ export async function registerRoutes(
       if (!user) {
         return res.status(401).json({ message: "Пользователь не аутентифицирован" });
       }
-      const userId = user.id;
-
       // Check if club exists
       const club = await storage.getClub(clubId);
       if (!club) {
         return res.status(404).json({ message: "Клуб не найден" });
       }
 
-      // Check if already a member
-      const existingMembership = await storage.getUserClubMembership(clubId, userId);
-      if (existingMembership) {
-        return res.status(409).json({ message: "Вы уже являетесь участником этого клуба" });
-      }
-
-      // Check if club is full
-      if (club.memberCount >= club.maxMembers) {
-        return res.status(409).json({ message: "Клуб заполнен" });
-      }
-
-      const membership = await storage.joinClub(clubId, userId);
-
-      await recordAnalyticsEvent(req, {
-        eventType: "club_join",
-        clubId,
-        bookId: null,
-        chapterNumber: null,
-        duration: null,
-        progress: null,
-      });
-
-      res.status(201).json({
-        message: "Вы успешно присоединились к клубу",
-        membership
-      });
+	  return res.status(403).json({
+	    message: "Присоединение к клубу возможно только по приглашению.",
+	    code: "INVITATION_REQUIRED"
+	  });
     } catch (error) {
       console.error("Join club error:", error);
       res.status(500).json({ message: "Внутренняя ошибка сервера" });
@@ -588,6 +573,75 @@ export async function registerRoutes(
       res.json({ books, query });
     } catch (error) {
       console.error("Search books error:", error);
+      res.status(500).json({ message: "Внутренняя ошибка сервера" });
+    }
+  });
+
+  // Global search across clubs, books, users, and future features
+  app.get("/api/search/global", async (req: Request, res: Response) => {
+    try {
+      const { q } = req.query;
+      const rawLimit = typeof req.query.limit === "string" ? Number.parseInt(req.query.limit, 10) : 6;
+      const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 20) : 6;
+
+      if (!q || typeof q !== "string" || q.trim().length < 2) {
+        return res.json({
+          query: typeof q === "string" ? q : "",
+          results: {
+            clubs: [],
+            books: [],
+            users: [],
+            features: [],
+          },
+        });
+      }
+
+      const query = q.trim();
+      const queryLower = query.toLowerCase();
+
+      const [clubs, books, users] = await Promise.all([
+        storage.getPublicCatalogClubs(limit, undefined, query),
+        storage.searchBooks(query),
+        storage.searchUsers(query, limit),
+      ]);
+
+      const searchableFeatures = [
+        { id: "catalog", title: "Каталог клубов", description: "Открыть все клубы", path: "/catalog", isFuture: false },
+        { id: "readers", title: "Топ чтецов", description: "Раздел чтецов и рейтингов", path: "/readers", isFuture: false },
+        { id: "library", title: "Моя библиотека", description: "Личные книги, история, закладки", path: "/library", isFuture: false },
+        { id: "pricing", title: "Тарифы", description: "Тарифные планы и возможности", path: "/pricing", isFuture: false },
+        { id: "become-reader", title: "Стать чтецом", description: "Подача заявки и onboarding", path: "/become-reader", isFuture: false },
+        { id: "rules", title: "Правила сообщества", description: "Раздел в разработке", path: "", isFuture: true },
+        { id: "privacy", title: "Приватность", description: "Раздел в разработке", path: "", isFuture: true },
+        { id: "terms", title: "Условия", description: "Раздел в разработке", path: "", isFuture: true },
+      ];
+
+      const features = searchableFeatures
+        .filter((item) => {
+          const haystack = `${item.title} ${item.description}`.toLowerCase();
+          return haystack.includes(queryLower);
+        })
+        .slice(0, limit);
+
+      res.json({
+        query,
+        results: {
+          clubs: clubs.slice(0, limit),
+          books: books.slice(0, limit).map((book) => ({
+            id: book.id,
+            title: book.title,
+            author: book.author,
+          })),
+          users: users.slice(0, limit).map((user) => ({
+            id: user.id,
+            username: user.username,
+            status: user.status,
+          })),
+          features,
+        },
+      });
+    } catch (error) {
+      console.error("Global search error:", error);
       res.status(500).json({ message: "Внутренняя ошибка сервера" });
     }
   });
@@ -950,9 +1004,34 @@ export async function registerRoutes(
         return res.status(403).json({ message: "Только чтец может запустить эту сессию" });
       }
 
+      await clearStudioStreamClosureIntent(sessionId);
+
       const success = await storage.startSession(sessionId);
       if (!success) {
         return res.status(400).json({ message: "Не удалось запустить сессию" });
+      }
+
+      const existingAnalytics = await sessionAnalyticsService.getSessionAnalytics(sessionId);
+      if (!existingAnalytics) {
+        await sessionAnalyticsService.initializeSessionAnalytics(sessionId);
+      }
+
+      // Уведомляем чтеца и слушателей что сессия официально в эфире.
+      // Чтец может ещё не быть в room (join_session требует isLive=true),
+      // поэтому ищем его сокет по userId и добавляем в room + эмитим напрямую.
+      try {
+        const io = getIO();
+        const room = `session_${sessionId}`;
+        // Найти все сокеты чтеца и добавить в room
+        for (const [, sock] of io.sockets.sockets) {
+          const authSock = sock as typeof sock & { userId?: string };
+          if (authSock.userId === userId) {
+            await authSock.join(room);
+          }
+        }
+        io.to(room).emit("session_started", { sessionId });
+      } catch {
+        // io может не быть инициализирован в тестах — не критично
       }
 
       res.json({ message: "Сессия запущена" });
@@ -982,9 +1061,16 @@ export async function registerRoutes(
         return res.status(403).json({ message: "Только чтец может завершить эту сессию" });
       }
 
+      await setStudioStreamClosureIntent(sessionId, "end");
+
       const success = await storage.endSession(sessionId);
       if (!success) {
         return res.status(400).json({ message: "Не удалось завершить сессию" });
+      }
+
+      const existingAnalytics = await sessionAnalyticsService.getSessionAnalytics(sessionId);
+      if (existingAnalytics) {
+        await sessionAnalyticsService.finalizeSessionAnalytics(sessionId);
       }
 
       res.json({ message: "Сессия завершена" });
@@ -1242,7 +1328,17 @@ export async function registerRoutes(
         return res.status(401).json({ message: "Пользователь не аутентифицирован" });
       }
 
-      const { displayName, avatar, coverImage, bio, favoriteGenres, isReader } = req.body;
+      const { displayName, bio, favoriteGenres, isReader } = req.body;
+      const avatar = await storeOptimizedImageIfNeeded(req.body.avatar, {
+        type: "avatar",
+        keyPrefix: `avatars/${currentUser.id}`,
+        filenamePrefix: "avatar",
+      });
+      const coverImage = await storeOptimizedImageIfNeeded(req.body.coverImage, {
+        type: "background",
+        keyPrefix: `profiles/${currentUser.id}`,
+        filenamePrefix: "cover",
+      });
 
       const profileData = {
         displayName,
@@ -1279,7 +1375,17 @@ export async function registerRoutes(
         return res.status(403).json({ message: "Недостаточно прав" });
       }
 
-      const { displayName, avatar, coverImage, bio, favoriteGenres, isReader } = req.body;
+      const { displayName, bio, favoriteGenres, isReader } = req.body;
+      const avatar = await storeOptimizedImageIfNeeded(req.body.avatar, {
+        type: "avatar",
+        keyPrefix: `avatars/${profileUserId}`,
+        filenamePrefix: "avatar",
+      });
+      const coverImage = await storeOptimizedImageIfNeeded(req.body.coverImage, {
+        type: "background",
+        keyPrefix: `profiles/${profileUserId}`,
+        filenamePrefix: "cover",
+      });
 
       const profileData = {
         displayName,

@@ -2,6 +2,12 @@ import { Badge } from "@/components/ui/badge";
 import { Users, BookOpen, Mic, Lock } from "lucide-react";
 import { Link } from "wouter";
 
+function formatMemberCount(members: number, maxMembers: number): string {
+  if (maxMembers > 0) return `${members}/${maxMembers}`;
+  if (members > 0) return `${members}`;
+  return "Открытый";
+}
+
 interface ClubCardProps {
   readonly id: string;
   readonly title: string;
@@ -117,7 +123,9 @@ export function ClubCard({
           <div className="mt-auto flex items-center justify-between text-muted-foreground text-sm">
             <div className="flex items-center gap-1.5">
               <Users className="h-4 w-4" />
-              <span>{members}/{maxMembers}</span>
+              <span>
+                {formatMemberCount(members, maxMembers)}
+              </span>
             </div>
             <div className="flex items-center gap-1.5">
               <Mic className="h-4 w-4" />

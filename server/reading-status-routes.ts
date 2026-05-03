@@ -52,6 +52,17 @@ function prepareInsertData(userId: string, bookId: string, bookType: string, sta
   return insertData;
 }
 
+function parsePlannedYearFromNotes(notes: string | null): number | null {
+  if (!notes) return null;
+  try {
+    const parsed = JSON.parse(notes) as { plannedYear?: number };
+    const year = parsed.plannedYear;
+    return typeof year === 'number' && year > 1900 ? year : null;
+  } catch {
+    return null;
+  }
+}
+
 // ===== СТАТУСЫ КНИГ =====
 
 /**
@@ -164,23 +175,50 @@ router.get('/stats/year/:year', jwtAuth, async (req, res) => {
         )
       );
 
-    // Статистика по статусам (всего по каждому статусу)
-    const statusStats = await db
+    const yearlyStatuses = await db
       .select({
         status: bookReadingStatus.status,
-        count: sql<string>`count(*)::text`,
+        notes: bookReadingStatus.notes,
+        updatedAt: bookReadingStatus.updatedAt,
       })
       .from(bookReadingStatus)
-      .where(eq(bookReadingStatus.userId, userId))
-      .groupBy(bookReadingStatus.status);
+      .where(eq(bookReadingStatus.userId, userId));
+
+    const statusBreakdown = yearlyStatuses.reduce((acc: Record<string, number>, item) => {
+      if (item.status === 'planned') {
+        const plannedYear = parsePlannedYearFromNotes(item.notes);
+        const includePlanned = plannedYear ? plannedYear === year : true;
+        if (includePlanned) {
+          acc.planned = (acc.planned || 0) + 1;
+        }
+        return acc;
+      }
+
+      if (item.status === 'abandoned') {
+        const abandonedAt = item.updatedAt ? new Date(item.updatedAt) : null;
+        const includeAbandoned = abandonedAt
+          ? abandonedAt >= startOfYear && abandonedAt <= endOfYear
+          : true;
+        if (includeAbandoned) {
+          acc.abandoned = (acc.abandoned || 0) + 1;
+        }
+        return acc;
+      }
+
+      if (item.status === 'reading') {
+        acc.reading = (acc.reading || 0) + 1;
+        return acc;
+      }
+
+      return acc;
+    }, {});
+
+    statusBreakdown.completed = Number.parseInt(completedCount?.count || '0');
 
     const result = {
       year,
       completedBooks: Number.parseInt(completedCount?.count || '0'),
-      statusBreakdown: statusStats.reduce((acc: Record<string, number>, stat) => {
-        acc[stat.status] = Number.parseInt(stat.count);
-        return acc;
-      }, {}),
+      statusBreakdown,
     };
 
     res.json(result);

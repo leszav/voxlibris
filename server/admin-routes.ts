@@ -1,17 +1,24 @@
 import express from 'express';
-import { jwtAuth, requireAdmin } from './jwt-middleware.js';
+import { createReadStream } from 'node:fs';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { jwtAuth, requireAdmin, requireModerator } from './jwt-middleware.js';
 import { storage } from './repositories/index.js';
 import { authService } from './auth-service.js';
 import { emailService } from './services/email-service.js';
 import { fileStorage } from './file-storage.js';
 import { CryptoService } from './crypto-service.js';
-import type { UserRole, UserStatus, AdminActionType, AdminActionTargetType } from '../shared/schema.js';
+import { z } from 'zod';
+import type { UserRole, UserStatus, AdminActionType, AdminActionTargetType, InsertGenre } from '../shared/schema.js';
 import { db } from './db.js';
 import postgres from 'postgres';
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { SQL } from 'drizzle-orm';
-import { books, personalBooks, clubBooks, users, clubs, clubMembers } from '../shared/schema.js';
+import { books, personalBooks, clubBooks, users, clubs, clubMembers, readingSessions } from '../shared/schema.js';
 import { logger } from './lib/logger.js';
+import { getStudioRecordingsDir } from './lib/studio-recording-storage.js';
 import {
   getPublicBaseUrl,
   invalidatePublicBaseUrlCache,
@@ -19,6 +26,29 @@ import {
   platformBaseUrlSettingKey,
 } from './lib/public-base-url.js';
 const PostgresError = postgres.PostgresError;
+
+const adminGenreUpsertSchema = z.object({
+  code: z.string().trim().min(1).max(120),
+  labelRu: z.string().trim().min(1),
+  labelEn: z.string().trim().max(255).optional().nullable(),
+  groupKey: z.string().trim().max(80).optional().nullable(),
+  description: z.string().trim().optional().nullable(),
+  aliases: z.array(z.string().trim().min(1)).optional(),
+  sortOrder: z.number().int().optional(),
+  isActive: z.boolean().optional(),
+});
+
+const adminGenreUpdateSchema = adminGenreUpsertSchema.omit({ code: true }).partial();
+type AdminGenreUpdatePayload = z.infer<typeof adminGenreUpdateSchema>;
+
+function buildGenreUpdatePayload(payload: AdminGenreUpdatePayload): Partial<InsertGenre> {
+  const { aliases, ...genreFields } = payload;
+
+  return {
+    ...genreFields,
+    ...(Array.isArray(aliases) ? { aliasesJson: JSON.stringify(aliases) } : {}),
+  };
+}
 
 const router = express.Router();
 
@@ -89,6 +119,9 @@ const logAction = (
 
 const DEFAULT_ADMIN_PAGE_LIMIT = 20;
 const MAX_ADMIN_PAGE_LIMIT = 100;
+const STUDIO_RECORDINGS_DIR = getStudioRecordingsDir();
+const STUDIO_RECORDING_FILE_RE = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:-(.+))?\.mp3$/i;
+const execFileAsync = promisify(execFile);
 const ADMIN_CLUB_STATUSES = ['pending', 'recruiting', 'active', 'completed', 'archived'] as const;
 type AdminClubStatus = (typeof ADMIN_CLUB_STATUSES)[number];
 type AdminBookSource = 'books' | 'personal_books' | 'club_books';
@@ -216,6 +249,210 @@ function parseAdminPagination(pageRaw: unknown, limitRaw: unknown) {
     limit,
     offset: (page - 1) * limit,
   };
+}
+
+interface StudioRecordingFileEntry {
+  id: string;
+  fileName: string;
+  filePath: string;
+  sessionId: string;
+  fileSize: number;
+  recordedAt: string;
+}
+
+interface StudioRecordingSessionMeta {
+  sessionId: string;
+  clubId: string;
+  clubName: string | null;
+  bookId: string;
+  bookTitle: string | null;
+  currentChapter: number;
+  readerId: string | null;
+  readerName: string | null;
+  startedAt: Date | null;
+}
+
+async function probeStudioRecordingDurationSeconds(filePath: string): Promise<number | null> {
+  try {
+    const { stdout } = await execFileAsync('ffprobe', [
+      '-v', 'error',
+      '-show_entries', 'format=duration',
+      '-of', 'default=noprint_wrappers=1:nokey=1',
+      filePath,
+    ]);
+
+    const value = Number.parseFloat(stdout.trim());
+    if (!Number.isFinite(value) || value < 0) {
+      return null;
+    }
+
+    return Math.round(value);
+  } catch (error) {
+    logger.warn({ error, filePath }, 'Failed to probe studio recording duration');
+    return null;
+  }
+}
+
+function parseStudioRecordingFileName(fileName: string): { sessionId: string; recordedAt: string | null } | null {
+  const match = STUDIO_RECORDING_FILE_RE.exec(fileName);
+  if (match === null) {
+    return null;
+  }
+
+  const sessionId = match[1];
+  const rawTimestamp = match[2]?.replace(/\.mp3$/i, '') ?? '';
+  if (!rawTimestamp) {
+    return {
+      sessionId,
+      recordedAt: null,
+    };
+  }
+
+  const isoTimestamp = rawTimestamp.replace(/-(\d{3})Z$/, '.$1Z');
+  const parsedTime = new Date(isoTimestamp);
+
+  return {
+    sessionId,
+    recordedAt: Number.isNaN(parsedTime.getTime()) ? null : parsedTime.toISOString(),
+  };
+}
+
+function resolveStudioRecordingPath(recordingId: string): string | null {
+  if (!recordingId || path.basename(recordingId) !== recordingId) {
+    return null;
+  }
+
+  const baseDir = path.resolve(STUDIO_RECORDINGS_DIR);
+  const resolvedPath = path.resolve(baseDir, recordingId);
+  if (resolvedPath !== path.join(baseDir, recordingId)) {
+    return null;
+  }
+
+  return resolvedPath;
+}
+
+async function listStudioRecordingFiles(): Promise<StudioRecordingFileEntry[]> {
+  try {
+    const entries = await fs.readdir(STUDIO_RECORDINGS_DIR, { withFileTypes: true });
+    const files = await Promise.all(
+      entries
+        .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith('.mp3'))
+        .map(async (entry) => {
+          const parsed = parseStudioRecordingFileName(entry.name);
+          if (!parsed) {
+            return null;
+          }
+
+          const filePath = path.join(STUDIO_RECORDINGS_DIR, entry.name);
+          const stats = await fs.stat(filePath);
+          return {
+            id: entry.name,
+            fileName: entry.name,
+            filePath,
+            sessionId: parsed.sessionId,
+            fileSize: stats.size,
+            recordedAt: parsed.recordedAt ?? stats.mtime.toISOString(),
+          } satisfies StudioRecordingFileEntry;
+        })
+    );
+
+    return files
+      .filter((file): file is StudioRecordingFileEntry => file !== null)
+      .sort((left, right) => right.recordedAt.localeCompare(left.recordedAt));
+  } catch (error) {
+    const errorCode = (error as NodeJS.ErrnoException | undefined)?.code;
+    if (errorCode === 'ENOENT') {
+      return [];
+    }
+    throw error;
+  }
+}
+
+async function getStudioRecordingSessionMeta(sessionIds: string[]): Promise<Map<string, StudioRecordingSessionMeta>> {
+  if (sessionIds.length === 0) {
+    return new Map();
+  }
+
+  const rows = await db
+    .select({
+      sessionId: readingSessions.id,
+      clubId: readingSessions.clubId,
+      clubName: clubs.title,
+      bookId: readingSessions.bookId,
+      bookTitle: sql<string | null>`coalesce(${clubBooks.title}, ${books.title})`,
+      currentChapter: readingSessions.currentChapter,
+      readerId: users.id,
+      readerName: users.username,
+      startedAt: readingSessions.startedAt,
+    })
+    .from(readingSessions)
+    .leftJoin(clubs, eq(readingSessions.clubId, clubs.id))
+    .leftJoin(users, eq(readingSessions.readerId, users.id))
+    .leftJoin(clubBooks, eq(readingSessions.bookId, clubBooks.id))
+    .leftJoin(books, eq(readingSessions.bookId, books.id))
+    .where(inArray(readingSessions.id, sessionIds));
+
+  return new Map(rows.map((row) => [row.sessionId, row]));
+}
+
+function recordingMatchesSearch(
+  search: string,
+  file: StudioRecordingFileEntry,
+  meta: StudioRecordingSessionMeta | undefined,
+): boolean {
+  if (!search) {
+    return true;
+  }
+
+  const haystack = [
+    file.fileName,
+    meta?.clubName,
+    meta?.bookTitle,
+    meta?.readerName,
+    meta?.currentChapter ? `глава ${meta.currentChapter}` : null,
+  ]
+    .filter((value): value is string => Boolean(value))
+    .join(' ')
+    .toLowerCase();
+
+  return haystack.includes(search.toLowerCase());
+}
+
+function getAudioMimeType(filePath: string): string {
+  return path.extname(filePath).toLowerCase() === '.mp3' ? 'audio/mpeg' : 'application/octet-stream';
+}
+
+async function sendFileRangeResponse(req: express.Request, res: express.Response, filePath: string): Promise<void> {
+  const stats = await fs.stat(filePath);
+  const fileSize = stats.size;
+  const range = req.headers.range;
+  const contentType = getAudioMimeType(filePath);
+
+  if (!range) {
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Length', fileSize.toString());
+    res.setHeader('Accept-Ranges', 'bytes');
+    res.sendFile(filePath);
+    return;
+  }
+
+  const [startRaw, endRaw] = range.replace(/bytes=/, '').split('-');
+  const start = Number.parseInt(startRaw, 10);
+  const end = endRaw ? Number.parseInt(endRaw, 10) : fileSize - 1;
+
+  if (!Number.isFinite(start) || start < 0 || start >= fileSize || end < start) {
+    res.status(416).setHeader('Content-Range', `bytes */${fileSize}`).end();
+    return;
+  }
+
+  res.status(206);
+  res.setHeader('Content-Type', contentType);
+  res.setHeader('Accept-Ranges', 'bytes');
+  res.setHeader('Content-Length', String(end - start + 1));
+  res.setHeader('Content-Range', `bytes ${start}-${end}/${fileSize}`);
+
+  const stream = createReadStream(filePath, { start, end });
+  stream.pipe(res);
 }
 
 function buildAdminUsersWhere(params: {
@@ -798,6 +1035,7 @@ function _formatClubBookForAdmin(book: { source: 'club_books' } & typeof clubBoo
 interface BookFilters {
   search: string;
   status?: string;
+  genre?: string;
 }
 
 interface BookConditions {
@@ -806,62 +1044,95 @@ interface BookConditions {
   clubWhere?: SQL<unknown>;
 }
 
-function buildBookConditions(filters: BookFilters): BookConditions {
-  const { search, status } = filters;
-  const searchPattern = search ? `%${search}%` : null;
+interface BookFilterPatterns {
+  searchPattern: string | null;
+  status?: string;
+  genrePattern: string | null;
+}
 
-  const sourceWhere = (conditions: SQL<unknown>[]): SQL<unknown> | undefined => {
-    if (conditions.length === 0) return undefined;
-    if (conditions.length === 1) return conditions[0];
-    return and(...conditions) as SQL<unknown>;
+type StatusConditionMap = Record<AdminBookStatus, SQL<unknown>>;
+
+function sourceWhere(conditions: SQL<unknown>[]): SQL<unknown> | undefined {
+  if (conditions.length === 0) return undefined;
+  if (conditions.length === 1) return conditions[0];
+  return and(...conditions) as SQL<unknown>;
+}
+
+function compactConditions(conditions: Array<SQL<unknown> | undefined>): SQL<unknown>[] {
+  return conditions.filter((condition): condition is SQL<unknown> => Boolean(condition));
+}
+
+function statusCondition(status: string | undefined, conditions: StatusConditionMap): SQL<unknown> | undefined {
+  if (isAdminBookStatus(status)) {
+    return conditions[status];
+  }
+
+  return undefined;
+}
+
+function buildBookFilterPatterns(filters: BookFilters): BookFilterPatterns {
+  return {
+    searchPattern: filters.search ? `%${filters.search}%` : null,
+    status: filters.status,
+    genrePattern: filters.genre ? `%${filters.genre}%` : null,
   };
+}
 
-  const booksConditions: SQL<unknown>[] = [];
-  if (searchPattern) {
-    booksConditions.push(
-      sql`(LOWER(${books.title}) LIKE ${searchPattern} OR LOWER(${books.author}) LIKE ${searchPattern})`
-    );
-  }
-  if (status === 'active') {
-    booksConditions.push(eq(books.status, 'active'));
-  } else if (status === 'blocked') {
-    booksConditions.push(eq(books.status, 'blocked'));
-  } else if (status === 'pending') {
-    booksConditions.push(sql`${books.status} NOT IN ('active', 'blocked')`);
-  }
+function buildSystemBookConditions(filters: BookFilterPatterns): SQL<unknown>[] {
+  const { searchPattern, status, genrePattern } = filters;
 
-  const personalConditions: SQL<unknown>[] = [];
-  if (searchPattern) {
-    personalConditions.push(
-      sql`(LOWER(${personalBooks.title}) LIKE ${searchPattern} OR LOWER(${personalBooks.author}) LIKE ${searchPattern})`
-    );
-  }
-  if (status === 'active') {
-    personalConditions.push(eq(personalBooks.isDeleted, false));
-  } else if (status === 'blocked') {
-    personalConditions.push(eq(personalBooks.isDeleted, true));
-  } else if (status === 'pending') {
-    personalConditions.push(sql`false`);
-  }
+  return compactConditions([
+    searchPattern
+      ? sql`(LOWER(${books.title}) LIKE ${searchPattern} OR LOWER(${books.author}) LIKE ${searchPattern})`
+      : undefined,
+    statusCondition(status, {
+      active: eq(books.status, 'active'),
+      blocked: eq(books.status, 'blocked'),
+      pending: sql`${books.status} NOT IN ('active', 'blocked')`,
+    }),
+    genrePattern ? sql`false` : undefined,
+  ]);
+}
 
-  const clubConditions: SQL<unknown>[] = [];
-  if (searchPattern) {
-    clubConditions.push(
-      sql`(LOWER(${clubBooks.title}) LIKE ${searchPattern} OR LOWER(${clubBooks.author}) LIKE ${searchPattern})`
-    );
-  }
-  if (status === 'active') {
-    clubConditions.push(eq(clubBooks.isDeleted, false));
-  } else if (status === 'blocked') {
-    clubConditions.push(eq(clubBooks.isDeleted, true));
-  } else if (status === 'pending') {
-    clubConditions.push(sql`false`);
-  }
+function buildPersonalBookConditions(filters: BookFilterPatterns): SQL<unknown>[] {
+  const { searchPattern, status, genrePattern } = filters;
+
+  return compactConditions([
+    searchPattern
+      ? sql`(LOWER(${personalBooks.title}) LIKE ${searchPattern} OR LOWER(${personalBooks.author}) LIKE ${searchPattern})`
+      : undefined,
+    statusCondition(status, {
+      active: eq(personalBooks.isDeleted, false),
+      blocked: eq(personalBooks.isDeleted, true),
+      pending: sql`false`,
+    }),
+    genrePattern ? sql`LOWER(COALESCE(${personalBooks.genre}, '')) LIKE ${genrePattern}` : undefined,
+  ]);
+}
+
+function buildClubBookConditions(filters: BookFilterPatterns): SQL<unknown>[] {
+  const { searchPattern, status, genrePattern } = filters;
+
+  return compactConditions([
+    searchPattern
+      ? sql`(LOWER(${clubBooks.title}) LIKE ${searchPattern} OR LOWER(${clubBooks.author}) LIKE ${searchPattern})`
+      : undefined,
+    statusCondition(status, {
+      active: eq(clubBooks.isDeleted, false),
+      blocked: eq(clubBooks.isDeleted, true),
+      pending: sql`false`,
+    }),
+    genrePattern ? sql`LOWER(COALESCE(${clubBooks.genre}, '')) LIKE ${genrePattern}` : undefined,
+  ]);
+}
+
+function buildBookConditions(filters: BookFilters): BookConditions {
+  const patterns = buildBookFilterPatterns(filters);
 
   return {
-    booksWhere: sourceWhere(booksConditions),
-    personalWhere: sourceWhere(personalConditions),
-    clubWhere: sourceWhere(clubConditions),
+    booksWhere: sourceWhere(buildSystemBookConditions(patterns)),
+    personalWhere: sourceWhere(buildPersonalBookConditions(patterns)),
+    clubWhere: sourceWhere(buildClubBookConditions(patterns)),
   };
 }
 
@@ -1140,6 +1411,7 @@ router.get('/books', jwtAuth, requireAdmin, async (req, res) => {
   try {
     const search = typeof req.query.search === 'string' ? req.query.search.trim().toLowerCase() : '';
     const status = typeof req.query.status === 'string' ? req.query.status : undefined;
+    const genre = typeof req.query.genre === 'string' ? req.query.genre.trim().toLowerCase() : undefined;
     const { page, limit, offset } = parseAdminPagination(req.query.page, req.query.limit);
 
     if (status && !['active', 'blocked', 'pending'].includes(status)) {
@@ -1149,7 +1421,7 @@ router.get('/books', jwtAuth, requireAdmin, async (req, res) => {
       });
     }
 
-    const conditions = buildBookConditions({ search, status });
+    const conditions = buildBookConditions({ search, status, genre });
     const counts = await fetchBookCounts(conditions);
     const total = counts.booksCount + counts.personalCount + counts.clubCount;
     const windows = calculateBookWindows(counts, offset, limit);
@@ -1169,6 +1441,60 @@ router.get('/books', jwtAuth, requireAdmin, async (req, res) => {
     console.error('Error fetching books:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
+});
+
+router.get('/genres', jwtAuth, requireAdmin, async (req, res) => {
+  const search = typeof req.query.search === 'string' ? req.query.search.trim() : undefined;
+  const genres = await storage.getGenresAdmin(search);
+  res.json(genres.map((genre) => ({
+    id: genre.id,
+    code: genre.code,
+    labelRu: genre.labelRu,
+    labelEn: genre.labelEn,
+    groupKey: genre.groupKey,
+    description: genre.description,
+    aliases: genre.aliasesJson ? JSON.parse(genre.aliasesJson) : [],
+    sortOrder: genre.sortOrder,
+    isActive: genre.isActive,
+    createdAt: genre.createdAt,
+    updatedAt: genre.updatedAt,
+  })));
+});
+
+router.post('/genres', jwtAuth, requireFullAdmin, async (req, res) => {
+  const parsed = adminGenreUpsertSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: 'Invalid genre payload' });
+  }
+
+  const payload = parsed.data;
+  const genre = await storage.createGenre({
+    code: payload.code,
+    labelRu: payload.labelRu,
+    labelEn: payload.labelEn ?? null,
+    groupKey: payload.groupKey ?? null,
+    description: payload.description ?? null,
+    aliasesJson: JSON.stringify(payload.aliases ?? []),
+    sortOrder: payload.sortOrder ?? 0,
+    isActive: payload.isActive ?? true,
+  });
+
+  res.json(genre);
+});
+
+router.put('/genres/:code', jwtAuth, requireFullAdmin, async (req, res) => {
+  const parsed = adminGenreUpdateSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: 'Invalid genre payload' });
+  }
+
+  const updated = await storage.updateGenre(req.params.code, buildGenreUpdatePayload(parsed.data));
+
+  if (!updated) {
+    return res.status(404).json({ error: 'Genre not found' });
+  }
+
+  res.json(updated);
 });
 
 async function buildPersonalBookDownloadPayload(
@@ -3123,6 +3449,233 @@ router.put('/clubs/:id/privacy', jwtAuth, requireAdmin, async (req, res) => {
   } catch (error) {
     console.error('Error updating club privacy:', error);
     res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+// ==== STUDIO RECORDINGS MANAGEMENT ====
+
+router.get('/recordings', jwtAuth, requireModerator, async (req, res) => {
+  try {
+    const { page, limit, offset } = parseAdminPagination(req.query.page, req.query.limit);
+    const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+    const clubId = typeof req.query.clubId === 'string' && req.query.clubId.trim() ? req.query.clubId.trim() : null;
+    const readerId = typeof req.query.readerId === 'string' && req.query.readerId.trim() ? req.query.readerId.trim() : null;
+    const bookId = typeof req.query.bookId === 'string' && req.query.bookId.trim() ? req.query.bookId.trim() : null;
+    const sort = req.query.sort === 'asc' ? 'asc' : 'desc';
+
+    const files = await listStudioRecordingFiles();
+    const sessionMetaMap = await getStudioRecordingSessionMeta([...new Set(files.map((file) => file.sessionId))]);
+    const durationEntries = await Promise.all(
+      files.map(async (file) => [file.id, await probeStudioRecordingDurationSeconds(file.filePath)] as const),
+    );
+    const durationMap = new Map(durationEntries);
+
+    const recordings = files.map((file) => {
+      const meta = sessionMetaMap.get(file.sessionId);
+      return {
+        id: file.id,
+        fileName: file.fileName,
+        sessionId: file.sessionId,
+        clubId: meta?.clubId ?? null,
+        clubName: meta?.clubName ?? 'Неизвестный клуб',
+        bookId: meta?.bookId ?? null,
+        bookTitle: meta?.bookTitle ?? 'Неизвестная книга',
+        chapter: meta?.currentChapter ?? null,
+        readerId: meta?.readerId ?? null,
+        readerName: meta?.readerName ?? 'Неизвестный чтец',
+        recordedAt: file.recordedAt,
+        sessionStartedAt: meta?.startedAt?.toISOString() ?? null,
+        durationSeconds: durationMap.get(file.id) ?? null,
+        fileSize: file.fileSize,
+        streamUrl: `/api/v1/admin/recordings/${encodeURIComponent(file.id)}/stream`,
+        downloadUrl: `/api/v1/admin/recordings/${encodeURIComponent(file.id)}/download`,
+      };
+    });
+
+    const clubs = Array.from(
+      new Map(
+        recordings
+          .filter((recording) => recording.clubId !== null)
+          .map((recording) => [recording.clubId as string, { id: recording.clubId as string, name: recording.clubName }]),
+      ).values(),
+    ).sort((left, right) => left.name.localeCompare(right.name, 'ru'));
+
+    const readers = Array.from(
+      new Map(
+        recordings
+          .filter((recording) => recording.readerId !== null)
+          .map((recording) => [recording.readerId as string, { id: recording.readerId as string, name: recording.readerName }]),
+      ).values(),
+    ).sort((left, right) => left.name.localeCompare(right.name, 'ru'));
+
+    const books = Array.from(
+      new Map(
+        recordings
+          .filter((recording) => recording.bookId !== null)
+          .map((recording) => [recording.bookId as string, { id: recording.bookId as string, name: recording.bookTitle }]),
+      ).values(),
+    ).sort((left, right) => left.name.localeCompare(right.name, 'ru'));
+
+    const filtered = recordings.filter((recording) => {
+      const meta = sessionMetaMap.get(recording.sessionId);
+      if (!recordingMatchesSearch(search, {
+        id: recording.id,
+        fileName: recording.fileName,
+        filePath: '',
+        sessionId: recording.sessionId,
+        fileSize: recording.fileSize,
+        recordedAt: recording.recordedAt,
+      }, meta)) {
+        return false;
+      }
+
+      if (clubId && recording.clubId !== clubId) {
+        return false;
+      }
+
+      if (readerId && recording.readerId !== readerId) {
+        return false;
+      }
+
+      if (bookId && recording.bookId !== bookId) {
+        return false;
+      }
+
+      return true;
+    });
+
+    filtered.sort((left, right) => {
+      const diff = left.recordedAt.localeCompare(right.recordedAt);
+      return sort === 'asc' ? diff : -diff;
+    });
+
+    const total = filtered.length;
+    const paginated = filtered.slice(offset, offset + limit);
+
+    res.json({
+      recordings: paginated,
+      filters: {
+        clubs,
+        readers,
+        books,
+      },
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.max(1, Math.ceil(total / limit)),
+      },
+    });
+  } catch (error) {
+    logger.error({ error }, 'Failed to list admin studio recordings');
+    res.status(500).json({ message: 'Не удалось получить список записей эфиров' });
+  }
+});
+
+router.get('/recordings/:id/download', jwtAuth, requireModerator, async (req, res) => {
+  try {
+    const filePath = resolveStudioRecordingPath(req.params.id);
+    if (!filePath) {
+      return res.status(400).json({ message: 'Некорректный идентификатор записи' });
+    }
+
+    await fs.access(filePath);
+    res.download(filePath, path.basename(filePath));
+  } catch (error) {
+    const errorCode = (error as NodeJS.ErrnoException | undefined)?.code;
+    if (errorCode === 'ENOENT') {
+      return res.status(404).json({ message: 'Файл записи не найден' });
+    }
+
+    logger.error({ error }, 'Failed to download admin studio recording');
+    res.status(500).json({ message: 'Не удалось скачать запись эфира' });
+  }
+});
+
+router.get('/recordings/:id/stream', jwtAuth, requireModerator, async (req, res) => {
+  try {
+    const filePath = resolveStudioRecordingPath(req.params.id);
+    if (!filePath) {
+      return res.status(400).json({ message: 'Некорректный идентификатор записи' });
+    }
+
+    await fs.access(filePath);
+    res.setHeader('Cache-Control', 'no-store');
+    await sendFileRangeResponse(req, res, filePath);
+  } catch (error) {
+    const errorCode = (error as NodeJS.ErrnoException | undefined)?.code;
+    if (errorCode === 'ENOENT') {
+      return res.status(404).json({ message: 'Файл записи не найден' });
+    }
+
+    logger.error({ error }, 'Failed to stream admin studio recording');
+    res.status(500).json({ message: 'Не удалось открыть запись эфира' });
+  }
+});
+
+router.delete('/recordings/:id', jwtAuth, requireAdmin, async (req, res) => {
+  try {
+    const filePath = resolveStudioRecordingPath(req.params.id);
+    if (!filePath) {
+      return res.status(400).json({ message: 'Некорректный идентификатор записи' });
+    }
+
+    await fs.unlink(filePath);
+
+    res.json({
+      success: true,
+      message: 'Запись эфира удалена',
+    });
+  } catch (error) {
+    const errorCode = (error as NodeJS.ErrnoException | undefined)?.code;
+    if (errorCode === 'ENOENT') {
+      return res.status(404).json({ message: 'Файл записи не найден' });
+    }
+
+    logger.error({ error }, 'Failed to delete admin studio recording');
+    res.status(500).json({ message: 'Не удалось удалить запись эфира' });
+  }
+});
+
+// Массовое удаление записей
+router.delete('/recordings', jwtAuth, requireAdmin, async (req, res) => {
+  try {
+    const ids = req.body?.ids;
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ message: 'Необходимо передать массив идентификаторов ids' });
+    }
+
+    const MAX_BATCH = 200;
+    if (ids.length > MAX_BATCH) {
+      return res.status(400).json({ message: `За один запрос можно удалить не более ${MAX_BATCH} записей` });
+    }
+
+    let deleted = 0;
+    let notFound = 0;
+
+    await Promise.all(
+      ids.map(async (id: unknown) => {
+        if (typeof id !== 'string') return;
+        const filePath = resolveStudioRecordingPath(id);
+        if (!filePath) return;
+        try {
+          await fs.unlink(filePath);
+          deleted++;
+        } catch (err) {
+          const code = (err as NodeJS.ErrnoException | undefined)?.code;
+          if (code === 'ENOENT') {
+            notFound++;
+          } else {
+            logger.warn({ error: err, id }, 'Failed to delete admin studio recording in batch');
+          }
+        }
+      }),
+    );
+
+    res.json({ success: true, deleted, notFound });
+  } catch (error) {
+    logger.error({ error }, 'Failed to batch delete admin studio recordings');
+    res.status(500).json({ message: 'Не удалось удалить записи эфиров' });
   }
 });
 

@@ -1,5 +1,5 @@
 import { Link, useLocation } from "wouter";
-import { Search, User, Menu, Settings, Construction, LogOut } from "lucide-react";
+import { Search, User, Menu, Settings, Construction, LogOut, House, Compass, BookOpen } from "lucide-react";
 import { Logo } from "@/components/logo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,22 +18,81 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { FeedbackModal } from "@/components/ui/feedback-modal";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { isImpersonating, getImpersonatedUsername, exitImpersonation } from "@/lib/token-store";
 import { GuestStatusBanner } from "@/components/guest/GuestStatusBanner";
+import { PwaInstallPrompt } from "@/components/layout/PwaInstallPrompt";
+
+interface SearchClubResult {
+  id: string;
+  title: string;
+  description: string | null;
+}
+
+interface SearchBookResult {
+  id: string;
+  title: string;
+  author: string;
+}
+
+interface SearchUserResult {
+  id: string;
+  username: string;
+  status: string;
+}
+
+interface SearchFeatureResult {
+  id: string;
+  title: string;
+  description: string;
+  path: string;
+  isFuture: boolean;
+}
+
+interface GlobalSearchResponse {
+  query: string;
+  results: {
+    clubs: SearchClubResult[];
+    books: SearchBookResult[];
+    users: SearchUserResult[];
+    features: SearchFeatureResult[];
+  };
+}
 
 export function MainLayout({ children }: { readonly children: React.ReactNode }) {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<GlobalSearchResponse["results"]>({
+    clubs: [],
+    books: [],
+    users: [],
+    features: [],
+  });
+  const [isSearchLoading, setIsSearchLoading] = useState(false);
+  const [showSearchResults, setShowSearchResults] = useState(false);
   const [showComingSoon, setShowComingSoon] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [showFeedback, setShowFeedback] = useState(false);
-  const [, setLocation] = useLocation();
+  const [location, setLocation] = useLocation();
   const { user, isAuthenticated, logout, refetchUser } = useAuth();
   const queryClient = useQueryClient();
+  const searchContainerRef = useRef<HTMLDivElement | null>(null);
   const [impersonating, setImpersonating] = useState(isImpersonating());
   const [impersonatedUser, setImpersonatedUser] = useState(getImpersonatedUsername());
+
+  const profileHref = isAuthenticated ? "/profile" : "/auth/login";
+  const profileLabel = isAuthenticated ? "Профиль" : "Войти";
+
+  const isHomeSection = location === "/";
+  const isClubsSection = location === "/catalog" || location.startsWith("/clubs") || location.startsWith("/club/");
+  const isLibrarySection = location.startsWith("/library") || location.startsWith("/books/") || location.startsWith("/guest/");
+  const isProfileSection = location.startsWith("/profile") || location.startsWith("/auth/") || location.startsWith("/confirm-email/");
+  const hideInstallPrompt = location.startsWith("/auth/")
+    || location.startsWith("/confirm-email/")
+    || location.startsWith("/admin")
+    || location.startsWith("/guest/reader/");
 
   useEffect(() => {
     if (!isAuthenticated && isLoggingOut) {
@@ -50,9 +109,77 @@ export function MainLayout({ children }: { readonly children: React.ReactNode })
     }
   }, [showComingSoon]);
 
+  useEffect(() => {
+    const trimmed = searchQuery.trim();
+
+    if (trimmed.length < 2) {
+      setSearchResults({ clubs: [], books: [], users: [], features: [] });
+      setIsSearchLoading(false);
+      return;
+    }
+
+    const abortController = new AbortController();
+    const timer = setTimeout(async () => {
+      try {
+        setIsSearchLoading(true);
+        const response = await fetch(`/api/search/global?q=${encodeURIComponent(trimmed)}&limit=6`, {
+          signal: abortController.signal,
+        });
+
+        if (!response.ok) {
+          throw new Error("Search request failed");
+        }
+
+        const payload = await response.json() as GlobalSearchResponse;
+        setSearchResults(payload.results);
+      } catch (error) {
+        if (!abortController.signal.aborted) {
+          console.error("Global search failed:", error);
+          setSearchResults({ clubs: [], books: [], users: [], features: [] });
+        }
+      } finally {
+        if (!abortController.signal.aborted) {
+          setIsSearchLoading(false);
+        }
+      }
+    }, 250);
+
+    return () => {
+      abortController.abort();
+      clearTimeout(timer);
+    };
+  }, [searchQuery]);
+
+  useEffect(() => {
+    const handleOutsideClick = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (searchContainerRef.current && target && !searchContainerRef.current.contains(target)) {
+        setShowSearchResults(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleOutsideClick);
+    return () => {
+      document.removeEventListener("mousedown", handleOutsideClick);
+    };
+  }, []);
+
   const handlePlaceholderLink = (e: React.MouseEvent<HTMLAnchorElement> | React.MouseEvent<HTMLButtonElement>) => {
     e.preventDefault();
     setShowComingSoon(true);
+  };
+
+  const handleSearchSelect = (path: string, isFuture: boolean = false) => {
+    setShowSearchResults(false);
+    setSearchQuery("");
+    setIsSearchOpen(false);
+
+    if (isFuture || !path) {
+      setShowComingSoon(true);
+      return;
+    }
+
+    setLocation(path);
   };
 
   const handleLogout = async () => {
@@ -156,13 +283,105 @@ export function MainLayout({ children }: { readonly children: React.ReactNode })
             </Button>
 
             <div className={`absolute top-16 left-0 w-full bg-background border-b p-4 sm:static sm:block sm:w-auto sm:border-none sm:bg-transparent sm:p-0 transition-all duration-200 ${isSearchOpen ? 'block animate-in slide-in-from-top-2' : 'hidden'}`}>
-              <div className="relative w-full sm:w-64">
+              <div ref={searchContainerRef} className="relative w-full sm:w-64">
                 <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
                 <Input
                   type="search"
                   placeholder="Найти клуб, книгу..."
+                  value={searchQuery}
+                  onChange={(e) => {
+                    setSearchQuery(e.target.value);
+                    setShowSearchResults(true);
+                  }}
+                  onFocus={() => setShowSearchResults(true)}
                   className="pl-9 bg-secondary/50 border-transparent focus:border-primary focus:bg-background transition-all rounded-full h-9 w-full"
                 />
+
+                {showSearchResults && searchQuery.trim().length >= 2 && (
+                  <div className="absolute left-0 right-0 top-11 z-50 max-h-[70vh] overflow-y-auto rounded-xl border bg-background shadow-lg">
+                    {isSearchLoading ? (
+                      <div className="p-3 text-sm text-muted-foreground">Ищем...</div>
+                    ) : (
+                      <div className="p-2">
+                        {searchResults.clubs.length > 0 && (
+                          <div className="mb-2">
+                            <div className="px-2 py-1 text-xs font-medium text-muted-foreground">Клубы</div>
+                            {searchResults.clubs.map((club) => (
+                              <button
+                                key={club.id}
+                                type="button"
+                                onClick={() => handleSearchSelect(`/clubs/${club.id}`)}
+                                className="w-full rounded-lg px-2 py-2 text-left hover:bg-secondary"
+                              >
+                                <div className="text-sm font-medium truncate">{club.title}</div>
+                                {club.description && (
+                                  <div className="text-xs text-muted-foreground truncate">{club.description}</div>
+                                )}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+
+                        {searchResults.books.length > 0 && (
+                          <div className="mb-2">
+                            <div className="px-2 py-1 text-xs font-medium text-muted-foreground">Книги</div>
+                            {searchResults.books.map((book) => (
+                              <button
+                                key={book.id}
+                                type="button"
+                                onClick={() => handleSearchSelect(`/books/${book.id}/read`)}
+                                className="w-full rounded-lg px-2 py-2 text-left hover:bg-secondary"
+                              >
+                                <div className="text-sm font-medium truncate">{book.title}</div>
+                                <div className="text-xs text-muted-foreground truncate">{book.author}</div>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+
+                        {searchResults.users.length > 0 && (
+                          <div className="mb-2">
+                            <div className="px-2 py-1 text-xs font-medium text-muted-foreground">Пользователи</div>
+                            {searchResults.users.map((item) => (
+                              <button
+                                key={item.id}
+                                type="button"
+                                onClick={() => handleSearchSelect(`/profile/${item.id}`)}
+                                className="w-full rounded-lg px-2 py-2 text-left hover:bg-secondary"
+                              >
+                                <div className="text-sm font-medium truncate">{item.username}</div>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+
+                        {searchResults.features.length > 0 && (
+                          <div>
+                            <div className="px-2 py-1 text-xs font-medium text-muted-foreground">Разделы и фичи</div>
+                            {searchResults.features.map((feature) => (
+                              <button
+                                key={feature.id}
+                                type="button"
+                                onClick={() => handleSearchSelect(feature.path, feature.isFuture)}
+                                className="w-full rounded-lg px-2 py-2 text-left hover:bg-secondary"
+                              >
+                                <div className="text-sm font-medium truncate">{feature.title}</div>
+                                <div className="text-xs text-muted-foreground truncate">{feature.description}</div>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+
+                        {searchResults.clubs.length === 0
+                          && searchResults.books.length === 0
+                          && searchResults.users.length === 0
+                          && searchResults.features.length === 0 && (
+                            <div className="p-2 text-sm text-muted-foreground">Ничего не найдено</div>
+                          )}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
             
@@ -267,8 +486,9 @@ export function MainLayout({ children }: { readonly children: React.ReactNode })
           </div>
         </div>
       </header>
-      <main className="flex-1">
+      <main className="flex-1 pb-20 md:pb-0">
         <GuestStatusBanner />
+        <PwaInstallPrompt hidden={hideInstallPrompt} />
         {children}
       </main>
       <footer className="border-t bg-card py-12 text-muted-foreground">
@@ -307,6 +527,49 @@ export function MainLayout({ children }: { readonly children: React.ReactNode })
           </div>
         </div>
       </footer>
+
+      <nav
+        className="fixed inset-x-0 bottom-0 z-50 border-t bg-background/95 backdrop-blur md:hidden"
+        style={{ paddingBottom: "max(env(safe-area-inset-bottom), 0.5rem)" }}
+      >
+        <div className="grid grid-cols-4 gap-1 px-2 pt-2">
+          <button
+            type="button"
+            onClick={() => setLocation("/")}
+            className={`flex min-h-14 flex-col items-center justify-center gap-1 rounded-xl text-[11px] transition-colors ${isHomeSection ? "bg-secondary text-primary" : "text-muted-foreground"}`}
+          >
+            <House className="h-4 w-4" />
+            <span>Главная</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setLocation("/catalog")}
+            className={`flex min-h-14 flex-col items-center justify-center gap-1 rounded-xl text-[11px] transition-colors ${isClubsSection ? "bg-secondary text-primary" : "text-muted-foreground"}`}
+          >
+            <Compass className="h-4 w-4" />
+            <span>Клубы</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setLocation("/library")}
+            className={`flex min-h-14 flex-col items-center justify-center gap-1 rounded-xl text-[11px] transition-colors ${isLibrarySection ? "bg-secondary text-primary" : "text-muted-foreground"}`}
+          >
+            <BookOpen className="h-4 w-4" />
+            <span>Чтение</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setLocation(profileHref)}
+            className={`flex min-h-14 flex-col items-center justify-center gap-1 rounded-xl text-[11px] transition-colors ${isProfileSection ? "bg-secondary text-primary" : "text-muted-foreground"}`}
+          >
+            <User className="h-4 w-4" />
+            <span>{profileLabel}</span>
+          </button>
+        </div>
+      </nav>
 
       <Dialog open={showComingSoon} onOpenChange={setShowComingSoon}>
         <DialogContent className="sm:max-w-md">

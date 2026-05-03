@@ -3,6 +3,10 @@ import { eq, and, desc } from 'drizzle-orm';
 import { 
   personalBooks,
   readingProgress,
+  readingHistory,
+  bookmarks,
+  notes,
+  bookReadingStatus,
   bookAccessLogs,
   analyticsEvents,
   type PersonalBook,
@@ -150,6 +154,25 @@ export class PersonalBooksRepository extends BaseRepository {
           .where(eq(readingProgress.bookId, id));
 
         await tx
+          .delete(bookmarks)
+          .where(eq(bookmarks.bookId, id));
+
+        await tx
+          .delete(notes)
+          .where(eq(notes.bookId, id));
+
+        await tx
+          .delete(bookReadingStatus)
+          .where(and(
+            eq(bookReadingStatus.bookId, id),
+            eq(bookReadingStatus.bookType, 'personal')
+          ));
+
+        await tx
+          .delete(readingHistory)
+          .where(eq(readingHistory.bookId, id));
+
+        await tx
           .delete(bookAccessLogs)
           .where(and(eq(bookAccessLogs.bookId, id), eq(bookAccessLogs.bookType, "personal")))
           .catch((error: unknown) => {
@@ -203,6 +226,25 @@ export class PersonalBooksRepository extends BaseRepository {
         await tx
           .delete(readingProgress)
           .where(eq(readingProgress.bookId, id));
+
+        await tx
+          .delete(bookmarks)
+          .where(eq(bookmarks.bookId, id));
+
+        await tx
+          .delete(notes)
+          .where(eq(notes.bookId, id));
+
+        await tx
+          .delete(bookReadingStatus)
+          .where(and(
+            eq(bookReadingStatus.bookId, id),
+            eq(bookReadingStatus.bookType, 'personal')
+          ));
+
+        await tx
+          .delete(readingHistory)
+          .where(eq(readingHistory.bookId, id));
 
         await tx
           .delete(bookAccessLogs)

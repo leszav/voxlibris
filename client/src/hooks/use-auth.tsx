@@ -165,6 +165,30 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   useEffect(() => {
     let isMounted = true;
+    let bootstrapTimeoutId: ReturnType<typeof setTimeout> | null = null;
+    let bootstrapIdleId: number | null = null;
+
+    const logBootstrapError = (error: unknown) => {
+      if (import.meta.env.DEV) {
+        console.error('Deferred auth bootstrap failed:', error);
+      }
+    };
+
+    const scheduleBackgroundAuthBootstrap = () => {
+      const run = () => {
+        if (!isMounted || hasExplicitLogoutRef.current) return;
+        fetchCurrentUser().catch(logBootstrapError);
+      };
+
+      const idleCallback = globalThis.window?.requestIdleCallback ?? null;
+
+      if (idleCallback) {
+        bootstrapIdleId = idleCallback(() => { run(); }, { timeout: 2500 });
+        return;
+      }
+
+      bootstrapTimeoutId = setTimeout(run, 2000);
+    };
 
     const initializeAuthState = async () => {
       // Синхронизируем токен из cookie при инициализации
@@ -174,12 +198,22 @@ export function AuthProvider({ children }: AuthProviderProps) {
         setIsLoading(true);
       }
 
-      await fetchCurrentUser();
+      if (authAPI.isAuthenticated()) {
+        await fetchCurrentUser();
+
+        if (isMounted && !isInitializedRef.current) {
+          isInitializedRef.current = true;
+          setIsLoading(false);
+        }
+        return;
+      }
 
       if (isMounted && !isInitializedRef.current) {
         isInitializedRef.current = true;
         setIsLoading(false);
       }
+
+      scheduleBackgroundAuthBootstrap();
     };
 
     void initializeAuthState();
@@ -223,6 +257,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
     return () => {
       isMounted = false;
       clearInterval(interval);
+      if (bootstrapTimeoutId) {
+        clearTimeout(bootstrapTimeoutId);
+      }
+      if (bootstrapIdleId !== null && globalThis.window?.cancelIdleCallback) {
+        globalThis.window.cancelIdleCallback(bootstrapIdleId);
+      }
       globalThis.removeEventListener('token-refreshed', handleTokenRefresh);
       globalThis.removeEventListener('account-status-changed', handleAccountStatusChanged);
     };

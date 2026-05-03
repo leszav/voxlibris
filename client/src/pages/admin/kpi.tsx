@@ -5,7 +5,8 @@ import { AdminLayout } from "../../components/layout/AdminLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui/select";
 import { Loader2, TrendingUp, Users, BookOpen, Target, BarChart3, Clock, Activity } from "lucide-react";
-import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell } from 'recharts';
+import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, PieChart, Pie, Cell } from 'recharts';
+import { Bar } from 'recharts/es6/cartesian/Bar';
 
 interface ProjectKPIs {
   // Пользовательские метрики

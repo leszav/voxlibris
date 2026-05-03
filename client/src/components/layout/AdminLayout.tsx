@@ -2,6 +2,7 @@ import { Link, useLocation } from "wouter";
 import {
   Users,
   BookOpen,
+  Tags,
   Users2,
   BarChart3,
   Settings,
@@ -12,7 +13,8 @@ import {
   TrendingUp,
   Home,
   Target,
-  Eye
+  Eye,
+  Headphones
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
@@ -23,22 +25,28 @@ import { cn } from "@/lib/utils";
 import { useEffect, useState } from "react";
 
 interface AdminLayoutProps {
-  children: React.ReactNode;
+  readonly children: React.ReactNode;
+}
+
+interface AdminSidebarProps {
+  readonly mobile?: boolean;
 }
 
 const navigation = [
   { name: "Панель управления", href: "/admin", icon: BarChart3 },
   { name: "Пользователи", href: "/admin/users", icon: Users },
   { name: "Книги", href: "/admin/books", icon: BookOpen },
+  { name: "Жанры", href: "/admin/genres", icon: Tags },
   { name: "Клубы", href: "/admin/clubs", icon: Users2 },
   { name: "Отчёты", href: "/admin/reports", icon: FileText },
   { name: "Аналитика", href: "/admin/analytics", icon: TrendingUp },
   { name: "KPI Метрики", href: "/admin/kpi", icon: Target },
   { name: "Аудит", href: "/admin/audit", icon: Eye },
+  { name: "Записи эфиров", href: "/admin/recordings", icon: Headphones },
   { name: "Настройки", href: "/admin/settings", icon: Settings },
 ];
 
-function AdminSidebar({ mobile = false }: { mobile?: boolean }) {
+function AdminSidebar({ mobile = false }: AdminSidebarProps) {
   const [location, setLocation] = useLocation();
   const { user, logout, isAuthenticated } = useAuth();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
@@ -143,7 +151,7 @@ function AdminSidebar({ mobile = false }: { mobile?: boolean }) {
   );
 }
 
-export function AdminLayout({ children }: AdminLayoutProps) {
+export function AdminLayout({ children }: Readonly<AdminLayoutProps>) {
   const { user, isAuthenticated } = useAuth();
   const [, setLocation] = useLocation();
 

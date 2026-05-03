@@ -168,6 +168,32 @@ export class UserRepository extends BaseRepository {
   }
 
   /**
+   * Обновление email пользователя с переинициализацией подтверждения
+   */
+  async updateUserEmail(userId: string, email: string, confirmationToken: string): Promise<User | undefined> {
+    this.validateRequired(userId, 'userId');
+    this.validateRequired(email, 'email');
+    this.validateRequired(confirmationToken, 'confirmationToken');
+
+    try {
+      const result = await this.db
+        .update(users)
+        .set({
+          email,
+          emailConfirmed: false,
+          confirmationToken,
+        })
+        .where(eq(users.id, userId))
+        .returning();
+
+      return this.getFirstResult(result);
+    } catch (error) {
+      this.logError('updateUserEmail', error);
+      return undefined;
+    }
+  }
+
+  /**
    * Обновление времени последней активности
    */
   async updateUserLastActivity(userId: string): Promise<User | undefined> {
@@ -224,9 +250,8 @@ export class UserRepository extends BaseRepository {
     }
   }
 
-  async updateUserConfirmationToken(userId: string, token: string): Promise<User | undefined> {
+  async updateUserConfirmationToken(userId: string, token: string | null): Promise<User | undefined> {
     this.validateRequired(userId, 'userId');
-    this.validateRequired(token, 'token');
     
     try {
       const result = await this.db

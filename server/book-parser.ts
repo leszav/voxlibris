@@ -38,6 +38,8 @@ export interface BookMetadata {
   author: string;
   description?: string;
   isbn?: string;
+  genre?: string;
+  genres?: string[];
   language?: string;
   publisher?: string;
   publishDate?: string;
@@ -297,6 +299,7 @@ export class EPUBParser extends BaseBookParser {
     const author = this.extractMetaValue(metadata['dc:creator'] ?? metadata.creator);
     const description = this.extractMetaValue(metadata['dc:description'] ?? metadata.description);
     const isbn = this.extractMetaValue(metadata['dc:identifier'] ?? metadata.identifier);
+    const genres = this.extractMetaValues(metadata['dc:subject'] ?? metadata.subject);
     const language = this.extractMetaValue(metadata['dc:language'] ?? metadata.language);
     const publisher = this.extractMetaValue(metadata['dc:publisher'] ?? metadata.publisher);
     const publishDate = this.extractMetaValue(metadata['dc:date'] ?? metadata.date);
@@ -320,6 +323,8 @@ export class EPUBParser extends BaseBookParser {
       author: author || 'Unknown Author',
       description,
       isbn,
+      genre: genres[0],
+      genres,
       language,
       publisher,
       publishDate,
@@ -350,6 +355,31 @@ export class EPUBParser extends BaseBookParser {
     }
 
     return undefined;
+  }
+
+  private extractMetaValues(metaValue: unknown): string[] {
+    if (!metaValue) return [];
+
+    const values: string[] = [];
+    const source = Array.isArray(metaValue) ? metaValue : [metaValue];
+
+    for (const item of source) {
+      if (typeof item === 'string') {
+        const normalized = item.trim();
+        if (normalized) values.push(normalized);
+        continue;
+      }
+
+      if (typeof item === 'object' && item !== null && '_' in item) {
+        const text = (item as { _: unknown })._;
+        if (typeof text === 'string') {
+          const normalized = text.trim();
+          if (normalized) values.push(normalized);
+        }
+      }
+    }
+
+    return Array.from(new Set(values));
   }
 
   private async findCoverImage(
@@ -963,6 +993,7 @@ export class FB2Parser extends BaseBookParser {
     const author = this.extractAuthorName(titleInfo?.author);
     const description_text = this.extractFB2Text(titleInfo?.annotation);
     const isbn = this.extractFB2Text(publishInfo?.isbn);
+    const genres = this.extractFB2Values(titleInfo?.genre);
     const language = (titleInfo?.lang as string[] | undefined)?.[0]
       || (titleInfo?.['src-lang'] as string[] | undefined)?.[0];
     const publisher = this.extractFB2Text(publishInfo?.publisher);
@@ -997,6 +1028,8 @@ export class FB2Parser extends BaseBookParser {
       author: author || 'Unknown Author',
       description: description_text,
       isbn,
+      genre: genres[0],
+      genres,
       language,
       publisher,
       publishDate,
@@ -1016,6 +1049,27 @@ export class FB2Parser extends BaseBookParser {
     }
 
     return undefined;
+  }
+
+  private extractFB2Values(element: unknown): string[] {
+    if (!Array.isArray(element)) return [];
+
+    const values: string[] = [];
+
+    for (const item of element) {
+      if (typeof item === 'string') {
+        const normalized = item.trim();
+        if (normalized) values.push(normalized);
+        continue;
+      }
+
+      if (typeof item === 'object' && item !== null) {
+        const text = this.extractTextFromFB2Element(item).trim();
+        if (text) values.push(text);
+      }
+    }
+
+    return Array.from(new Set(values));
   }
 
   private extractTextFromFB2Element(element: unknown): string {
@@ -1136,22 +1190,136 @@ export class FB2Parser extends BaseBookParser {
           return;
         }
 
-        const chapterContent = this.extractSectionContent(section);
-        if (chapterContent.trim()) {
-          // Попытаться извлечь заголовок
-          const title = this.extractSectionTitle(section) || `Chapter ${chapterNumber}`;
-
-          chapters.push({
-            chapterNumber: chapterNumber++,
-            title,
-            content: chapterContent,
-            wordCount: this.countWords(chapterContent),
-          });
-        }
+        chapterNumber = this.appendSectionChapters(section, chapters, chapterNumber, []);
       });
     });
 
     return chapters;
+  }
+
+  private appendSectionChapters(
+    section: XmlElement,
+    chapters: BookChapter[],
+    chapterNumber: number,
+    ancestorTitles: string[],
+  ): number {
+    if (chapters.length >= MAX_BOOK_CHAPTERS) {
+      return chapterNumber;
+    }
+
+    const sectionTitle = this.extractSectionTitle(section);
+    const childSections = asArray<XmlElement>(section?.section);
+    const directContent = this.extractSectionOwnContent(section);
+    const directWordCount = this.countWords(directContent);
+    const nextAncestorTitles = sectionTitle?.trim()
+      ? [...ancestorTitles, sectionTitle.trim()]
+      : ancestorTitles;
+
+    if (this.shouldSplitSectionIntoChildChapters(section, childSections, directWordCount)) {
+      const hasMeaningfulIntro = directWordCount >= 80;
+
+      if (hasMeaningfulIntro) {
+        const title = sectionTitle || this.buildFallbackSectionTitle(ancestorTitles, chapterNumber, true);
+        chapters.push({
+          chapterNumber,
+          title,
+          content: directContent,
+          wordCount: directWordCount,
+        });
+        chapterNumber += 1;
+      }
+
+      for (const childSection of childSections) {
+        if (chapters.length >= MAX_BOOK_CHAPTERS) {
+          break;
+        }
+
+        chapterNumber = this.appendSectionChapters(childSection, chapters, chapterNumber, nextAncestorTitles);
+      }
+
+      return chapterNumber;
+    }
+
+    const chapterContent = this.extractSectionContent(section);
+    if (chapterContent.trim()) {
+      const title = sectionTitle || this.buildFallbackSectionTitle(ancestorTitles, chapterNumber, true);
+
+      chapters.push({
+        chapterNumber,
+        title,
+        content: chapterContent,
+        wordCount: this.countWords(chapterContent),
+      });
+      return chapterNumber + 1;
+    }
+
+    return chapterNumber;
+  }
+
+  private shouldSplitSectionIntoChildChapters(
+    section: XmlElement,
+    childSections: XmlElement[],
+    directWordCount: number,
+  ): boolean {
+    if (childSections.length === 0) {
+      return false;
+    }
+
+    const titledChildSections = childSections.filter((childSection) => {
+      const title = this.extractSectionTitle(childSection);
+      return Boolean(title && title.trim().length > 0);
+    });
+
+    if (titledChildSections.length === 0) {
+      return false;
+    }
+
+    const sectionTitle = this.extractSectionTitle(section);
+    const isContainerLike = directWordCount < 80;
+    const nonStructuralChildTitles = titledChildSections.filter((childSection) => {
+      const title = this.extractSectionTitle(childSection);
+      return title ? !this.isStructuralSubsectionTitle(title) : false;
+    });
+    const structuralChildTitles = titledChildSections.filter((childSection) => {
+      const title = this.extractSectionTitle(childSection);
+      return title ? this.isStructuralSubsectionTitle(title) : false;
+    });
+
+    if (childSections.length >= 2 && isContainerLike && nonStructuralChildTitles.length >= 2) {
+      return true;
+    }
+
+    if (childSections.length >= 2 && isContainerLike && structuralChildTitles.length >= 1) {
+      return true;
+    }
+
+    if (childSections.length === 1 && !sectionTitle && directWordCount < 30 && nonStructuralChildTitles.length === 1) {
+      return true;
+    }
+
+    return false;
+  }
+
+  private isStructuralSubsectionTitle(title: string): boolean {
+    const normalized = title.trim().replaceAll(/\s+/g, ' ').toLowerCase();
+
+    if (!normalized) {
+      return true;
+    }
+
+    return /^(?:\d+|\d+[.)]|[ivxlcdm]+|[ivxlcdm]+[.)]|(?:часть|глава|книга|том|раздел|акт)\s+(?:\d+|[ivxlcdm]+|первая|вторая|третья|четвертая|четвёртая|пятая|шестая|седьмая|восьмая|девятая|десятая|одиннадцатая|двенадцатая|последняя)|(?:пролог|эпилог))$/i.test(normalized);
+  }
+
+  private buildFallbackSectionTitle(ancestorTitles: string[], chapterNumber: number, preferIntroLabel = false): string {
+    const nearestAncestorTitle = [...ancestorTitles]
+      .reverse()
+      .find((title) => title.trim().length > 0);
+
+    if (nearestAncestorTitle) {
+      return preferIntroLabel ? `${nearestAncestorTitle} — вступление` : nearestAncestorTitle;
+    }
+
+    return `Chapter ${chapterNumber}`;
   }
 
   private extractSectionTitle(section: XmlElement): string | undefined {
@@ -1225,6 +1393,51 @@ export class FB2Parser extends BaseBookParser {
     const subsections = section?.section as XmlElement[] | undefined ?? [];
     subsections.forEach((subsection) => {
       content += this.extractSectionContent(subsection);
+    });
+
+    return content;
+  }
+
+  private extractSectionOwnContent(section: XmlElement): string {
+    let content = '';
+
+    const sectionTitle = this.extractSectionTitle(section);
+    if (sectionTitle?.trim()) {
+      content += `<h3>${this.escapeHtml(sectionTitle)}</h3>\n`;
+    }
+
+    const paragraphs = section?.p as XmlElement[] | undefined ?? [];
+    paragraphs.forEach((paragraph) => {
+      const paragraphText = this.extractTextFromFB2Element(paragraph);
+      if (paragraphText.trim()) {
+        content += `<p>${this.escapeHtml(paragraphText)}</p>\n`;
+      }
+    });
+
+    const epigraphs = section?.epigraph as XmlElement[] | undefined ?? [];
+    epigraphs.forEach((epigraph) => {
+      const epigraphText = this.extractTextFromFB2Element(epigraph);
+      if (epigraphText.trim()) {
+        content += `<blockquote class="epigraph">${this.escapeHtml(epigraphText)}</blockquote>\n`;
+      }
+    });
+
+    const poems = section?.poem as XmlElement[] | undefined ?? [];
+    poems.forEach((poem) => {
+      content += '<div class="poem">';
+      const stanzas = poem?.stanza as XmlElement[] | undefined ?? [];
+      stanzas.forEach((stanza) => {
+        content += '<div class="stanza">';
+        const verses = stanza?.v as XmlElement[] | undefined ?? [];
+        verses.forEach((verse) => {
+          const verseText = this.extractTextFromFB2Element(verse);
+          if (verseText.trim()) {
+            content += `<p class="verse">${this.escapeHtml(verseText)}</p>`;
+          }
+        });
+        content += '</div>';
+      });
+      content += '</div>\n';
     });
 
     return content;

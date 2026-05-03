@@ -4,7 +4,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Loader2, BookOpen, Star } from "lucide-react";
-import { authFetch } from "@/lib/queryClient";
+import { apiRequest } from "@/lib/queryClient";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -46,6 +46,17 @@ const bookshelfStatuses = [
   { id: "abandoned", label: "Брошено", color: "bg-gray-500" },
 ];
 
+function parsePlannedYear(notes: string | null): number | null {
+  if (!notes) return null;
+  try {
+    const parsed = JSON.parse(notes) as { plannedYear?: number };
+    const year = parsed.plannedYear;
+    return typeof year === "number" && year > 1900 ? year : null;
+  } catch {
+    return null;
+  }
+}
+
 export function Bookshelf({ userId }: BookshelfProps) {
   const [activeStatus, setActiveStatus] = React.useState("reading");
   const { toast } = useToast();
@@ -54,31 +65,20 @@ export function Bookshelf({ userId }: BookshelfProps) {
   const { data: booksWithStatus = [], isLoading } = useQuery<BookWithStatus[]>({
     queryKey: ["reading-status", userId, activeStatus],
     queryFn: async () => {
-      const response = await authFetch(`/api/reading-status?status=${activeStatus}`, {
-        headers: {
-          'Content-Type': 'application/json'
-        }
-      });
-      if (!response.ok) return [];
-      return response.json();
+      return apiRequest<BookWithStatus[]>(`/api/reading-status?status=${activeStatus}`);
     },
   });
 
   const updateStatusMutation = useMutation({
     mutationFn: async ({ bookId, bookType, newStatus }: { bookId: string; bookType: string; newStatus: string }) => {
-      const response = await authFetch('/api/reading-status', {
+      return apiRequest('/api/reading-status', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
         body: JSON.stringify({
           bookId,
           bookType,
           status: newStatus,
         }),
       });
-      if (!response.ok) throw new Error('Failed to update status');
-      return response.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["reading-status"] });
@@ -141,6 +141,7 @@ export function Bookshelf({ userId }: BookshelfProps) {
           {booksWithStatus.map((item) => {
             const book = item.book;
             if (!book) return null;
+            const plannedYear = item.status === 'planned' ? parsePlannedYear(item.notes) : null;
             
             return (
               <Card key={item.id} className="hover:shadow-md transition-shadow">
@@ -186,32 +187,39 @@ export function Bookshelf({ userId }: BookshelfProps) {
                           <p className="text-xs text-muted-foreground mt-1">{item.progress}%</p>
                         </div>
                       )}
+                      {plannedYear && item.status === 'planned' && (
+                        <p className="mt-2 text-xs text-muted-foreground">
+                          Хочу прочитать в {plannedYear} году
+                        </p>
+                      )}
                       
                       {/* Меню смены статуса */}
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="sm" className="mt-2 h-7 text-xs">
-                            Изменить статус
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent>
-                          {bookshelfStatuses
-                            .filter(s => s.id !== item.status)
-                            .map((status) => (
-                              <DropdownMenuItem
-                                key={status.id}
-                                onClick={() => updateStatusMutation.mutate({
-                                  bookId: item.bookId,
-                                  bookType: item.bookType,
-                                  newStatus: status.id,
-                                })}
-                              >
-                                <div className={`w-2 h-2 rounded-full ${status.color} mr-2`} />
-                                {status.label}
-                              </DropdownMenuItem>
-                            ))}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
+                      {item.status !== 'abandoned' && (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="sm" className="mt-2 h-7 text-xs">
+                              Изменить статус
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent>
+                            {bookshelfStatuses
+                              .filter(s => s.id !== item.status)
+                              .map((status) => (
+                                <DropdownMenuItem
+                                  key={status.id}
+                                  onClick={() => updateStatusMutation.mutate({
+                                    bookId: item.bookId,
+                                    bookType: item.bookType,
+                                    newStatus: status.id,
+                                  })}
+                                >
+                                  <div className={`w-2 h-2 rounded-full ${status.color} mr-2`} />
+                                  {status.label}
+                                </DropdownMenuItem>
+                              ))}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      )}
                     </div>
                   </div>
                 </CardContent>

@@ -2,15 +2,19 @@ import { useEffect, useRef, useState } from 'react';
 import { useLocation, useRoute, Link } from 'wouter';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { useAnalytics } from '@/hooks/use-analytics';
 import { useInvitationByToken, useAcceptInvitation, useDeclineInvitation } from '@/hooks/use-clubs';
 import { useAuth } from '@/hooks/use-auth';
+import { getMobileAnalyticsContext } from '@/lib/mobile-analytics';
 import { useToast } from '@/hooks/use-toast';
+import { reachYandexGoal } from '@/lib/yandexMetrika';
 import { Mic, CheckCircle, XCircle, AlertCircle, Loader2, Users } from 'lucide-react';
 
 export default function InviteAccept() {
   const [, params] = useRoute('/invite/:token');
   const [, setLocation] = useLocation();
   const { user, isAuthenticated } = useAuth();
+  const analytics = useAnalytics();
   const { toast } = useToast();
   const token = params?.token || '';
   
@@ -60,6 +64,19 @@ export default function InviteAccept() {
 
     try {
       const result = await acceptInvitation.mutateAsync({ token });
+      const joinedClubId = result.club?.id || invitation.club?.id;
+      const analyticsContext = getMobileAnalyticsContext({ source: 'invite_accept' });
+
+      if (joinedClubId) {
+        analytics.trackClubJoin(joinedClubId, analyticsContext ?? undefined);
+      }
+
+      if (analyticsContext) {
+        reachYandexGoal('mobile_club_join', {
+          clubId: joinedClubId,
+          ...analyticsContext,
+        });
+      }
       
       setActionTaken('accepted');
       toast({

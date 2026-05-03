@@ -4,9 +4,16 @@ export interface ReaderPositionPayload {
   scrollHeight?: number;
   clientHeight?: number;
   timestamp?: number;
+  textOffset?: number;
 }
 
 export interface ReaderProgressPayload {
+  currentChapter: number;
+  currentPosition: string;
+  progress: number;
+}
+
+export interface ReaderProgressSnapshot {
   currentChapter: number;
   currentPosition: string;
   progress: number;
@@ -20,6 +27,7 @@ export interface ReaderProgressBuildInput {
   clientHeight: number;
   progressOverride?: number;
   timestamp?: number;
+  textOffset?: number;
 }
 
 export function serializeReaderPosition(position: ReaderPositionPayload): string {
@@ -40,6 +48,7 @@ export function parseReaderPosition(raw: string | null | undefined): ReaderPosit
       scrollHeight: typeof parsed.scrollHeight === "number" ? parsed.scrollHeight : undefined,
       clientHeight: typeof parsed.clientHeight === "number" ? parsed.clientHeight : undefined,
       timestamp: typeof parsed.timestamp === "number" ? parsed.timestamp : undefined,
+      textOffset: typeof parsed.textOffset === "number" ? parsed.textOffset : undefined,
     };
   } catch {
     return null;
@@ -90,6 +99,7 @@ export function createReaderProgressPayload(input: ReaderProgressBuildInput): Re
     clientHeight,
     progressOverride,
     timestamp = Date.now(),
+    textOffset,
   } = input;
 
   const progress = typeof progressOverride === "number"
@@ -104,7 +114,16 @@ export function createReaderProgressPayload(input: ReaderProgressBuildInput): Re
       scrollHeight,
       clientHeight,
       timestamp,
+      textOffset,
     }),
     progress,
   };
+}
+
+export function getReaderProgressSignature(progress: ReaderProgressSnapshot): string {
+  return [
+    progress.currentChapter,
+    progress.progress,
+    progress.currentPosition,
+  ].join("|");
 }

@@ -199,7 +199,7 @@ export function EditProfileDialog({ profile, children, onSave, isLoading }: Edit
         <DialogTrigger asChild>
           {children}
         </DialogTrigger>
-      <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-h-[90vh] max-w-[calc(100vw-2rem)] overflow-y-auto sm:max-w-[500px]">
         <DialogHeader>
           <DialogTitle>Редактировать профиль</DialogTitle>
         </DialogHeader>
@@ -317,14 +317,14 @@ export function EditProfileDialog({ profile, children, onSave, isLoading }: Edit
                         </div>
                       )}
                     </div>
-                    <div className="flex gap-2">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        asChild
-                        className="flex-1"
-                      >
+                        <div className="flex flex-col gap-2 sm:flex-row">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            asChild
+                            className="w-full sm:flex-1"
+                          >
                         <label className="cursor-pointer">
                           <Upload className="w-4 h-4 mr-2" />
                           Загрузить файл
@@ -394,8 +394,8 @@ export function EditProfileDialog({ profile, children, onSave, isLoading }: Edit
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Любимые жанры</FormLabel>
-                  <div className="space-y-2">
-                    <div className="flex flex-wrap gap-2">
+                    <div className="space-y-2">
+                      <div className="flex flex-wrap gap-2">
                       {currentGenres.map((genre) => (
                         <Badge key={genre} variant="secondary" className="pr-1">
                           {genre}
@@ -412,10 +412,10 @@ export function EditProfileDialog({ profile, children, onSave, isLoading }: Edit
                       ))}
                     </div>
                     
-                    <div className="flex gap-2">
-                      <Input
-                        placeholder="Добавить жанр"
-                        value={newGenre}
+                      <div className="flex gap-2">
+                        <Input
+                          placeholder="Добавить жанр"
+                          value={newGenre}
                         onChange={(e) => setNewGenre(e.target.value)}
                         onKeyDown={(e) => {
                           if (e.key === "Enter") {
@@ -424,10 +424,10 @@ export function EditProfileDialog({ profile, children, onSave, isLoading }: Edit
                           }
                         }}
                       />
-                      <Button type="button" size="sm" onClick={handleAddCustomGenre}>
-                        <Plus className="h-4 w-4" />
-                      </Button>
-                    </div>
+                        <Button type="button" size="sm" onClick={handleAddCustomGenre} className="shrink-0">
+                          <Plus className="h-4 w-4" />
+                        </Button>
+                      </div>
 
                     <div className="flex flex-wrap gap-1">
                       {commonGenres.map((genre) => (
@@ -453,7 +453,7 @@ export function EditProfileDialog({ profile, children, onSave, isLoading }: Edit
               control={form.control}
               name="isReader"
               render={({ field }) => (
-                <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4">
+                <FormItem className="flex flex-col gap-3 rounded-lg border p-4 sm:flex-row sm:items-center sm:justify-between">
                   <div className="space-y-0.5">
                     <FormLabel className="text-base">Статус читателя</FormLabel>
                     <div className="text-sm text-muted-foreground">
@@ -470,11 +470,11 @@ export function EditProfileDialog({ profile, children, onSave, isLoading }: Edit
               )}
             />
 
-            <div className="flex justify-end space-x-2 pt-4">
-              <Button type="button" variant="outline" onClick={() => setOpen(false)}>
+            <div className="flex flex-col gap-2 pt-4 sm:flex-row sm:justify-end sm:space-x-0">
+              <Button type="button" variant="outline" onClick={() => setOpen(false)} className="w-full sm:w-auto">
                 Отмена
               </Button>
-              <Button type="submit" disabled={isLoading}>
+              <Button type="submit" disabled={isLoading} className="w-full sm:w-auto">
                 {isLoading ? "Сохранение..." : "Сохранить"}
               </Button>
             </div>

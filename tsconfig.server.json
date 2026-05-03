@@ -10,7 +10,6 @@
     "rootDir": ".",
     "noEmit": false,
     "declaration": false,
-    "baseUrl": ".",
     "paths": {
       "@shared/*": ["./shared/*"]
     }

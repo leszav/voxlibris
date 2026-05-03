@@ -53,6 +53,20 @@ class SessionAnalyticsService {
   private readonly MAX_LISTENER_EVENTS_PER_SESSION = 2000;
   private readonly SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 
+  private ensureSessionTracking(sessionId: string): Set<ListenerEvent> {
+    const existingListeners = this.activeSessions.get(sessionId);
+    if (existingListeners) {
+      return existingListeners;
+    }
+
+    const listeners = new Set<ListenerEvent>();
+    this.activeSessions.set(sessionId, listeners);
+    this.sessionStartedAt.set(sessionId, Date.now());
+    this.enforceSessionLimit();
+
+    return listeners;
+  }
+
   private cleanupStaleSessions(nowMs: number = Date.now()): void {
     for (const [sessionId, startedAt] of this.sessionStartedAt.entries()) {
       if (nowMs - startedAt > this.SESSION_TTL_MS) {
@@ -119,9 +133,7 @@ class SessionAnalyticsService {
       });
 
       // Инициализируем хранилище для отслеживания слушателей
-      this.activeSessions.set(sessionId, new Set());
-      this.sessionStartedAt.set(sessionId, Date.now());
-      this.enforceSessionLimit();
+      this.ensureSessionTracking(sessionId);
 
       logger.info(`Session analytics initialized for session ${sessionId}`);
     } catch (error) {
@@ -360,9 +372,14 @@ class SessionAnalyticsService {
    */
   async finalizeSessionAnalytics(sessionId: string): Promise<SessionMetrics> {
     try {
-      const listeners = this.activeSessions.get(sessionId);
-      if (!listeners) {
-        throw new Error(`Session ${sessionId} not found in active sessions`);
+      const analytics = await repositories.sessionAnalytics.getSessionAnalytics(sessionId);
+      if (!analytics) {
+        throw new Error(`Analytics not found for session ${sessionId}`);
+      }
+
+      const listeners = this.activeSessions.get(sessionId) ?? new Set<ListenerEvent>();
+      if (!this.activeSessions.has(sessionId)) {
+        logger.warn({ sessionId }, 'Finalizing session analytics without in-memory active session state');
       }
 
       // Рассчитываем метрики

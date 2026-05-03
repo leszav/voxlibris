@@ -1,0 +1,232 @@
+# Карта зависимостей репозитория
+
+Сгенерировано: 2026-04-29
+
+## Вывод
+
+Для Voxlibris визуализация связей стоит внедрения. В репозитории 333 внутренних модулей и 1196 внутренних импортов между `client`, `server` и `shared`; без графа трудно быстро увидеть реальные границы доменов и точки высокой связности.
+
+Практичный уровень для проекта - не полный граф файлов, а свернутые Mermaid-графы по слоям и зонам. Полный граф получается слишком шумным, а эти два среза показывают главные архитектурные зависимости и остаются читаемыми в Markdown.
+
+## Проверки
+
+- Циклические зависимости: 0.
+- Неразрешенные импорты в отчете dependency-cruiser: 0.
+- `client -> server`: 0.
+- `server -> client`: 0.
+- `shared -> client/server`: 0.
+
+## Верхний уровень
+
+```mermaid
+flowchart LR
+%% Voxlibris top-level dependencies
+
+n0["client<br/>232 files"]
+n1["server<br/>100 files"]
+n2["shared<br/>1 files"]
+
+n0 -->|16| n2
+n1 -->|58| n2
+```
+
+## Зоны
+
+```mermaid
+flowchart LR
+%% Voxlibris feature-zone dependencies
+
+n0["client/api<br/>1 files"]
+n1["client/app-shell<br/>6 files"]
+n2["client/components/admin<br/>4 files"]
+n3["client/components/chat<br/>1 files"]
+n4["client/components/club<br/>8 files"]
+n5["client/components/guest<br/>2 files"]
+n6["client/components/illustrations<br/>1 files"]
+n7["client/components/layout<br/>3 files"]
+n8["client/components/profile<br/>2 files"]
+n9["client/components/reader<br/>28 files"]
+n10["client/components/root<br/>4 files"]
+n11["client/components/studio<br/>17 files"]
+n12["client/components/ui<br/>68 files"]
+n13["client/hooks<br/>24 files"]
+n14["client/lib<br/>29 files"]
+n15["client/pages/admin<br/>11 files"]
+n16["client/pages/auth<br/>5 files"]
+n17["client/pages/clubs<br/>2 files"]
+n18["client/pages/root<br/>14 files"]
+n19["client/styles<br/>1 files"]
+n20["client/types<br/>1 files"]
+n21["server/analytics<br/>1 files"]
+n22["server/audio<br/>2 files"]
+n23["server/config<br/>1 files"]
+n24["server/domain-core<br/>9 files"]
+n25["server/lib<br/>17 files"]
+n26["server/middleware<br/>1 files"]
+n27["server/repositories<br/>25 files"]
+n28["server/routes<br/>26 files"]
+n29["server/runtime<br/>6 files"]
+n30["server/services<br/>8 files"]
+n31["server/websocket<br/>4 files"]
+n32["shared/schema<br/>1 files"]
+
+n0 -->|1| n14
+n1 -->|2| n9
+n1 -->|1| n10
+n1 -->|3| n12
+n1 -->|1| n13
+n1 -->|2| n14
+n1 -->|11| n15
+n1 -->|5| n16
+n1 -->|2| n17
+n1 -->|13| n18
+n1 -->|1| n19
+n2 -->|13| n12
+n2 -->|4| n14
+n3 -->|3| n12
+n3 -->|2| n13
+n3 -->|1| n32
+n4 -->|1| n0
+n4 -->|49| n12
+n4 -->|12| n13
+n4 -->|4| n14
+n4 -->|1| n32
+n5 -->|4| n12
+n5 -->|3| n13
+n7 -->|1| n5
+n7 -->|1| n10
+n7 -->|11| n12
+n7 -->|4| n13
+n7 -->|4| n14
+n8 -->|12| n12
+n8 -->|2| n13
+n8 -->|1| n14
+n9 -->|1| n3
+n9 -->|4| n11
+n9 -->|18| n12
+n9 -->|19| n13
+n9 -->|19| n14
+n9 -->|3| n32
+n10 -->|1| n12
+n10 -->|1| n13
+n10 -->|1| n14
+n11 -->|21| n12
+n11 -->|6| n13
+n11 -->|20| n14
+n12 -->|12| n13
+n12 -->|53| n14
+n13 -->|35| n14
+n13 -->|7| n32
+n14 -->|1| n11
+n14 -->|2| n32
+n15 -->|4| n2
+n15 -->|11| n7
+n15 -->|81| n12
+n15 -->|10| n13
+n15 -->|12| n14
+n16 -->|21| n12
+n16 -->|3| n13
+n16 -->|1| n14
+n17 -->|2| n7
+n17 -->|12| n12
+n17 -->|3| n13
+n18 -->|1| n3
+n18 -->|8| n4
+n18 -->|1| n6
+n18 -->|11| n7
+n18 -->|2| n8
+n18 -->|2| n9
+n18 -->|2| n10
+n18 -->|5| n11
+n18 -->|62| n12
+n18 -->|29| n13
+n18 -->|10| n14
+n18 -->|2| n32
+n21 -->|1| n29
+n21 -->|1| n32
+n22 -->|1| n25
+n24 -->|6| n25
+n24 -->|1| n27
+n24 -->|2| n29
+n24 -->|1| n30
+n24 -->|2| n32
+n25 -->|2| n24
+n25 -->|2| n27
+n25 -->|3| n29
+n25 -->|3| n32
+n26 -->|1| n25
+n26 -->|1| n27
+n27 -->|1| n24
+n27 -->|4| n25
+n27 -->|1| n29
+n27 -->|28| n32
+n28 -->|1| n21
+n28 -->|28| n24
+n28 -->|45| n25
+n28 -->|1| n26
+n28 -->|18| n27
+n28 -->|24| n29
+n28 -->|15| n30
+n28 -->|16| n32
+n29 -->|1| n23
+n29 -->|4| n24
+n29 -->|5| n25
+n29 -->|2| n27
+n29 -->|17| n28
+n29 -->|1| n30
+n29 -->|4| n31
+n30 -->|1| n24
+n30 -->|8| n25
+n30 -->|9| n27
+n30 -->|4| n32
+n31 -->|2| n22
+n31 -->|2| n24
+n31 -->|7| n25
+n31 -->|2| n27
+n31 -->|2| n29
+n31 -->|1| n30
+n31 -->|4| n32
+```
+
+## Самые связные файлы
+
+Исходящие внутренние импорты:
+
+- `client/src/App.tsx`: 40
+- `client/src/components/reader/ClubReader.tsx`: 37
+- `client/src/pages/club-details.tsx`: 31
+- `server/index.ts`: 31
+- `client/src/components/reader/ReaderWorkspace.tsx`: 26
+- `server/repositories/index.ts`: 24
+- `client/src/pages/library.tsx`: 22
+- `server/routes.ts`: 22
+
+Входящие внутренние импорты:
+
+- `client/src/components/ui/button.tsx`: 86
+- `shared/schema.ts`: 74
+- `client/src/lib/utils.ts`: 69
+- `server/lib/logger.ts`: 51
+- `client/src/components/ui/card.tsx`: 39
+- `client/src/lib/queryClient.ts`: 36
+- `client/src/components/ui/input.tsx`: 33
+- `client/src/hooks/use-toast.ts`: 32
+
+## Как обновить
+
+```bash
+pnpm run deps:graph
+```
+
+Команда строит JSON через dependency-cruiser и затем обновляет:
+
+- `docs/02-architecture/dependency-graphs/top-level.mmd`
+- `docs/02-architecture/dependency-graphs/feature-zones.mmd`
+- `docs/02-architecture/repository-dependency-map.md`
+
+## Инструменты
+
+- [dependency-cruiser](https://github.com/sverweij/dependency-cruiser/blob/main/doc/cli.md) выбран как основной инструмент: он поддерживает TypeScript, правила зависимостей и Mermaid/DOT-репортеры.
+- [Madge](https://github.com/pahen/madge) оставлен как альтернативный быстрый инструмент для точечных проверок циклов.
+- [Nx Graph](https://nx.dev/docs/features/explore-graph) не внедрялся: Voxlibris сейчас не оформлен как Nx workspace, поэтому это было бы слишком тяжелым изменением ради одной карты зависимостей.
+- [Graphviz](https://graphviz.org/doc/info/command.html) полезен для SVG, но в текущем окружении `dot` не установлен; Mermaid дает переносимый результат без системной зависимости.

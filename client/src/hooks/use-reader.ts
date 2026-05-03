@@ -2,6 +2,15 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { apiRequest } from "../lib/queryClient";
 import type { Bookmark, Note } from "@shared/schema";
+import {
+  normalizeReaderSettings,
+  type ReaderSettings,
+} from "@/lib/reader-settings";
+import {
+  getFreshestReaderProgress,
+  loadReaderProgressFromStorage,
+  saveReaderProgressToStorage,
+} from "@/lib/reader-local-progress";
 
 interface BookContentResponse {
   title?: string;
@@ -19,8 +28,37 @@ interface ReadingProgress {
   progress: number;
 }
 
+interface UpdateProgressPayload {
+  currentChapter: number;
+  currentPosition: string;
+  progress: number;
+  clubId?: string;
+}
+
+interface UpdateProgressContext {
+  previousProgress?: ReadingProgress;
+}
+
+interface ReaderSettingsResponse {
+  settings: ReaderSettings;
+}
+
+interface UpdateReaderSettingsContext {
+  previousSettings?: ReaderSettings;
+}
+
+export interface UserBookmarkListItem extends Bookmark {
+  bookTitle: string | null;
+  bookAuthor: string | null;
+  bookCoverUrl: string | null;
+}
+
 interface BookmarksResponse {
   bookmarks: Bookmark[];
+}
+
+interface UserBookmarksResponse {
+  bookmarks: UserBookmarkListItem[];
 }
 
 interface BookmarkResponse {
@@ -69,18 +107,25 @@ export function useReadingProgress(bookId: string) {
   return useQuery({
     queryKey: ["/api/v1/books", bookId, "progress"],
     queryFn: async () => {
+      const localProgress = loadReaderProgressFromStorage({
+        type: "personal",
+        bookId,
+      });
+
       try {
         const response = await apiRequest<ReadingProgress>(`/api/v1/books/${bookId}/progress`);
-        return response;
+        return getFreshestReaderProgress(response, localProgress) ?? response;
       } catch (error: unknown) {
         // Если прогресс не найден, возвращаем начальные значения
         const err = error as { status?: number };
         if (err?.status === 404) {
-          return {
+          const defaultProgress = {
             currentChapter: 1,
             currentPosition: "",
             progress: 0
           };
+
+          return getFreshestReaderProgress(defaultProgress, localProgress) ?? defaultProgress;
         }
         throw error;
       }
@@ -92,27 +137,128 @@ export function useReadingProgress(bookId: string) {
 // Обновление прогресса чтения
 export function useUpdateProgress(bookId: string) {
   const queryClient = useQueryClient();
+  const progressQueryKey = ["/api/v1/books", bookId, "progress"] as const;
 
   return useMutation({
-    mutationFn: async (data: {
-      currentChapter: number;
-      currentPosition: string;
-      progress: number;
-      clubId?: string;
-    }) => {
+    mutationFn: async (data: UpdateProgressPayload) => {
       const response = await apiRequest(`/api/v1/books/${bookId}/progress`, {
         method: "PUT",
         body: JSON.stringify(data),
       });
       return response;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: ["/api/v1/books", bookId, "progress"],
-      });
+    onMutate: async (data): Promise<UpdateProgressContext> => {
+      await queryClient.cancelQueries({ queryKey: progressQueryKey });
+      const previousProgress = queryClient.getQueryData<ReadingProgress>(progressQueryKey);
+
+      saveReaderProgressToStorage(
+        {
+          type: "personal",
+          bookId,
+        },
+        data,
+      );
+
+      queryClient.setQueryData<ReadingProgress>(progressQueryKey, (current) => ({
+        ...current,
+        currentChapter: data.currentChapter,
+        currentPosition: data.currentPosition,
+        progress: data.progress,
+      }));
+
+      return { previousProgress };
+    },
+    onError: (_error, _data, context) => {
+      if (context?.previousProgress) {
+        queryClient.setQueryData(progressQueryKey, context.previousProgress);
+      }
+    },
+    onSuccess: (_response, data) => {
+      saveReaderProgressToStorage(
+        {
+          type: "personal",
+          bookId,
+        },
+        data,
+      );
+
+      queryClient.setQueryData<ReadingProgress>(progressQueryKey, (current) => ({
+        ...current,
+        currentChapter: data.currentChapter,
+        currentPosition: data.currentPosition,
+        progress: data.progress,
+      }));
       queryClient.invalidateQueries({ queryKey: ["reading-status"] });
       queryClient.invalidateQueries({ queryKey: ["reading-stats"] });
       queryClient.invalidateQueries({ queryKey: ["reading-goal"] });
+    },
+  });
+}
+
+export function useReaderSettings(enabled: boolean = true, deviceMode: "desktop" | "mobile" = "desktop") {
+  return useQuery({
+    queryKey: ["reader-settings", deviceMode],
+    queryFn: async () => {
+      const response = await apiRequest<ReaderSettingsResponse>(`/api/v1/books/reader-settings?deviceMode=${deviceMode}`);
+      return normalizeReaderSettings(response.settings);
+    },
+    enabled,
+    staleTime: 5 * 60 * 1000, // 5 minutes - settings don't change often
+    gcTime: 10 * 60 * 1000, // 10 minutes garbage collection
+    retry: 3,
+    retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000),
+  });
+}
+
+export function useAllBookmarks() {
+  const query = useQuery({
+    queryKey: ["reader-all-bookmarks"],
+    queryFn: async () => {
+      const response = await apiRequest<UserBookmarksResponse>("/api/v1/books/all-bookmarks");
+      return response.bookmarks;
+    },
+  });
+
+  return {
+    ...query,
+    bookmarks: query.data || [],
+  };
+}
+
+/**
+ * Legacy hook for backward compatibility
+ * New code should use the offline-first sync manager directly
+ * This hook is kept for components that still use the old pattern
+ */
+export function useUpdateReaderSettings() {
+  const queryClient = useQueryClient();
+  const queryKey = ["reader-settings"] as const;
+
+  return useMutation({
+    mutationFn: async (settings: ReaderSettings) => {
+      const response = await apiRequest<ReaderSettingsResponse>("/api/v1/books/reader-settings", {
+        method: "PUT",
+        body: JSON.stringify({ settings }),
+      });
+
+      return normalizeReaderSettings(response.settings);
+    },
+    onMutate: async (settings): Promise<UpdateReaderSettingsContext> => {
+      // Don't cancel queries - let them continue in background
+      const previousSettings = queryClient.getQueryData<ReaderSettings>(queryKey);
+      // Optimistically update cache immediately
+      queryClient.setQueryData(queryKey, normalizeReaderSettings(settings));
+      return { previousSettings };
+    },
+    onError: (_error, _settings, context) => {
+      // Only rollback if we have previous settings
+      if (context?.previousSettings) {
+        queryClient.setQueryData(queryKey, context.previousSettings);
+      }
+    },
+    onSuccess: (settings) => {
+      // Update cache with server response
+      queryClient.setQueryData(queryKey, settings);
     },
   });
 }
@@ -157,6 +303,9 @@ export function useAddBookmark(bookId: string) {
       queryClient.invalidateQueries({
         queryKey: ["/api/v1/books", bookId, "bookmarks"],
       });
+      queryClient.invalidateQueries({
+        queryKey: ["reader-all-bookmarks"],
+      });
     },
   });
 }
@@ -174,6 +323,29 @@ export function useDeleteBookmark(bookId: string) {
     onSuccess: () => {
       queryClient.invalidateQueries({
         queryKey: ["/api/v1/books", bookId, "bookmarks"],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["reader-all-bookmarks"],
+      });
+    },
+  });
+}
+
+export function useDeleteBookmarkEntry() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ bookId, bookmarkId }: { bookId: string; bookmarkId: string }) => {
+      await apiRequest(`/api/v1/books/${bookId}/bookmarks/${bookmarkId}`, {
+        method: "DELETE",
+      });
+    },
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({
+        queryKey: ["/api/v1/books", variables.bookId, "bookmarks"],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["reader-all-bookmarks"],
       });
     },
   });

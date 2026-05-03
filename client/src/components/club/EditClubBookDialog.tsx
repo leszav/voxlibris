@@ -118,7 +118,10 @@ export function EditClubBookDialog({ book, clubId, children, onSave }: EditClubB
     try {
       await apiRequest(`/api/v1/clubs/${clubId}/books/${book.id}`, {
         method: "PATCH",
-        body: JSON.stringify(data),
+        body: JSON.stringify({
+          ...data,
+          genres: data.genre?.trim() ? [data.genre.trim()] : [],
+        }),
       });
 
       toast({

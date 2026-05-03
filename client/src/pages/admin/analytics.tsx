@@ -23,13 +23,13 @@ import {
   Tooltip,
   ResponsiveContainer,
   BarChart,
-  Bar,
   FunnelChart,
   Funnel,
   PieChart,
   Pie,
   Cell,
 } from 'recharts';
+import { Bar } from 'recharts/es6/cartesian/Bar';
 import { BookAnalyticsModal } from "@/components/admin/BookAnalyticsModal";
 import { ActivityHeatmap } from "@/components/admin/ActivityHeatmap";
 import { ClubAnalyticsModal } from "@/components/admin/ClubAnalyticsModal";
@@ -72,6 +72,30 @@ interface DeviceStatsResponse {
   };
   browsers: Array<{ name: string; count: number }>;
   os: Array<{ name: string; count: number }>;
+}
+
+interface MobilePwaStatsResponse {
+  period: string;
+  totalTrackedEvents: number;
+  summary: {
+    pwaInstall: number;
+    pwaHomescreenOpen: number;
+    mobileReaderOpen: number;
+    mobileClubJoin: number;
+  };
+  eventsByType: Array<{ eventType: string; count: number }>;
+  deviceTypes: Array<{ name: string; count: number }>;
+  os: Array<{ name: string; count: number }>;
+  displayModes: Array<{ name: string; count: number }>;
+  sources: Array<{ name: string; count: number }>;
+  trend: Array<{
+    date: string;
+    total: number;
+    pwaInstall: number;
+    pwaHomescreenOpen: number;
+    mobileReaderOpen: number;
+    mobileClubJoin: number;
+  }>;
 }
 
 interface UserJourneyStatsResponse {
@@ -154,6 +178,13 @@ export default function AdminAnalyticsPage() {
     },
   });
 
+  const { data: mobilePwaStats, isLoading: isMobilePwaLoading } = useQuery<MobilePwaStatsResponse>({
+    queryKey: [`/api/v1/analytics/mobile-pwa`, period],
+    queryFn: async () => {
+      return apiRequest<MobilePwaStatsResponse>(`/api/v1/analytics/mobile-pwa?period=${period}`);
+    },
+  });
+
   if (isLoading) {
     return (
       <AdminLayout>
@@ -231,6 +262,15 @@ export default function AdminAnalyticsPage() {
     club_join: 'Вступление в клуб',
     club_leave: 'Выход из клуба',
     book_upload: 'Загрузка книги',
+    pwa_install: 'Установка PWA',
+    pwa_homescreen_open: 'Запуск с домашнего экрана',
+  };
+
+  const mobilePwaEventLabels: Record<string, string> = {
+    pwa_install: 'Установка PWA',
+    pwa_homescreen_open: 'Запуск с домашнего экрана',
+    mobile_reader_open: 'Открытие ридера с мобильного',
+    mobile_club_join: 'Вступление в клуб с мобильного',
   };
 
   const funnelStageLabels: Record<string, string> = {
@@ -267,10 +307,43 @@ export default function AdminAnalyticsPage() {
     unknown: '#64748b',
   };
 
+  const displayModeLabels: Record<string, string> = {
+    browser: 'Браузер',
+    standalone: 'Установленное приложение',
+  };
+
+  const displayModeColors: Record<string, string> = {
+    browser: '#0284c7',
+    standalone: '#7c3aed',
+  };
+
+  const mobilePwaSourceLabels: Record<string, string> = {
+    install_prompt: 'Install prompt',
+    homescreen: 'Домашний экран',
+    personal_reader: 'Личный ридер',
+    club_reader: 'Клубный ридер',
+    invite_accept: 'Принятие приглашения',
+  };
+
   const deviceTypeData = Object.entries(deviceStats?.deviceType || {}).map(([name, count]) => ({
     name,
     label: deviceTypeLabels[name] || name,
     count: Number(count) || 0,
+  }));
+
+  const mobilePwaEventData = (mobilePwaStats?.eventsByType || []).map((item) => ({
+    ...item,
+    label: mobilePwaEventLabels[item.eventType] || item.eventType,
+  }));
+
+  const mobilePwaDisplayModeData = (mobilePwaStats?.displayModes || []).map((item) => ({
+    ...item,
+    label: displayModeLabels[item.name] || item.name,
+  }));
+
+  const mobilePwaSourceData = (mobilePwaStats?.sources || []).map((item) => ({
+    ...item,
+    label: mobilePwaSourceLabels[item.name] || item.name,
   }));
 
   const userJourneyTotalUsers =
@@ -571,6 +644,69 @@ export default function AdminAnalyticsPage() {
     ];
 
     downloadCsv(getCsvFileName('analytics-devices'), rows, [
+      { header: 'Секция', accessor: (item) => item.section },
+      { header: 'Элемент', accessor: (item) => item.item },
+      { header: 'Количество', accessor: (item) => item.count },
+      { header: 'Доля, %', accessor: (item) => item.share },
+    ]);
+  };
+
+  const exportMobilePwaCsv = () => {
+    if (!mobilePwaStats) return;
+
+    const totalEvents = mobilePwaStats.totalTrackedEvents || 0;
+    const rows = [
+      {
+        section: 'Summary',
+        item: 'Установка PWA',
+        count: mobilePwaStats.summary.pwaInstall,
+        share: totalEvents > 0 ? Math.round((mobilePwaStats.summary.pwaInstall / totalEvents) * 1000) / 10 : 0,
+      },
+      {
+        section: 'Summary',
+        item: 'Запуск с домашнего экрана',
+        count: mobilePwaStats.summary.pwaHomescreenOpen,
+        share: totalEvents > 0 ? Math.round((mobilePwaStats.summary.pwaHomescreenOpen / totalEvents) * 1000) / 10 : 0,
+      },
+      {
+        section: 'Summary',
+        item: 'Открытие ридера с мобильного',
+        count: mobilePwaStats.summary.mobileReaderOpen,
+        share: totalEvents > 0 ? Math.round((mobilePwaStats.summary.mobileReaderOpen / totalEvents) * 1000) / 10 : 0,
+      },
+      {
+        section: 'Summary',
+        item: 'Вступление в клуб с мобильного',
+        count: mobilePwaStats.summary.mobileClubJoin,
+        share: totalEvents > 0 ? Math.round((mobilePwaStats.summary.mobileClubJoin / totalEvents) * 1000) / 10 : 0,
+      },
+      ...mobilePwaEventData.map((item) => ({
+        section: 'Events',
+        item: item.label,
+        count: Number(item.count) || 0,
+        share: totalEvents > 0 ? Math.round(((Number(item.count) || 0) / totalEvents) * 1000) / 10 : 0,
+      })),
+      ...(mobilePwaStats.os || []).map((item) => ({
+        section: 'OS',
+        item: item.name,
+        count: Number(item.count) || 0,
+        share: totalEvents > 0 ? Math.round(((Number(item.count) || 0) / totalEvents) * 1000) / 10 : 0,
+      })),
+      ...mobilePwaDisplayModeData.map((item) => ({
+        section: 'Display Mode',
+        item: item.label,
+        count: Number(item.count) || 0,
+        share: totalEvents > 0 ? Math.round(((Number(item.count) || 0) / totalEvents) * 1000) / 10 : 0,
+      })),
+      ...mobilePwaSourceData.map((item) => ({
+        section: 'Source',
+        item: item.label,
+        count: Number(item.count) || 0,
+        share: totalEvents > 0 ? Math.round(((Number(item.count) || 0) / totalEvents) * 1000) / 10 : 0,
+      })),
+    ];
+
+    downloadCsv(getCsvFileName('analytics-mobile-pwa'), rows, [
       { header: 'Секция', accessor: (item) => item.section },
       { header: 'Элемент', accessor: (item) => item.item },
       { header: 'Количество', accessor: (item) => item.count },
@@ -892,6 +1028,164 @@ export default function AdminAnalyticsPage() {
                         <Tooltip formatter={(value?: number) => [value || 0, 'События']} />
                         <Bar dataKey="count" fill="#16a34a" />
                       </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Mobile / PWA analytics */}
+          <Card className="mb-8">
+            <CardHeader className="flex flex-row items-start justify-between gap-4">
+              <div>
+                <CardTitle>Mobile / PWA аналитика</CardTitle>
+                <CardDescription>
+                  Установки, запуски с домашнего экрана и ключевые мобильные действия внутри приложения
+                </CardDescription>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="shrink-0"
+                onClick={exportMobilePwaCsv}
+                disabled={!mobilePwaStats || mobilePwaStats.totalTrackedEvents === 0}
+              >
+                <Download className="h-4 w-4" />
+                Скачать CSV
+              </Button>
+            </CardHeader>
+            <CardContent>
+              {isMobilePwaLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                </div>
+              ) : !mobilePwaStats || mobilePwaStats.totalTrackedEvents === 0 ? (
+                <div className="text-sm text-muted-foreground">
+                  Пока нет mobile/PWA событий за выбранный период. Данные появятся после установок PWA, запусков с домашнего экрана и мобильных входов в ридер или клуб.
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                    <div className="rounded-lg border p-4">
+                      <div className="text-xs text-muted-foreground">Установки PWA</div>
+                      <div className="mt-1 text-2xl font-semibold tabular-nums">
+                        {mobilePwaStats.summary.pwaInstall.toLocaleString()}
+                      </div>
+                    </div>
+                    <div className="rounded-lg border p-4">
+                      <div className="text-xs text-muted-foreground">Запуски с домашнего экрана</div>
+                      <div className="mt-1 text-2xl font-semibold tabular-nums">
+                        {mobilePwaStats.summary.pwaHomescreenOpen.toLocaleString()}
+                      </div>
+                    </div>
+                    <div className="rounded-lg border p-4">
+                      <div className="text-xs text-muted-foreground">Открытия ридера с мобильного</div>
+                      <div className="mt-1 text-2xl font-semibold tabular-nums">
+                        {mobilePwaStats.summary.mobileReaderOpen.toLocaleString()}
+                      </div>
+                    </div>
+                    <div className="rounded-lg border p-4">
+                      <div className="text-xs text-muted-foreground">Вступления в клуб с мобильного</div>
+                      <div className="mt-1 text-2xl font-semibold tabular-nums">
+                        {mobilePwaStats.summary.mobileClubJoin.toLocaleString()}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-6 xl:grid-cols-3">
+                    <div className="xl:col-span-2 h-[300px]">
+                      <div className="text-sm font-medium mb-2">Ключевые mobile / PWA события</div>
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={mobilePwaEventData}>
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis dataKey="label" tick={{ fontSize: 12 }} />
+                          <YAxis />
+                          <Tooltip formatter={(value?: number) => [value || 0, 'События']} />
+                          <Bar dataKey="count" fill="#0f766e" />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+
+                    <div className="h-[300px]">
+                      <div className="text-sm font-medium mb-2">Режим запуска</div>
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Tooltip formatter={(value?: number) => [value || 0, 'События']} />
+                          <Pie
+                            data={mobilePwaDisplayModeData}
+                            dataKey="count"
+                            nameKey="label"
+                            cx="50%"
+                            cy="50%"
+                            outerRadius={90}
+                            label={({ name, percent }) =>
+                              percent && percent > 0 ? `${name} ${(percent * 100).toFixed(0)}%` : ''
+                            }
+                          >
+                            {mobilePwaDisplayModeData.map((entry) => (
+                              <Cell
+                                key={entry.name}
+                                fill={displayModeColors[entry.name] || '#94a3b8'}
+                              />
+                            ))}
+                          </Pie>
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-6 xl:grid-cols-3">
+                    <div className="xl:col-span-2 h-[280px]">
+                      <div className="text-sm font-medium mb-2">Операционные системы</div>
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={(mobilePwaStats.os || []).slice(0, 8)}>
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis dataKey="name" tick={{ fontSize: 12 }} />
+                          <YAxis />
+                          <Tooltip formatter={(value?: number) => [value || 0, 'События']} />
+                          <Bar dataKey="count" fill="#2563eb" />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+
+                    <div>
+                      <div className="text-sm font-medium mb-2">Источники событий</div>
+                      <div className="space-y-2 rounded-lg border p-4">
+                        {mobilePwaSourceData.length === 0 ? (
+                          <div className="text-sm text-muted-foreground">Нет данных по источникам.</div>
+                        ) : (
+                          mobilePwaSourceData.map((item) => (
+                            <div key={item.name} className="flex items-center justify-between gap-3 text-sm">
+                              <span className="text-muted-foreground">{item.label}</span>
+                              <span className="font-medium tabular-nums">{item.count}</span>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="h-[300px]">
+                    <div className="text-sm font-medium mb-2">Динамика mobile / PWA событий</div>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={mobilePwaStats.trend || []}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis
+                          dataKey="date"
+                          tick={{ fontSize: 12 }}
+                          tickFormatter={(value) => new Date(value).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })}
+                        />
+                        <YAxis />
+                        <Tooltip
+                          labelFormatter={(value) => new Date(value).toLocaleDateString('ru-RU')}
+                          formatter={(value?: number, name?: string) => [value || 0, mobilePwaEventLabels[name || ''] || name || 'События']}
+                        />
+                        <Line type="monotone" dataKey="pwaInstall" name="pwa_install" stroke="#7c3aed" strokeWidth={2} />
+                        <Line type="monotone" dataKey="pwaHomescreenOpen" name="pwa_homescreen_open" stroke="#0284c7" strokeWidth={2} />
+                        <Line type="monotone" dataKey="mobileReaderOpen" name="mobile_reader_open" stroke="#16a34a" strokeWidth={2} />
+                        <Line type="monotone" dataKey="mobileClubJoin" name="mobile_club_join" stroke="#f59e0b" strokeWidth={2} />
+                      </LineChart>
                     </ResponsiveContainer>
                   </div>
                 </div>

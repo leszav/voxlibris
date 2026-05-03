@@ -62,7 +62,7 @@ export default function ResetPassword() {
 
   if (!token) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background px-4">
+      <div className="flex min-h-[100dvh] items-start justify-center bg-background px-4 py-8 sm:items-center sm:py-10">
         <Card className="w-full max-w-md">
           <CardContent className="pt-6 text-center space-y-3">
             <AlertCircle className="h-8 w-8 text-destructive mx-auto" />
@@ -78,8 +78,8 @@ export default function ResetPassword() {
 
   if (status === "success") {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background px-4">
-        <div className="w-full max-w-md space-y-6">
+      <div className="flex min-h-[100dvh] items-start justify-center bg-background px-4 py-8 sm:items-center sm:py-10">
+        <div className="w-full max-w-md space-y-5 sm:space-y-6">
           <div className="text-center space-y-2">
             <div className="flex items-center justify-center gap-2 font-serif text-2xl font-bold text-primary">
               <Mic className="h-6 w-6 text-accent" />
@@ -107,8 +107,8 @@ export default function ResetPassword() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background px-4">
-      <div className="w-full max-w-md space-y-6">
+    <div className="flex min-h-[100dvh] items-start justify-center bg-background px-4 py-8 sm:items-center sm:py-10">
+      <div className="w-full max-w-md space-y-5 sm:space-y-6">
         <div className="text-center space-y-2">
           <div className="flex items-center justify-center gap-2 font-serif text-2xl font-bold text-primary">
             <Mic className="h-6 w-6 text-accent" />

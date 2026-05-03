@@ -30,9 +30,11 @@ FROM node:20-alpine
 WORKDIR /app
 
 # Install runtime dependencies and create non-root user
+# ffmpeg нужен для транскодинга WebM/Opus → Ogg/Opus перед отправкой в Icecast
 RUN apk add --no-cache \
     libstdc++ \
-    libc6-compat && \
+    libc6-compat \
+    ffmpeg && \
     addgroup -g 1001 -S nodejs && \
     adduser -S nodejs -u 1001
 

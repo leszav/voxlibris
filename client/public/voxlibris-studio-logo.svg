@@ -1,0 +1,35 @@
+<svg width="760" height="180" viewBox="0 0 760 180" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">VoxLibris Studio logo</title>
+  <desc id="desc">Transparent VoxLibris Studio logo with amber wordmark and dark studio badge.</desc>
+
+  <rect x="24" y="34" width="6" height="112" rx="3" fill="#D5831A"/>
+
+  <text
+    x="46"
+    y="104"
+    fill="#DB8C22"
+    font-family="Georgia, 'Times New Roman', serif"
+    font-size="64"
+    font-weight="700"
+    letter-spacing="-1.6"
+  >
+    VoxLibris
+  </text>
+
+  <g transform="translate(386 47)">
+    <rect width="168" height="62" rx="18" fill="#18181B" fill-opacity="0.94" stroke="#3A3B42" stroke-width="2"/>
+    <rect x="8" y="8" width="152" height="46" rx="13" stroke="#27272F" stroke-opacity="0.85"/>
+    <text
+      x="84"
+      y="39"
+      text-anchor="middle"
+      fill="#A2A3AD"
+      font-family="Arial, Helvetica, sans-serif"
+      font-size="26"
+      font-weight="500"
+      letter-spacing="3"
+    >
+      СТУДИЯ
+    </text>
+  </g>
+</svg>

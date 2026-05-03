@@ -1,8 +1,11 @@
 import * as React from "react";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { MainLayout } from "@/components/layout/MainLayout";
+import { useReaderPanelsAutoclose } from "@/components/reader/core/use-reader-panels-autoclose";
+import { usePreserveReaderVisualAnchor } from "@/components/reader/core/use-preserve-reader-visual-anchor";
 import { Button } from "@/components/ui/button";
 import { useGuest } from "@/hooks/use-guest";
+import { DEFAULT_READER_SETTINGS, getEffectiveReaderSettings } from "@/lib/reader-settings";
 
 type GuestReaderTheme = "light" | "dark";
 type GuestReaderFontFamily = "Georgia" | "Arial" | "system-ui";
@@ -44,7 +47,7 @@ function loadGuestReaderSettings(): GuestReaderSettings {
     const parsed = JSON.parse(savedRaw) as Partial<GuestReaderSettings>;
     return {
       fontSize:
-        typeof parsed.fontSize === "number" && parsed.fontSize >= 14 && parsed.fontSize <= 28
+        typeof parsed.fontSize === "number" && parsed.fontSize >= 12 && parsed.fontSize <= 28
           ? parsed.fontSize
           : DEFAULT_GUEST_READER_SETTINGS.fontSize,
       fontFamily: isGuestReaderFontFamily(parsed.fontFamily)
@@ -77,6 +80,8 @@ export default function GuestReader() {
   } = useGuest();
 
   const contentRef = useRef<HTMLDivElement>(null);
+  const contentAreaRef = useRef<HTMLElement>(null);
+  const settingsPanelRef = useRef<HTMLDivElement>(null);
   const scrollProgressRef = useRef(0);
   const sessionIdRef = useRef<string | null>(null);
   const sessionStartTimeRef = useRef(0);
@@ -85,12 +90,51 @@ export default function GuestReader() {
   const [isSaving, setIsSaving] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [readerSettings, setReaderSettings] = useState<GuestReaderSettings>(() => loadGuestReaderSettings());
+  const [viewportWidth, setViewportWidth] = useState(() =>
+    typeof window === "undefined" ? 1024 : window.innerWidth
+  );
 
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const effectiveReaderSettings = React.useMemo(
+    () => getEffectiveReaderSettings({
+      ...DEFAULT_READER_SETTINGS,
+      fontSize: readerSettings.fontSize,
+      fontFamily: readerSettings.fontFamily,
+      theme: readerSettings.theme,
+      contentWidth: readerSettings.contentWidth,
+    }, viewportWidth),
+    [readerSettings, viewportWidth]
+  );
+  const preserveReaderVisualAnchor = usePreserveReaderVisualAnchor({
+    scrollContainerRef: contentRef as React.RefObject<HTMLElement | null>,
+    contentAreaRef: contentAreaRef as React.RefObject<HTMLElement | null>,
+  });
+
+  useReaderPanelsAutoclose({
+    isOpen: showSettings,
+    onClose: () => setShowSettings(false),
+    contentRef: contentRef as React.RefObject<HTMLElement | null>,
+    protectedRefs: [settingsPanelRef as React.RefObject<HTMLElement | null>],
+  });
 
   useEffect(() => {
     localStorage.setItem(GUEST_READER_SETTINGS_KEY, JSON.stringify(readerSettings));
   }, [readerSettings]);
+
+  useEffect(() => {
+    const updateViewportWidth = () => {
+      setViewportWidth(window.innerWidth);
+    };
+
+    window.addEventListener("resize", updateViewportWidth);
+    window.addEventListener("orientationchange", updateViewportWidth);
+
+    return () => {
+      window.removeEventListener("resize", updateViewportWidth);
+      window.removeEventListener("orientationchange", updateViewportWidth);
+    };
+  }, []);
 
   useEffect(() => {
     const body = document.body;
@@ -103,11 +147,19 @@ export default function GuestReader() {
   }, [readerSettings.theme]);
 
   const updateFontSize = useCallback((delta: number) => {
-    setReaderSettings((prev) => ({
-      ...prev,
-      fontSize: Math.min(28, Math.max(14, prev.fontSize + delta)),
-    }));
-  }, []);
+    preserveReaderVisualAnchor(() => {
+      setReaderSettings((prev) => ({
+        ...prev,
+        fontSize: Math.min(28, Math.max(12, prev.fontSize + delta)),
+      }));
+    });
+  }, [preserveReaderVisualAnchor]);
+
+  const updateReaderSettingsWithAnchor = useCallback((updater: (previous: GuestReaderSettings) => GuestReaderSettings) => {
+    preserveReaderVisualAnchor(() => {
+      setReaderSettings((prev) => updater(prev));
+    });
+  }, [preserveReaderVisualAnchor]);
 
   // Debounced save position
   const debouncedSave = useCallback((progress: number, currentScrollTop: number) => {
@@ -282,20 +334,26 @@ export default function GuestReader() {
         </div>
 
         {showSettings && (
-          <div className="container mx-auto px-4 py-3 border-t bg-card space-y-3">
+          <div ref={settingsPanelRef} className="container mx-auto px-4 py-3 border-t bg-card space-y-3">
+            {viewportWidth < 768 && (
+              <p className="text-xs text-muted-foreground">
+                На телефоне применяется минимальный шрифт, минимальный интервал и максимальная ширина текста.
+              </p>
+            )}
+
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-xs text-muted-foreground">Тема:</span>
               <Button
                 variant={readerSettings.theme === "light" ? "secondary" : "outline"}
                 size="sm"
-                onClick={() => setReaderSettings((prev) => ({ ...prev, theme: "light" }))}
+                onClick={() => updateReaderSettingsWithAnchor((prev) => ({ ...prev, theme: "light" }))}
               >
                 Светлая
               </Button>
               <Button
                 variant={readerSettings.theme === "dark" ? "secondary" : "outline"}
                 size="sm"
-                onClick={() => setReaderSettings((prev) => ({ ...prev, theme: "dark" }))}
+                onClick={() => updateReaderSettingsWithAnchor((prev) => ({ ...prev, theme: "dark" }))}
               >
                 Тёмная
               </Button>
@@ -306,21 +364,21 @@ export default function GuestReader() {
               <Button
                 variant={readerSettings.fontFamily === "Georgia" ? "secondary" : "outline"}
                 size="sm"
-                onClick={() => setReaderSettings((prev) => ({ ...prev, fontFamily: "Georgia" }))}
+                onClick={() => updateReaderSettingsWithAnchor((prev) => ({ ...prev, fontFamily: "Georgia" }))}
               >
                 Georgia
               </Button>
               <Button
                 variant={readerSettings.fontFamily === "Arial" ? "secondary" : "outline"}
                 size="sm"
-                onClick={() => setReaderSettings((prev) => ({ ...prev, fontFamily: "Arial" }))}
+                onClick={() => updateReaderSettingsWithAnchor((prev) => ({ ...prev, fontFamily: "Arial" }))}
               >
                 Arial
               </Button>
               <Button
                 variant={readerSettings.fontFamily === "system-ui" ? "secondary" : "outline"}
                 size="sm"
-                onClick={() => setReaderSettings((prev) => ({ ...prev, fontFamily: "system-ui" }))}
+                onClick={() => updateReaderSettingsWithAnchor((prev) => ({ ...prev, fontFamily: "system-ui" }))}
               >
                 Системный
               </Button>
@@ -338,21 +396,21 @@ export default function GuestReader() {
               <Button
                 variant={readerSettings.contentWidth === 92 ? "secondary" : "outline"}
                 size="sm"
-                onClick={() => setReaderSettings((prev) => ({ ...prev, contentWidth: 92 }))}
+                onClick={() => updateReaderSettingsWithAnchor((prev) => ({ ...prev, contentWidth: 92 }))}
               >
                 Узкие
               </Button>
               <Button
                 variant={readerSettings.contentWidth === 82 ? "secondary" : "outline"}
                 size="sm"
-                onClick={() => setReaderSettings((prev) => ({ ...prev, contentWidth: 82 }))}
+                onClick={() => updateReaderSettingsWithAnchor((prev) => ({ ...prev, contentWidth: 82 }))}
               >
                 Средние
               </Button>
               <Button
                 variant={readerSettings.contentWidth === 72 ? "secondary" : "outline"}
                 size="sm"
-                onClick={() => setReaderSettings((prev) => ({ ...prev, contentWidth: 72 }))}
+                onClick={() => updateReaderSettingsWithAnchor((prev) => ({ ...prev, contentWidth: 72 }))}
               >
                 Широкие
               </Button>
@@ -380,9 +438,10 @@ export default function GuestReader() {
         }}
       >
         <article
+          ref={contentAreaRef}
           className="mx-auto px-6 py-8 w-full"
           style={{
-            maxWidth: `${readerSettings.contentWidth}%`,
+            maxWidth: `${effectiveReaderSettings.contentWidth}%`,
           }}
         >
           {/* Book title */}
@@ -399,9 +458,9 @@ export default function GuestReader() {
           <div
             className="reader-content max-w-none"
             style={{
-              fontSize: `${readerSettings.fontSize}px`,
-              fontFamily: readerSettings.fontFamily,
-              lineHeight: 1.8,
+              fontSize: `${effectiveReaderSettings.fontSize}px`,
+              fontFamily: effectiveReaderSettings.fontFamily,
+              lineHeight: effectiveReaderSettings.lineHeight,
             }}
             dangerouslySetInnerHTML={{ __html: book.flatContent?.replaceAll('\n', '<br>') || '' }}
           />

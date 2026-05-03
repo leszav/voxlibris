@@ -12,7 +12,6 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Loader2, BookOpen, Clock, Users, TrendingUp, List } from "lucide-react";
 import {
   BarChart,
-  Bar,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -20,6 +19,7 @@ import {
   ResponsiveContainer,
   Legend,
 } from "recharts";
+import { Bar } from "recharts/es6/cartesian/Bar";
 
 interface BookAnalyticsModalProps {
   bookId: string | null;

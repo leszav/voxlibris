@@ -38,6 +38,13 @@ interface ClubDiscussionBoardProps {
   readonly currentUserId: string;
 }
 
+function stripHtml(raw: string): string {
+  return raw
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 // Компонент для рендеринга HTML-контента сообщений
 function MessageContent({ content }: Readonly<{ content: string }>) {
   // Если контент содержит HTML-теги, используем HtmlContentRenderer
@@ -176,7 +183,7 @@ export function ClubDiscussionBoard({ clubId, isOwner }: Readonly<ClubDiscussion
     replyMutation.mutate({
       discussionId: replyingTo.id,
       content: content,
-      quotedContent: replyingTo.content.substring(0, 100),
+      quotedContent: stripHtml(replyingTo.content).substring(0, 100),
     });
     replyEditorRef.current?.setContent('');
     setReplyingTo(null);
@@ -219,6 +226,7 @@ export function ClubDiscussionBoard({ clubId, isOwner }: Readonly<ClubDiscussion
           maxLength={MAX_CHARS}
           value={newMessage}
           onChange={setNewMessage}
+          enableSpoilerBlocks
         />
         <div className="flex justify-end mt-2">
           <Button
@@ -346,6 +354,7 @@ export function ClubDiscussionBoard({ clubId, isOwner }: Readonly<ClubDiscussion
                     maxLength={MAX_CHARS}
                     value={replyContent}
                     onChange={setReplyContent}
+                    enableSpoilerBlocks
                   />
                   <div className="flex justify-end gap-2 mt-2">
                     <Button
