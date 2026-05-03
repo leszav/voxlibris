@@ -230,10 +230,6 @@ function BookActionsMenu({ book }: Readonly<{ book: Book }>) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin-books'] });
       setShowDeleteDialog(false);
-      void modalAlert({
-        title: "Книга удалена",
-        description: "Книга была удалена из системы",
-      });
     },
     onError: (error: Error) => {
       void modalAlert({
@@ -252,28 +248,15 @@ function BookActionsMenu({ book }: Readonly<{ book: Book }>) {
       if (variables.status === 'blocked') {
         setShowBlockDialog(false);
         setBlockReason("");
-        void modalAlert({
-          title: "Книга заблокирована",
-          description: variables.source === 'books'
-            ? "Книга заблокирована"
-            : "Книга заблокирована, пользователь уведомлен по email",
-        });
         return;
       }
 
       if (variables.status === 'active' && book.status === 'pending') {
-        void modalAlert({
-          title: "Книга одобрена",
-          description: "Книга переведена в активный статус",
-        });
         return;
       }
 
       if (variables.status === 'active') {
-        void modalAlert({
-          title: "Книга разблокирована",
-          description: "Книга снова доступна",
-        });
+        return;
       }
     },
     onError: (error: Error) => {
@@ -624,14 +607,8 @@ export default function AdminBooks() {
   const guestStatusMutation = useMutation({
     mutationFn: ({ bookId, status, notes }: { bookId: string; status: "approved" | "rejected"; notes?: string }) =>
       updateGuestBookStatus(bookId, status, notes),
-    onSuccess: (_data, variables) => {
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin-guest-books"] });
-      void modalAlert({
-        title: variables.status === "rejected" ? "Книга заблокирована" : "Книга разрешена",
-        description: variables.status === "rejected"
-          ? "Гостевая книга заблокирована для чтения"
-          : "Гостевая книга разрешена",
-      });
     },
     onError: (mutationError: Error) => {
       void modalAlert({
@@ -646,10 +623,6 @@ export default function AdminBooks() {
     mutationFn: (bookId: string) => deleteGuestBookAdmin(bookId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin-guest-books"] });
-      void modalAlert({
-        title: "Гостевая книга удалена",
-        description: "Книга удалена из гостевой библиотеки",
-      });
     },
     onError: (mutationError: Error) => {
       void modalAlert({

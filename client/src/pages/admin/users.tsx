@@ -233,17 +233,8 @@ function UserActionsMenu({ user }: Readonly<{ user: User }>) {
   const updateRoleMutation = useMutation({
     mutationFn: ({ username, role }: { username: string; role: string }) =>
       updateUserRole(username, role),
-    onSuccess: (_data, variables) => {
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin-users"] });
-      const roleNames = {
-        admin: "Администратор",
-        moderator: "Модератор",
-        user: "Пользователь"
-      };
-      void modalAlert({
-        title: "Роль изменена",
-        description: `Пользователь ${variables.username} теперь ${roleNames[variables.role as keyof typeof roleNames]}.`,
-      });
     },
     onError: (error: unknown) => {
       void modalAlert({
@@ -292,10 +283,6 @@ function UserActionsMenu({ user }: Readonly<{ user: User }>) {
     mutationFn: (userId: string) => resetUserPassword(userId),
     onSuccess: () => {
       setShowResetDialog(false);
-      void modalAlert({
-        title: "Письмо отправлено",
-        description: `Инструкция по сбросу пароля отправлена пользователю ${user.username}.`,
-      });
     },
     onError: (error: unknown) => {
       void modalAlert({
@@ -317,10 +304,6 @@ function UserActionsMenu({ user }: Readonly<{ user: User }>) {
       await refetchUser();
       // Перенаправляем на главную страницу
       setLocation("/");
-      void modalAlert({
-        title: "Вход выполнен",
-        description: `Вы вошли как пользователь ${data.user.username}`,
-      });
     },
     onError: (error: unknown) => {
       void modalAlert({

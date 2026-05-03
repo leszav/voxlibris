@@ -5,7 +5,6 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { useAuth } from '@/hooks/use-auth';
-import { RegistrationSuccessModal } from '@/components/ui/registration-success-modal';
 import { RegistrationErrorModal } from '@/components/ui/registration-error-modal';
 import { Mic, Eye, EyeOff, Check, X } from 'lucide-react';
 
@@ -19,7 +18,6 @@ export default function Register() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showErrorModal, setShowErrorModal] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [, setLocation] = useLocation();
@@ -74,18 +72,13 @@ export default function Register() {
     setIsLoading(true);
     try {
       await register(username.trim(), email.trim().toLowerCase(), password, rememberMe, inviteToken);
-      setShowSuccessModal(true);
+      setLocation('/');
     } catch (error) {
       setErrorMessage(parseRegisterError(error));
       setShowErrorModal(true);
     } finally {
       setIsLoading(false);
     }
-  };
-
-  const handleCloseSuccessModal = () => {
-    setShowSuccessModal(false);
-    setLocation('/');
   };
 
   const handleCloseErrorModal = () => {
@@ -270,12 +263,6 @@ export default function Register() {
           </CardContent>
         </Card>
       </div>
-      
-      <RegistrationSuccessModal 
-        isOpen={showSuccessModal}
-        onClose={handleCloseSuccessModal}
-        email={email}
-      />
       
       <RegistrationErrorModal 
         isOpen={showErrorModal}

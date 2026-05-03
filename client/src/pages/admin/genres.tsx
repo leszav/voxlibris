@@ -129,10 +129,6 @@ export default function AdminGenres() {
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["admin-genres"] });
-      await modalAlert({
-        title: selectedGenre ? "Жанр обновлён" : "Жанр создан",
-        description: selectedGenre ? "Изменения сохранены" : "Новый жанр добавлен в каталог",
-      });
       if (!selectedGenre) {
         setForm(emptyForm);
       }
@@ -299,6 +295,7 @@ export default function AdminGenres() {
 
               <label className="flex items-center gap-2 text-sm text-gray-700">
                 <input
+                  className="h-4 w-4"
                   type="checkbox"
                   checked={form.isActive}
                   onChange={(e) => setForm((prev) => ({ ...prev, isActive: e.target.checked }))}

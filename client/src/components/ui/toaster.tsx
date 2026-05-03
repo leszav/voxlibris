@@ -26,6 +26,7 @@ export function Toaster() {
   const activeMessage = activeDialog ? undefined : messages[0];
   const activeItem = activeDialog ?? activeMessage;
   const isPrompt = activeDialog?.kind === "prompt";
+  const isSilentMessage = Boolean(activeMessage && activeMessage.variant !== "destructive");
 
   useEffect(() => {
     if (isPrompt) {
@@ -34,6 +35,12 @@ export function Toaster() {
     }
     setPromptValue("");
   }, [activeDialog, isPrompt]);
+
+  useEffect(() => {
+    if (isSilentMessage && activeMessage) {
+      dismissToast(activeMessage.id);
+    }
+  }, [activeMessage, dismissToast, isSilentMessage]);
 
   const visual = useMemo(() => {
     if (activeDialog?.kind === "confirm") {
@@ -81,6 +88,10 @@ export function Toaster() {
   }, [activeDialog, activeItem?.variant]);
 
   if (!activeItem) {
+    return null;
+  }
+
+  if (isSilentMessage) {
     return null;
   }
 

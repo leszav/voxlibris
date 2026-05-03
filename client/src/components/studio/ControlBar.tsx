@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Mic, MicOff, Pause, Play, Square, MessageSquare, Users, Settings2, Bookmark } from "lucide-react";
+import { Mic, MicOff, Pause, Play, Square, Users, Bookmark } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { StudioWordmark } from "@/components/studio/StudioWordmark";
@@ -59,10 +59,7 @@ export function ControlBar({
   onPause,
   onResume,
   onEnd,
-  onOpenChat,
-  chatUnread = 0,
   onBookmark,
-  onSettings,
   floating = true,
 }: Readonly<ControlBarProps>) {
   const [vuLevel, setVuLevel] = useState(0);
@@ -210,7 +207,7 @@ export function ControlBar({
         )}
       </div>
 
-      {/* Right group: listeners + chat + settings */}
+      {/* Right group: listeners */}
       <div className="flex items-center gap-1 pl-2">
         <span
           className={cn(
@@ -244,31 +241,6 @@ export function ControlBar({
             <Bookmark className="w-4 h-4" />
           </Button>
         )}
-
-        <Button
-          variant="ghost"
-          size="icon"
-          className="relative h-9 w-9 rounded-xl text-muted-foreground hover:text-foreground"
-          onClick={onOpenChat}
-          title="Чат"
-        >
-          <MessageSquare className="w-4 h-4" />
-          {chatUnread > 0 && (
-            <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 rounded-full bg-amber-500 text-white text-[10px] font-bold flex items-center justify-center px-0.5">
-              {chatUnread > 9 ? "9+" : chatUnread}
-            </span>
-          )}
-        </Button>
-
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-9 w-9 rounded-xl text-muted-foreground hover:text-foreground"
-          onClick={onSettings}
-          title="Настройки"
-        >
-          <Settings2 className="w-4 h-4" />
-        </Button>
       </div>
     </div>
   );

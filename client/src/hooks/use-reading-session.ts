@@ -46,10 +46,20 @@ export function useReadingSession(enabled: boolean = true) {
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const listenerPollRef = useRef<NodeJS.Timeout | null>(null);
   const sessionRef = useRef<ReadingSessionState>(session);
+  const activeSegmentStartedAtRef = useRef<number | null>(null);
+  const accumulatedElapsedMsRef = useRef(0);
 
   useEffect(() => {
     sessionRef.current = session;
   }, [session]);
+
+  const syncElapsedTime = (nowMs: number = Date.now()) => {
+    const activeSegmentMs = activeSegmentStartedAtRef.current === null
+      ? 0
+      : Math.max(0, nowMs - activeSegmentStartedAtRef.current);
+    const totalElapsedSeconds = Math.floor((accumulatedElapsedMsRef.current + activeSegmentMs) / 1000);
+    setSession(prev => ({ ...prev, elapsedTime: totalElapsedSeconds }));
+  };
 
   // Initialize WebSocket connection
   useEffect(() => {
@@ -157,14 +167,25 @@ export function useReadingSession(enabled: boolean = true) {
 
   // Timer for elapsed time
   const startTimer = () => {
+    activeSegmentStartedAtRef.current ??= Date.now();
+
+    syncElapsedTime();
+
     if (timerRef.current) return;
-    
+
     timerRef.current = setInterval(() => {
-      setSession(prev => ({ ...prev, elapsedTime: prev.elapsedTime + 1 }));
+      syncElapsedTime();
     }, 1000);
   };
 
   const stopTimer = () => {
+    if (activeSegmentStartedAtRef.current !== null) {
+      accumulatedElapsedMsRef.current += Math.max(0, Date.now() - activeSegmentStartedAtRef.current);
+      activeSegmentStartedAtRef.current = null;
+    }
+
+    syncElapsedTime();
+
     if (timerRef.current) {
       clearInterval(timerRef.current);
       timerRef.current = null;
@@ -197,6 +218,8 @@ export function useReadingSession(enabled: boolean = true) {
         currentPosition: '0:0',
         elapsedTime: 0
       }));
+      accumulatedElapsedMsRef.current = 0;
+      activeSegmentStartedAtRef.current = null;
       
       // Join the WebSocket session after creation
       if (socketRef.current?.connected) {
@@ -240,6 +263,8 @@ export function useReadingSession(enabled: boolean = true) {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
       if (resp.ok) {
+        accumulatedElapsedMsRef.current = 0;
+        activeSegmentStartedAtRef.current = null;
         setSession(prev => ({ ...prev, isLive: true, isPaused: false }));
         startTimer();
       }
@@ -289,6 +314,8 @@ export function useReadingSession(enabled: boolean = true) {
       isLive: false,
       isPaused: false
     }));
+    accumulatedElapsedMsRef.current = 0;
+    activeSegmentStartedAtRef.current = null;
   };
 
   // Update reading position

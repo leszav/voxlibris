@@ -73,10 +73,6 @@ export interface AudioStreamControls {
 const STUDIO_STREAM_READY_ATTEMPTS = 24;
 const STUDIO_STREAM_READY_DELAY_MS = 250;
 
-function isAbortError(error: unknown): boolean {
-  return error instanceof Error && error.name === 'AbortError';
-}
-
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {

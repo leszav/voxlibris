@@ -601,10 +601,6 @@ function FeedbackSettings() {
       });
     },
     onSuccess: () => {
-      void modalAlert({
-        title: "Настройки обратной связи сохранены",
-        description: "Изменения успешно применены.",
-      });
       setIsSaving(false);
     },
     onError: (error: unknown) => {
@@ -768,10 +764,6 @@ function SMTPSettings() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['smtp-settings'] });
-      void modalAlert({
-        title: "SMTP настройки сохранены",
-        description: "Изменения успешно применены.",
-      });
     },
     onError: (error: Error) => {
       void modalAlert({
@@ -799,12 +791,7 @@ function SMTPSettings() {
         method: 'POST',
         body: JSON.stringify({ testEmail }),
       });
-      if (data.success) {
-        void modalAlert({
-          title: "Тестовое письмо отправлено",
-          description: `Письмо отправлено на ${testEmail}.`,
-        });
-      } else {
+      if (!data.success) {
         void modalAlert({
           title: "Ошибка отправки",
           description: data.message || "Не удалось отправить тестовое письмо.",
@@ -1037,10 +1024,6 @@ function FeatureFlagsSettings() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin-features'] });
-      void modalAlert({
-        title: "Настройки сохранены",
-        description: "Изменения применены.",
-      });
     },
     onError: (error: Error) => {
       void modalAlert({

@@ -4,10 +4,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useAuth } from '@/hooks/use-auth';
 import { useToast } from '@/hooks/use-toast';
-import { Mic, Eye, EyeOff, Clock } from 'lucide-react';
+import { Mic, Eye, EyeOff } from 'lucide-react';
 import { getAccessToken } from '@/lib/token-store';
 
 export default function Login() {
@@ -16,7 +15,6 @@ export default function Login() {
   const [rememberMe, setRememberMe] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [showPendingDialog, setShowPendingDialog] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
   const [, setLocation] = useLocation();
   const { login } = useAuth();
@@ -42,7 +40,7 @@ export default function Login() {
           }).then(r => r.json());
           
           if (userData.user?.status === 'pending') {
-            setShowPendingDialog(true);
+            setLocation('/');
             return;
           }
         } catch (e) {
@@ -71,11 +69,6 @@ export default function Login() {
     } finally {
       setIsLoading(false);
     }
-  };
-
-  const handlePendingDialogClose = () => {
-    setShowPendingDialog(false);
-    setLocation('/');
   };
 
   return (
@@ -195,41 +188,6 @@ export default function Login() {
         </Card>
       </div>
 
-      {/* Диалог ожидания активации */}
-      <Dialog open={showPendingDialog} onOpenChange={setShowPendingDialog}>
-        <DialogContent className="max-w-[calc(100vw-2rem)] sm:max-w-lg">
-          <DialogHeader>
-            <div className="flex items-center gap-3 mb-2">
-              <div className="p-3 bg-yellow-100 rounded-full">
-                <Clock className="h-6 w-6 text-yellow-600" />
-              </div>
-              <DialogTitle>Аккаунт ожидает активации</DialogTitle>
-            </div>
-            <DialogDescription className="text-base">
-              Ваш аккаунт успешно создан и вы вошли в систему, но он ожидает активации администратором.
-              <br /><br />
-              <strong>Что вы можете делать сейчас:</strong>
-              <ul className="list-disc list-inside mt-2 space-y-1">
-                <li>Просматривать каталог клубов</li>
-                <li>Просматривать свою библиотеку</li>
-                <li>Читать ранее загруженные книги</li>
-              </ul>
-              <br />
-              <strong>После активации станут доступны:</strong>
-              <ul className="list-disc list-inside mt-2 space-y-1">
-                <li>Загрузка новых книг</li>
-                <li>Создание и присоединение к клубам</li>
-                <li>Проведение сессий чтения</li>
-              </ul>
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button onClick={handlePendingDialogClose} className="w-full">
-              Понятно, продолжить
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

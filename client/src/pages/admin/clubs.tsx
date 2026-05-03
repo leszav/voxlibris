@@ -221,10 +221,6 @@ function ClubActionsMenu({
     mutationFn: (clubId: string) => approveClub(clubId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin-clubs'] });
-      void modalAlert({
-        title: "Клуб одобрен",
-        description: "Клуб успешно одобрен и теперь доступен для пользователей",
-      });
     },
     onError: (error: Error) => {
       void modalAlert({
@@ -242,10 +238,6 @@ function ClubActionsMenu({
       queryClient.invalidateQueries({ queryKey: ['admin-clubs'] });
       setRejectDialogOpen(false);
       setRejectReason("");
-      void modalAlert({
-        title: "Клуб отклонён",
-        description: "Клуб отклонён, владелец уведомлён по email, клуб удалён",
-      });
     },
     onError: (error: Error) => {
       void modalAlert({
@@ -681,10 +673,6 @@ export default function AdminClubs() {
       queryClient.invalidateQueries({ queryKey: ['admin-clubs'] });
       setTransferringClub(null);
       setSelectedMemberId(null);
-      void modalAlert({
-        title: "Владелец передан",
-        description: "Права владельца клуба успешно переданы",
-      });
     },
     onError: (error) => {
       void modalAlert({
