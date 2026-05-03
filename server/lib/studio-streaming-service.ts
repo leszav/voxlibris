@@ -98,7 +98,7 @@ export async function buildStudioStreamStatus(sessionId: string): Promise<{
     payload: {
       sessionId,
       isLive: hasLiveStream,
-      isPaused: session.isActive && !hasLiveStream && !session.isLive,
+      isPaused: session.isActive && !hasLiveStream,
       streamUrl: hasLiveStream
         ? getStudioPublicStreamUrl(sessionId)
         : null,

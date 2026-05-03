@@ -170,20 +170,21 @@ export function useClubLiveListening(meta: ClubListeningMeta) {
         if (currentListeningState.reader.sessionId !== listeningInCurrentClub.reader.sessionId) return;
 
         const wasPaused = Boolean(currentListeningState.reader.isPaused);
+        const nextIsPaused = status.isPaused || (!status.isLive && wasPaused);
         const nextReader: LiveReader = {
           ...currentListeningState.reader,
           streamUrl: status.streamUrl ?? currentListeningState.reader.streamUrl,
-          isPaused: status.isPaused,
+          isPaused: nextIsPaused,
         };
 
         const changed = nextReader.streamUrl !== currentListeningState.reader.streamUrl
           || nextReader.isPaused !== currentListeningState.reader.isPaused;
 
-        if (status.isPaused && !wasPaused) {
+        if (nextIsPaused && !wasPaused) {
           stopIcecastPlayback();
         }
 
-        if (!status.isPaused && wasPaused && nextReader.streamUrl) {
+        if (status.isLive && wasPaused && nextReader.streamUrl) {
           runBestEffort(primeIcecastPlayback(nextReader.streamUrl));
         }
 
