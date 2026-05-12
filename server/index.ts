@@ -210,10 +210,11 @@ app.use(
 					defaultSrc: ["'self'"],
 					styleSrc: ["'self'", "'unsafe-inline'"],
 					fontSrc: ["'self'"],
-					imgSrc: ["'self'", "data:", "https:"],
+					imgSrc: ["'self'", "data:", "https:", "blob:"],
 					scriptSrc: ["'self'", "https://mc.yandex.ru", "https://mc.yandex.com"],
 					connectSrc: ["'self'", "wss:", "https:"],
 					// blob: — для воспроизведения mic-check записи (createObjectURL)
+					// blob: в imgSrc — для загрузки локальных изображений через canvas (gamification админка)
 					// https://radio.voxlibris.ru — для воспроизведения Icecast потока слушателями
 					mediaSrc: ["'self'", "blob:", "https://radio.voxlibris.ru"],
 				frameSrc: ["'none'"],
