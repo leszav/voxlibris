@@ -1,7 +1,7 @@
 import sharp from 'sharp';
 import { logger } from './lib/logger.js';
 
-export type ImageType = 'cover' | 'background' | 'avatar' | 'thumbnail';
+export type ImageType = 'cover' | 'background' | 'avatar' | 'thumbnail' | 'reward-asset';
 
 interface OptimizationResult {
   buffer: Buffer;
@@ -44,6 +44,12 @@ const OPTIMIZATION_PRESETS: Record<ImageType, OptimizationOptions> = {
     maxHeight: 400,
     quality: 85,
     fit: 'cover',
+  },
+  'reward-asset': {
+    maxWidth: 512,
+    maxHeight: 512,
+    quality: 90,
+    fit: 'inside',
   },
 };
 

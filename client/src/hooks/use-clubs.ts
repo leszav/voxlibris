@@ -54,6 +54,16 @@ export interface UpdateClubRequest {
 export interface ClubMemberWithUser {
   id: string;
   username: string;
+  displayName?: string | null;
+  avatar?: string | null;
+  readerRating?: number | null;
+  achievements?: Array<{
+    achievementId: string;
+    code: string;
+    titleRu: string;
+    iconType: "badge" | "star" | "title";
+    badgeImageUrl: string | null;
+  }>;
   role: ClubMemberRole;
   joinedAt: Date;
   status: string;

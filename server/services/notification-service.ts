@@ -22,6 +22,11 @@ export interface NotificationSettings {
   sessionStart: boolean; // Уведомлять о начале сессии
   sessionEnd: boolean; // Уведомлять о завершении сессии
   newQuestion: boolean; // Уведомлять о новых вопросах
+  notifyReply: boolean; // Уведомлять об ответах на комментарии
+  notifyMention: boolean; // Уведомлять об упоминаниях
+  notifyChapterReady: boolean; // Уведомлять о готовности главы
+  notifyMessage: boolean; // Уведомлять о личных сообщениях
+  notifyPlanUpdate: boolean; // Уведомлять об изменениях плана
 }
 
 export interface NotificationPayload {
@@ -50,6 +55,11 @@ class NotificationService {
         sessionStart: true,
         sessionEnd: false,
         newQuestion: true,
+        notifyReply: true,
+        notifyMention: true,
+        notifyChapterReady: true,
+        notifyMessage: true,
+        notifyPlanUpdate: true,
       };
 
       // Применяем пользовательские настройки из БД
@@ -74,6 +84,21 @@ class NotificationService {
             case `notifications.${userId}.new_question`:
               defaultSettings.newQuestion = s.value === 'true';
               break;
+            case `notifications.${userId}.type.reply`:
+              defaultSettings.notifyReply = s.value === 'true';
+              break;
+            case `notifications.${userId}.type.mention`:
+              defaultSettings.notifyMention = s.value === 'true';
+              break;
+            case `notifications.${userId}.type.chapter_ready`:
+              defaultSettings.notifyChapterReady = s.value === 'true';
+              break;
+            case `notifications.${userId}.type.message`:
+              defaultSettings.notifyMessage = s.value === 'true';
+              break;
+            case `notifications.${userId}.type.plan_update`:
+              defaultSettings.notifyPlanUpdate = s.value === 'true';
+              break;
           }
         }
       });
@@ -91,6 +116,11 @@ class NotificationService {
         sessionStart: true,
         sessionEnd: false,
         newQuestion: true,
+        notifyReply: true,
+        notifyMention: true,
+        notifyChapterReady: true,
+        notifyMessage: true,
+        notifyPlanUpdate: true,
       };
     }
   }
@@ -147,6 +177,46 @@ class NotificationService {
         await storage.setSetting({
           key: `notifications.${userId}.new_question`,
           value: String(updates.newQuestion),
+          category: 'notifications',
+          updatedBy: userId,
+        });
+      }
+      if (updates.notifyReply !== undefined) {
+        await storage.setSetting({
+          key: `notifications.${userId}.type.reply`,
+          value: String(updates.notifyReply),
+          category: 'notifications',
+          updatedBy: userId,
+        });
+      }
+      if (updates.notifyMention !== undefined) {
+        await storage.setSetting({
+          key: `notifications.${userId}.type.mention`,
+          value: String(updates.notifyMention),
+          category: 'notifications',
+          updatedBy: userId,
+        });
+      }
+      if (updates.notifyChapterReady !== undefined) {
+        await storage.setSetting({
+          key: `notifications.${userId}.type.chapter_ready`,
+          value: String(updates.notifyChapterReady),
+          category: 'notifications',
+          updatedBy: userId,
+        });
+      }
+      if (updates.notifyMessage !== undefined) {
+        await storage.setSetting({
+          key: `notifications.${userId}.type.message`,
+          value: String(updates.notifyMessage),
+          category: 'notifications',
+          updatedBy: userId,
+        });
+      }
+      if (updates.notifyPlanUpdate !== undefined) {
+        await storage.setSetting({
+          key: `notifications.${userId}.type.plan_update`,
+          value: String(updates.notifyPlanUpdate),
           category: 'notifications',
           updatedBy: userId,
         });

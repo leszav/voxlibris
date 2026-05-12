@@ -159,6 +159,7 @@ export function EmbeddedClubStudioShell({
               onMicToggle={onMicToggle}
               elapsedTime={elapsedTime}
               listenerCount={listenerCount}
+              sessionId={sessionId}
               micLevel={micLevel}
               micBars={micBars}
               onPause={onPause}

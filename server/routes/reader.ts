@@ -20,6 +20,7 @@ import {
   generateShortLivedToken,
 } from "../encryption.js";
 import { logger } from "../lib/logger.js";
+import { activityService } from "../services/activity-service.js";
 
 const router = express.Router();
 
@@ -243,6 +244,19 @@ async function addToReadingHistory(userId: string, bookId: string, clubId?: stri
       bookCoverUrl: bookData[0].coverUrl || null,
       completedAt: new Date(),
     });
+
+    activityService.emit({
+      actorId: userId,
+      eventType: 'reading_completed',
+      targetType: 'book',
+      targetId: bookId,
+      metadata: {
+        bookId,
+        bookTitle: bookData[0].title,
+        bookAuthor: bookData[0].author,
+        clubId: clubId || null,
+      },
+    }).catch((err) => logger.warn('[activity] reading_completed emit failed', err));
     
     logger.info(`[Reader API] Книга "${bookData[0].title}" добавлена в историю пользователя ${userId}`);
 

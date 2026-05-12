@@ -1,9 +1,13 @@
 import type { ClubBook, ClubMemberRole, ClubWithDetails, User } from "../../shared/schema.js";
 
-type AuthUserInput = Pick<
+type AuthUserBaseInput = Pick<
   User,
   "id" | "username" | "email" | "role" | "status" | "emailConfirmed" | "createdAt" | "lastActivityAt"
 >;
+
+type AuthUserInput = AuthUserBaseInput & {
+  avatar?: string | null;
+};
 
 export interface ClientClubOwner {
   id: string;
@@ -13,6 +17,16 @@ export interface ClientClubOwner {
 export interface ClientClubMember {
   id: string;
   username: string;
+  displayName?: string | null;
+  avatar?: string | null;
+  readerRating?: number | null;
+  achievements?: Array<{
+    achievementId: string;
+    code: string;
+    titleRu: string;
+    iconType: 'badge' | 'star' | 'title';
+    badgeImageUrl: string | null;
+  }>;
   role: ClubMemberRole;
   joinedAt: Date;
 }
@@ -37,6 +51,7 @@ export type ClientAuthUser = {
   id: string;
   username: string;
   email: string;
+  avatar: string | null;
   role: User["role"];
   status: User["status"];
   emailConfirmed: boolean;
@@ -57,6 +72,7 @@ export function serializeAuthUser(user: AuthUserInput): ClientAuthUser {
     id: user.id,
     username: user.username,
     email: user.email,
+    avatar: user.avatar ?? null,
     role: user.role,
     status: user.status,
     emailConfirmed: user.emailConfirmed,
@@ -138,6 +154,10 @@ export function serializeClubMember(member: ClientClubMember): ClientClubMember 
   return {
     id: member.id,
     username: member.username,
+    displayName: member.displayName ?? null,
+    avatar: member.avatar ?? null,
+    readerRating: member.readerRating ?? 0,
+    achievements: member.achievements ?? [],
     role: member.role,
     joinedAt: member.joinedAt,
   };

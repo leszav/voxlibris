@@ -32,6 +32,7 @@ describe('Client serializers', () => {
     const serialized = serializeAuthUser(user);
 
     assert.deepEqual(Object.keys(serialized).sort((left, right) => left.localeCompare(right)), [
+      'avatar',
       'createdAt',
       'email',
       'emailConfirmed',
@@ -132,10 +133,15 @@ describe('Client serializers', () => {
     const serialized = serializeClubMember({
       id: 'member-1',
       username: 'member',
+      displayName: 'Участник',
+      avatar: 'https://example.com/avatar.png',
+      readerRating: 480,
       role: 'member',
       joinedAt: new Date('2026-03-05T10:00:00.000Z'),
     });
 
-    assert.deepEqual(Object.keys(serialized).sort((left, right) => left.localeCompare(right)), ['id', 'joinedAt', 'role', 'username']);
+    assert.deepEqual(Object.keys(serialized).sort((left, right) => left.localeCompare(right)), ['achievements', 'avatar', 'displayName', 'id', 'joinedAt', 'readerRating', 'role', 'username']);
+    assert.equal(serialized.readerRating, 480);
+    assert.deepEqual(serialized.achievements, []);
   });
 });

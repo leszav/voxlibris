@@ -72,6 +72,7 @@ function createAuthHeaders(additionalHeaders: Record<string, string> = {}): Reco
  * Автоматически добавляет Authorization header, если токен доступен
  */
 export async function authFetch(url: string, options: RequestInit = {}): Promise<Response> {
+  syncTokenFromCookie();
   const headers = createAuthHeaders(
     options.headers as Record<string, string> || {}
   );
@@ -79,6 +80,7 @@ export async function authFetch(url: string, options: RequestInit = {}): Promise
   return fetch(url, {
     ...options,
     headers,
+    credentials: "include",
   });
 }
 

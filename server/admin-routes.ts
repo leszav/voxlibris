@@ -16,7 +16,7 @@ import { db } from './db.js';
 import postgres from 'postgres';
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { SQL } from 'drizzle-orm';
-import { books, personalBooks, clubBooks, users, clubs, clubMembers, readingSessions } from '../shared/schema.js';
+import { books, personalBooks, clubBooks, users, clubs, clubMembers, readingSessions, conversations, directMessages, dmReports, dmAdminAccessLog } from '../shared/schema.js';
 import { logger } from './lib/logger.js';
 import { getStudioRecordingsDir } from './lib/studio-recording-storage.js';
 import {
@@ -896,6 +896,51 @@ router.put('/users/:id/restore', jwtAuth, requireAdmin, async (req, res) => {
   }
 });
 
+// Редактировать поля пользователя (admin only)
+const USERNAME_REGEX_ADMIN = /^[A-Za-z0-9_-]{3,32}$/;
+const EMAIL_REGEX_ADMIN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+router.put('/users/:id/fields', jwtAuth, requireFullAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { username, email } = req.body as { username?: string; email?: string };
+
+    const user = await storage.getUser(id);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    if (username !== undefined) {
+      if (!USERNAME_REGEX_ADMIN.test(username)) {
+        return res.status(400).json({ message: 'Некорректный username: только A-Za-z0-9_-, 3–32 символа' });
+      }
+      const existing = await storage.getUserByUsername(username);
+      if (existing && existing.id !== id) {
+        return res.status(409).json({ message: 'Username уже занят' });
+      }
+      await storage.updateUserUsername(id, username);
+    }
+
+    if (email !== undefined) {
+      if (!EMAIL_REGEX_ADMIN.test(email)) {
+        return res.status(400).json({ message: 'Некорректный email' });
+      }
+      const existingByEmail = await storage.getUserByEmail(email);
+      if (existingByEmail && existingByEmail.id !== id) {
+        return res.status(409).json({ message: 'Email уже занят' });
+      }
+      // Для смены email через админку не требуем подтверждения
+      await db.update(users).set({ email }).where(eq(users.id, id));
+    }
+
+    await logAction(req, 'edit_user_fields', 'user', id, `Fields updated: ${Object.keys(req.body).join(', ')}`);
+    const updated = await storage.getUser(id);
+    if (!updated) return res.status(404).json({ message: 'User not found after update' });
+    const { password: _p, ...safeUser } = updated;
+    res.json({ user: safeUser });
+  } catch (error) {
+    console.error('Error updating user fields:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
 // Удалить пользователя окончательно (физическое удаление)
 router.delete('/users/:id/permanent', jwtAuth, requireFullAdmin, async (req, res) => {
   try {
@@ -1495,6 +1540,16 @@ router.put('/genres/:code', jwtAuth, requireFullAdmin, async (req, res) => {
   }
 
   res.json(updated);
+});
+
+router.delete('/genres/:code', jwtAuth, requireFullAdmin, async (req, res) => {
+  const deleted = await storage.deleteGenre(req.params.code);
+
+  if (!deleted) {
+    return res.status(404).json({ error: 'Genre not found' });
+  }
+
+  res.status(204).send();
 });
 
 async function buildPersonalBookDownloadPayload(
@@ -3676,6 +3731,124 @@ router.delete('/recordings', jwtAuth, requireAdmin, async (req, res) => {
   } catch (error) {
     logger.error({ error }, 'Failed to batch delete admin studio recordings');
     res.status(500).json({ message: 'Не удалось удалить записи эфиров' });
+  }
+});
+
+// ─── DM-модерация ─────────────────────────────────────────────────────────────
+
+/**
+ * GET /admin/dm/reports
+ * Список жалоб на сообщения (только для fullAdmin)
+ */
+router.get('/dm/reports', jwtAuth, requireFullAdmin, async (req, res) => {
+  try {
+    const status = (req.query.status as string) || 'pending';
+    const limit = Math.min(Number(req.query.limit) || 50, 100);
+    const offset = Number(req.query.offset) || 0;
+
+    const rows = await db
+      .select({
+        report: dmReports,
+        message: { id: directMessages.id, body: directMessages.body, senderId: directMessages.senderId, conversationId: directMessages.conversationId, isDeleted: directMessages.isDeleted, createdAt: directMessages.createdAt },
+        reporter: { id: users.id, username: users.username },
+      })
+      .from(dmReports)
+      .innerJoin(directMessages, eq(dmReports.messageId, directMessages.id))
+      .innerJoin(users, eq(dmReports.reporterId, users.id))
+      .where(eq(dmReports.status, status as 'pending' | 'reviewed' | 'dismissed'))
+      .orderBy(desc(dmReports.createdAt))
+      .limit(limit)
+      .offset(offset);
+
+    res.json({ success: true, reports: rows, total: rows.length });
+  } catch (error) {
+    logger.error({ error }, 'Failed to list dm reports');
+    res.status(500).json({ message: 'Не удалось получить жалобы' });
+  }
+});
+
+/**
+ * GET /admin/dm/conversations/:conversationId
+ * Просмотр переписки администратором — только по жалобе, с логированием
+ */
+router.get('/dm/conversations/:conversationId', jwtAuth, requireFullAdmin, async (req, res) => {
+  const adminId = req.user!.id;
+  const { conversationId } = req.params;
+  const reportId = req.query.reportId as string | undefined;
+  const reason = req.query.reason as string | undefined;
+
+  if (!reason || reason.trim().length < 5) {
+    return res.status(400).json({ message: 'Укажите причину просмотра (параметр reason, мин. 5 символов)' });
+  }
+
+  try {
+    // Проверяем, что диалог существует
+    const conv = await db
+      .select({ id: conversations.id, participantA: conversations.participantA, participantB: conversations.participantB })
+      .from(conversations)
+      .where(eq(conversations.id, conversationId))
+      .limit(1);
+
+    if (!conv.length) {
+      return res.status(404).json({ message: 'Диалог не найден' });
+    }
+
+    // Логируем доступ
+    await db.insert(dmAdminAccessLog).values({
+      adminId,
+      conversationId,
+      reportId: reportId ?? null,
+      reason: reason.trim(),
+    });
+
+    await logAction(req, 'view_dm_conversation', 'message', conversationId, JSON.stringify({ reportId, reason: reason.trim() }));
+
+    // Читаем сообщения (последние 100)
+    const messages = await db
+      .select()
+      .from(directMessages)
+      .where(eq(directMessages.conversationId, conversationId))
+      .orderBy(desc(directMessages.createdAt))
+      .limit(100);
+
+    res.json({ success: true, conversation: conv[0], messages });
+  } catch (error) {
+    logger.error({ error }, 'Failed to view dm conversation as admin');
+    res.status(500).json({ message: 'Не удалось загрузить переписку' });
+  }
+});
+
+/**
+ * POST /admin/dm/reports/:reportId/review
+ * Закрыть жалобу (reviewed / dismissed)
+ */
+router.post('/dm/reports/:reportId/review', jwtAuth, requireFullAdmin, async (req, res) => {
+  const adminId = req.user!.id;
+  const { reportId } = req.params;
+  const { status } = req.body as { status: 'reviewed' | 'dismissed' };
+
+  if (!['reviewed', 'dismissed'].includes(status)) {
+    return res.status(400).json({ message: 'status должен быть reviewed или dismissed' });
+  }
+
+  try {
+    const updated = await db
+      .update(dmReports)
+      .set({ status, reviewedBy: adminId, reviewedAt: new Date() })
+      .where(and(eq(dmReports.id, reportId), eq(dmReports.status, 'pending')))
+      .returning({ id: dmReports.id });
+
+    if (!updated.length) {
+      return res.status(404).json({ message: 'Жалоба не найдена или уже закрыта' });
+    }
+
+    const actionType = status === 'reviewed' ? 'review_dm_report' : 'dismiss_dm_report';
+    await logAction(req, actionType as AdminActionType, 'message', reportId, JSON.stringify({ status }));
+
+    res.json({ success: true, reportId, status });
+  } catch (error) {
+    logger.error({ error }, 'Failed to review dm report');
+    res.status(500).json({ message: 'Не удалось закрыть жалобу' });
   }
 });
 

@@ -11,6 +11,9 @@ import { insertUserSchema } from "../shared/schema.js";
 // Email validation regex (RFC 5322 simplified)
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+// Username validation: only A-Za-z0-9_- allowed, 3-32 chars
+const USERNAME_REGEX = /^[A-Za-z0-9_-]{3,32}$/;
+
 // Password validation schema
 const passwordSchema = z.string()
   .min(8, "Пароль должен содержать минимум 8 символов")
@@ -19,6 +22,10 @@ const passwordSchema = z.string()
 
 // Registration schema with password validation
 const registerSchema = insertUserSchema.extend({
+  username: z
+    .string()
+    .trim()
+    .regex(USERNAME_REGEX, "Имя пользователя может содержать только буквы (A-Z, a-z), цифры, _ и -, от 3 до 32 символов"),
   email: z
     .string()
     .trim()
@@ -420,6 +427,7 @@ export function setupAuthRoutes(app: Express): void {
     try {
       // Получаем полные данные пользователя из БД
       const user = await storage.getUser(req.user!.userId);
+      const profile = await storage.getUserProfile(req.user!.userId);
       
       if (!user) {
         return res.status(404).json({
@@ -454,7 +462,10 @@ export function setupAuthRoutes(app: Express): void {
       }
 
       res.json({
-        user: serializeAuthUser(user)
+        user: serializeAuthUser({
+          ...user,
+          avatar: profile?.avatar ?? null,
+        })
       });
     } catch (error) {
       console.error("Get current user error:", error);
@@ -571,6 +582,41 @@ export function setupAuthRoutes(app: Express): void {
         success: true,
         message: "Если аккаунт существует, письмо отправлено"
       });
+    }
+  });
+
+  // Change username endpoint (для пользователей у которых username содержит @)
+  app.put("/api/auth/username", jwtAuth, requireActiveUser, async (req: Request, res: Response) => {
+    try {
+      const currentUser = req.user;
+      if (!currentUser) {
+        return res.status(401).json({ message: "Не аутентифицирован" });
+      }
+
+      const { username } = req.body;
+      if (!username || !USERNAME_REGEX.test(username)) {
+        return res.status(400).json({
+          message: "Имя пользователя может содержать только буквы (A-Z, a-z), цифры, _ и -, от 3 до 32 символов",
+          code: "INVALID_USERNAME"
+        });
+      }
+
+      // Проверяем уникальность
+      const existing = await storage.getUserByUsername(username);
+      if (existing && existing.id !== currentUser.userId) {
+        return res.status(409).json({ message: "Это имя пользователя уже занято", code: "USERNAME_TAKEN" });
+      }
+
+      const updated = await storage.updateUserUsername(currentUser.userId, username);
+      if (!updated) {
+        return res.status(404).json({ message: "Пользователь не найден" });
+      }
+
+      const { password: _p, ...safeUser } = updated;
+      res.json({ message: "Имя пользователя обновлено", user: safeUser });
+    } catch (error) {
+      console.error("Change username error:", error);
+      res.status(500).json({ message: "Внутренняя ошибка сервера" });
     }
   });
 

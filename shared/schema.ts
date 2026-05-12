@@ -412,12 +412,29 @@ export const userProfiles = pgTable("user_profiles", {
   avatar: text("avatar"),
   coverImage: text("cover_image"), // URL обложки профиля
   bio: text("bio"),
+  profileQuote: text("profile_quote"),
+  profileQuoteAuthor: text("profile_quote_author"),
   favoriteGenres: text("favorite_genres"), // JSON array
   readerSettings: text("reader_settings"), // JSON с настройками ридера для синхронизации между устройствами
   isReader: boolean("is_reader").notNull().default(false),
   readerRating: integer("reader_rating").notNull().default(0), // 0-500 (5.0 * 100)
   totalReadingSessions: integer("total_reading_sessions").notNull().default(0),
   totalListeners: integer("total_listeners").notNull().default(0),
+  followersCount: integer("followers_count").notNull().default(0),
+  followingCount: integer("following_count").notNull().default(0),
+  feedLastSeenAt: timestamp("feed_last_seen_at"),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+  updatedAt: timestamp("updated_at").notNull().default(sql`now()`),
+});
+
+export const profileBookshelf = pgTable("profile_bookshelf", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  bookId: varchar("book_id").notNull(),
+  bookType: text("book_type").notNull().$type<BookType>(),
+  reviewText: text("review_text"),
+  rating: integer("rating"),
+  displayOrder: integer("display_order").notNull().default(0),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
   updatedAt: timestamp("updated_at").notNull().default(sql`now()`),
 });
@@ -453,6 +470,16 @@ export const insertUserProfileSchema = createInsertSchema(userProfiles).pick({
   bio: true,
   favoriteGenres: true,
   isReader: true,
+  profileQuote: true,
+  profileQuoteAuthor: true,
+});
+
+export const insertProfileBookshelfSchema = createInsertSchema(profileBookshelf).pick({
+  bookId: true,
+  bookType: true,
+  reviewText: true,
+  rating: true,
+  displayOrder: true,
 });
 
 // Types for reading system
@@ -691,11 +718,12 @@ export const moderationReports = pgTable("moderation_reports", {
 
 export const adminActionTypes = [
   "block_user", "unblock_user", "change_user_role", "change_user_status", "delete_user", "restore_user", "permanent_delete_user",
-  "reset_password", "impersonate",
+  "reset_password", "impersonate", "edit_user_fields",
   "archive_club", "delete_club", "block_club", "unblock_club", "update_club", "update_club_privacy",
   "delete_book", "block_book", "unblock_book", "update_book_status",
   "delete_message", "block_message",
   "resolve_report", "dismiss_report", "assign_report", "update_report_status",
+  "review_dm_report", "dismiss_dm_report", "view_dm_conversation",
   "update_settings", "update_smtp_settings", "test_smtp", "backup_data", "restore_data"
 ] as const;
 export type AdminActionType = typeof adminActionTypes[number];
@@ -803,6 +831,9 @@ export type SystemSetting = typeof systemSettings.$inferSelect;
 // Reading status types
 export type BookReadingStatusRecord = typeof bookReadingStatus.$inferSelect;
 export type InsertBookReadingStatus = typeof bookReadingStatus.$inferInsert;
+
+export type ProfileBookshelf = typeof profileBookshelf.$inferSelect;
+export type InsertProfileBookshelf = typeof profileBookshelf.$inferInsert;
 
 export type UserReadingGoal = typeof userReadingGoals.$inferSelect;
 export type InsertUserReadingGoal = typeof userReadingGoals.$inferInsert;
@@ -1028,6 +1059,19 @@ export type CommentVisibility = typeof commentVisibilities[number];
 export const notificationTypes = ["reply", "mention", "chapter_ready", "message", "plan_update"] as const;
 export type NotificationType = typeof notificationTypes[number];
 
+export const notificationKinds = [
+  "dm_message",
+  "followed_you",
+  "club_discussion_reply",
+  "club_membership_approved",
+  "comment_reply",
+  "mention",
+  "chapter_ready",
+  "plan_update",
+  "achievement_unlocked",
+] as const;
+export type NotificationKind = typeof notificationKinds[number];
+
 // Типы жалоб
 export const reportReasons = ["spam", "abuse", "copyright", "explicit", "other"] as const;
 export type ReportReason = typeof reportReasons[number];
@@ -1146,6 +1190,12 @@ export const notifications = pgTable("notifications", {
   sourceCommentId: varchar("source_comment_id").references(() => comments.id, { onDelete: "set null" }),
   sourceUserId: varchar("source_user_id").references(() => users.id, { onDelete: "set null" }),
   sourceMessageId: varchar("source_message_id").references(() => chatMessages.id, { onDelete: "set null" }),
+  kind: varchar("kind", { length: 60 }).$type<NotificationKind>(),
+  actorUserId: varchar("actor_user_id").references(() => users.id, { onDelete: "set null" }),
+  entityType: varchar("entity_type", { length: 40 }),
+  entityId: varchar("entity_id"),
+  actionUrl: text("action_url"),
+  payload: jsonb("payload"),
   message: text("message").notNull(),
   readAt: timestamp("read_at"),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
@@ -1301,6 +1351,7 @@ export interface ChatUser {
   id: string;
   username: string;
   displayName?: string | null;
+  avatar?: string | null;
 }
 
 export interface ChatMessageWithUser extends ChatMessage {
@@ -2177,3 +2228,306 @@ export interface GuestAnalyticsSummaryResponse {
   averageSessionTime: number;
   lastActivity: string;
 }
+
+// ============================================
+// СОЦИАЛЬНЫЙ ГРАФ (SOCIAL GRAPH)
+// ============================================
+
+export const profileVisibilities = ['public', 'followers', 'private'] as const;
+export type ProfileVisibility = typeof profileVisibilities[number];
+
+export const dmPermissions = ['everyone', 'followers', 'nobody'] as const;
+export type DmPermission = typeof dmPermissions[number];
+
+// Подписки (follower → following)
+export const userFollows = pgTable('user_follows', {
+  id: varchar('id').primaryKey().default(sql`gen_random_uuid()`),
+  followerId: varchar('follower_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  followingId: varchar('following_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  createdAt: timestamp('created_at').notNull().default(sql`now()`),
+});
+
+// Блокировки
+export const userBlocks = pgTable('user_blocks', {
+  id: varchar('id').primaryKey().default(sql`gen_random_uuid()`),
+  blockerId: varchar('blocker_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  blockedId: varchar('blocked_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  createdAt: timestamp('created_at').notNull().default(sql`now()`),
+});
+
+// Муты (скрыть активность без блокировки)
+export const userMutes = pgTable('user_mutes', {
+  id: varchar('id').primaryKey().default(sql`gen_random_uuid()`),
+  muterId: varchar('muter_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  mutedId: varchar('muted_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  createdAt: timestamp('created_at').notNull().default(sql`now()`),
+});
+
+// Настройки приватности профиля
+export const userPrivacySettings = pgTable('user_privacy_settings', {
+  userId: varchar('user_id').primaryKey().references(() => users.id, { onDelete: 'cascade' }),
+  profileVisibility: text('profile_visibility').notNull().default('public').$type<ProfileVisibility>(),
+  readingStatsVisible: boolean('reading_stats_visible').notNull().default(true),
+  clubsVisible: boolean('clubs_visible').notNull().default(true),
+  readingHistoryVisible: boolean('reading_history_visible').notNull().default(true),
+  allowDmFrom: text('allow_dm_from').notNull().default('followers').$type<DmPermission>(),
+  updatedAt: timestamp('updated_at').notNull().default(sql`now()`),
+});
+
+// Схемы валидации
+export const insertUserFollowSchema = createInsertSchema(userFollows).pick({
+  followingId: true,
+});
+
+export const insertUserPrivacySettingsSchema = createInsertSchema(userPrivacySettings).pick({
+  profileVisibility: true,
+  readingStatsVisible: true,
+  clubsVisible: true,
+  readingHistoryVisible: true,
+  allowDmFrom: true,
+});
+
+// Типы
+export type UserFollow = typeof userFollows.$inferSelect;
+export type InsertUserFollow = typeof userFollows.$inferInsert;
+
+export type UserBlock = typeof userBlocks.$inferSelect;
+export type InsertUserBlock = typeof userBlocks.$inferInsert;
+
+export type UserMute = typeof userMutes.$inferSelect;
+export type InsertUserMute = typeof userMutes.$inferInsert;
+
+export type UserPrivacySettings = typeof userPrivacySettings.$inferSelect;
+export type InsertUserPrivacySettings = Pick<
+  typeof userPrivacySettings.$inferInsert,
+  | 'profileVisibility'
+  | 'readingStatsVisible'
+  | 'clubsVisible'
+  | 'readingHistoryVisible'
+  | 'allowDmFrom'
+>;
+
+// Расширенный тип публичного профиля
+export interface PublicUserProfile {
+  id: string;
+  username: string;
+  displayName: string | null;
+  avatar: string | null;
+  coverImage: string | null;
+  bio: string | null;
+  favoriteGenres: string[];
+  isReader: boolean;
+  readerRating: number;
+  followersCount: number;
+  followingCount: number;
+  totalReadingSessions: number;
+  totalListeners: number;
+  createdAt: Date;
+  // Социальный контекст (если viewer авторизован)
+  isFollowing?: boolean;
+  isFollowedBy?: boolean;
+  isBlocked?: boolean;
+}
+
+// ─── Лента активности (Sprint 2.1) ───────────────────────────────────────────
+
+export const activityEventTypes = [
+  'session_started',
+  'session_ended',
+  'joined_club',
+  'left_club',
+  'club_created',
+  'reading_completed',
+  'book_review_posted',
+  'achievement_unlocked',
+  'club_session_scheduled',
+  'discussion_hot',
+  'followed_user',
+  'book_added_to_club',
+] as const;
+export type ActivityEventType = (typeof activityEventTypes)[number];
+
+export const activityEvents = pgTable('activity_events', {
+  id: varchar('id').primaryKey().default(sql`gen_random_uuid()`),
+  actorId: varchar('actor_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  eventType: text('event_type').notNull().$type<ActivityEventType>(),
+  targetType: text('target_type'), // 'session' | 'club' | 'book' | 'user' | 'achievement'
+  targetId: varchar('target_id'),
+  metadata: jsonb('metadata'), // денормализованный снапшот для рендеринга
+  visibility: text('visibility')
+    .notNull()
+    .default('followers')
+    .$type<'public' | 'followers' | 'private'>(),
+  createdAt: timestamp('created_at').notNull().default(sql`now()`),
+});
+
+export type ActivityEvent = typeof activityEvents.$inferSelect;
+export type InsertActivityEvent = typeof activityEvents.$inferInsert;
+
+export interface ActivityEventWithActor extends ActivityEvent {
+  actor: {
+    id: string;
+    username: string;
+    displayName: string | null;
+    avatar: string | null;
+    isReader: boolean;
+  };
+}
+
+// ─── Личные сообщения (Sprint 2.3) ───────────────────────────────────────────
+
+export const conversations = pgTable('conversations', {
+  id: varchar('id').primaryKey().default(sql`gen_random_uuid()`),
+  participantA: varchar('participant_a').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  participantB: varchar('participant_b').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  lastMessageAt: timestamp('last_message_at'),
+  lastMessageId: varchar('last_message_id'),
+  createdAt: timestamp('created_at').notNull().default(sql`now()`),
+});
+
+export const directMessages = pgTable('direct_messages', {
+  id: varchar('id').primaryKey().default(sql`gen_random_uuid()`),
+  conversationId: varchar('conversation_id').notNull().references(() => conversations.id, { onDelete: 'cascade' }),
+  senderId: varchar('sender_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  body: text('body').notNull(),
+  isDeleted: boolean('is_deleted').notNull().default(false),
+  createdAt: timestamp('created_at').notNull().default(sql`now()`),
+  readAt: timestamp('read_at'),
+});
+
+export const conversationUnread = pgTable('conversation_unread', {
+  conversationId: varchar('conversation_id').notNull().references(() => conversations.id, { onDelete: 'cascade' }),
+  userId: varchar('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  unreadCount: integer('unread_count').notNull().default(0),
+});
+
+export type Conversation = typeof conversations.$inferSelect;
+export type DirectMessage = typeof directMessages.$inferSelect;
+export type ConversationUnread = typeof conversationUnread.$inferSelect;
+
+// ─── Жалобы на ЛС + аудит доступа администраторов (Sprint 2.3) ───────────────
+
+export const dmReports = pgTable('dm_reports', {
+  id: varchar('id').primaryKey().default(sql`gen_random_uuid()`),
+  messageId: varchar('message_id').notNull().references(() => directMessages.id, { onDelete: 'cascade' }),
+  reporterId: varchar('reporter_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  category: varchar('category').notNull().$type<'spam' | 'harassment' | 'threats' | 'other'>(),
+  comment: text('comment'),
+  status: varchar('status').notNull().default('pending').$type<'pending' | 'reviewed' | 'dismissed'>(),
+  reviewedBy: varchar('reviewed_by').references(() => users.id, { onDelete: 'set null' }),
+  reviewedAt: timestamp('reviewed_at'),
+  createdAt: timestamp('created_at').notNull().default(sql`now()`),
+});
+
+export const dmAdminAccessLog = pgTable('dm_admin_access_log', {
+  id: varchar('id').primaryKey().default(sql`gen_random_uuid()`),
+  adminId: varchar('admin_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  conversationId: varchar('conversation_id').notNull().references(() => conversations.id, { onDelete: 'cascade' }),
+  reportId: varchar('report_id').references(() => dmReports.id, { onDelete: 'set null' }),
+  reason: text('reason').notNull(),
+  accessedAt: timestamp('accessed_at').notNull().default(sql`now()`),
+});
+
+export type DmReport = typeof dmReports.$inferSelect;
+export type DmAdminAccessLog = typeof dmAdminAccessLog.$inferSelect;
+
+// ─── Геймификация (Sprint 2.4) ──────────────────────────────────────────────
+
+export const achievementStatuses = ['draft', 'active', 'archived'] as const;
+export type AchievementStatus = (typeof achievementStatuses)[number];
+
+export const achievementIconTypes = ['badge', 'star', 'title'] as const;
+export type AchievementIconType = (typeof achievementIconTypes)[number];
+
+export const achievements = pgTable('achievements', {
+  id: varchar('id').primaryKey().default(sql`gen_random_uuid()`),
+  code: varchar('code', { length: 100 }).notNull().unique(),
+  titleRu: varchar('title_ru', { length: 120 }).notNull(),
+  descriptionRu: text('description_ru'),
+  iconType: varchar('icon_type', { length: 30 }).notNull().default('badge').$type<AchievementIconType>(),
+  badgeImageUrl: text('badge_image_url'),
+  rewardPayload: jsonb('reward_payload'),
+  conditionsPayload: jsonb('conditions_payload').notNull().default(sql`'[]'::jsonb`),
+  status: varchar('status', { length: 20 }).notNull().default('draft').$type<AchievementStatus>(),
+  sortOrder: integer('sort_order').notNull().default(0),
+  createdBy: varchar('created_by').references(() => users.id, { onDelete: 'set null' }),
+  updatedBy: varchar('updated_by').references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at').notNull().default(sql`now()`),
+  updatedAt: timestamp('updated_at').notNull().default(sql`now()`),
+});
+
+export const achievementBuildingBlocks = pgTable('achievement_building_blocks', {
+  id: varchar('id').primaryKey().default(sql`gen_random_uuid()`),
+  code: varchar('code', { length: 100 }).notNull().unique(),
+  labelRu: varchar('label_ru', { length: 120 }).notNull(),
+  valueType: varchar('value_type', { length: 20 }).notNull().$type<'number' | 'string' | 'boolean'>(),
+  supportedOperators: jsonb('supported_operators').notNull().default(sql`'[]'::jsonb`),
+  isActive: boolean('is_active').notNull().default(true),
+  createdBy: varchar('created_by').references(() => users.id, { onDelete: 'set null' }),
+  updatedBy: varchar('updated_by').references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at').notNull().default(sql`now()`),
+  updatedAt: timestamp('updated_at').notNull().default(sql`now()`),
+});
+
+export const achievementRewardAssets = pgTable('achievement_reward_assets', {
+  id: varchar('id').primaryKey().default(sql`gen_random_uuid()`),
+  assetType: varchar('asset_type', { length: 20 }).notNull().$type<AchievementIconType>(),
+  nameRu: varchar('name_ru', { length: 120 }).notNull(),
+  imageUrl: text('image_url').notNull(),
+  descriptionRu: text('description_ru'),
+  groupKey: varchar('group_key', { length: 80 }).notNull().default('default'),
+  tags: jsonb('tags').notNull().default(sql`'[]'::jsonb`),
+  sortOrder: integer('sort_order').notNull().default(0),
+  isActive: boolean('is_active').notNull().default(true),
+  createdBy: varchar('created_by').references(() => users.id, { onDelete: 'set null' }),
+  updatedBy: varchar('updated_by').references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at').notNull().default(sql`now()`),
+  updatedAt: timestamp('updated_at').notNull().default(sql`now()`),
+});
+
+export const userAchievements = pgTable('user_achievements', {
+  id: varchar('id').primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  achievementId: varchar('achievement_id').notNull().references(() => achievements.id, { onDelete: 'cascade' }),
+  awardedAt: timestamp('awarded_at').notNull().default(sql`now()`),
+  awardedBy: varchar('awarded_by').references(() => users.id, { onDelete: 'set null' }),
+  meta: jsonb('meta'),
+});
+
+export const userActivityCounters = pgTable('user_activity_counters', {
+  userId: varchar('user_id').primaryKey().references(() => users.id, { onDelete: 'cascade' }),
+  completedBooksCount: integer('completed_books_count').notNull().default(0),
+  sentDmCount: integer('sent_dm_count').notNull().default(0),
+  followingCountSnapshot: integer('following_count_snapshot').notNull().default(0),
+  followersCountSnapshot: integer('followers_count_snapshot').notNull().default(0),
+  clubSessionsJoinedCount: integer('club_sessions_joined_count').notNull().default(0),
+  updatedAt: timestamp('updated_at').notNull().default(sql`now()`),
+});
+
+export const userStreaks = pgTable('user_streaks', {
+  userId: varchar('user_id').primaryKey().references(() => users.id, { onDelete: 'cascade' }),
+  currentStreakDays: integer('current_streak_days').notNull().default(0),
+  bestStreakDays: integer('best_streak_days').notNull().default(0),
+  lastActiveDate: text('last_active_date'),
+  updatedAt: timestamp('updated_at').notNull().default(sql`now()`),
+});
+
+export type Achievement = typeof achievements.$inferSelect;
+export type InsertAchievement = typeof achievements.$inferInsert;
+
+export type AchievementBuildingBlock = typeof achievementBuildingBlocks.$inferSelect;
+export type InsertAchievementBuildingBlock = typeof achievementBuildingBlocks.$inferInsert;
+
+export type AchievementRewardAsset = typeof achievementRewardAssets.$inferSelect;
+export type InsertAchievementRewardAsset = typeof achievementRewardAssets.$inferInsert;
+
+export type UserAchievement = typeof userAchievements.$inferSelect;
+export type InsertUserAchievement = typeof userAchievements.$inferInsert;
+
+export type UserActivityCounters = typeof userActivityCounters.$inferSelect;
+export type InsertUserActivityCounters = typeof userActivityCounters.$inferInsert;
+
+export type UserStreak = typeof userStreaks.$inferSelect;
+export type InsertUserStreak = typeof userStreaks.$inferInsert;

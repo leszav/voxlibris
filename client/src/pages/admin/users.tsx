@@ -16,6 +16,7 @@ import {
   User as UserIcon,
   UserPlus,
 } from "lucide-react";
+import { Pencil } from "lucide-react";
 import { useState } from "react";
 import { useLocation } from "wouter";
 import { AdminLayout } from "@/components/layout/AdminLayout";
@@ -29,6 +30,14 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -122,6 +131,13 @@ async function restoreUser(userId: string): Promise<void> {
 async function permanentDeleteUser(userId: string): Promise<void> {
   await apiRequest(`/api/v1/admin/users/${userId}/permanent`, {
     method: "DELETE",
+  });
+}
+
+async function updateUserFields(userId: string, fields: { username?: string; email?: string }): Promise<void> {
+  await apiRequest(`/api/v1/admin/users/${userId}/fields`, {
+    method: "PUT",
+    body: JSON.stringify(fields),
   });
 }
 
@@ -229,6 +245,21 @@ function UserActionsMenu({ user }: Readonly<{ user: User }>) {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [showPermanentDeleteDialog, setShowPermanentDeleteDialog] = useState(false);
   const [showResetDialog, setShowResetDialog] = useState(false);
+  const [showEditDialog, setShowEditDialog] = useState(false);
+  const [editUsername, setEditUsername] = useState(user.username);
+  const [editEmail, setEditEmail] = useState(user.email);
+  const [editError, setEditError] = useState<string | null>(null);
+
+  const editFieldsMutation = useMutation({
+    mutationFn: (fields: { username?: string; email?: string }) => updateUserFields(user.id, fields),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["/api/v1/admin/users"] });
+      setShowEditDialog(false);
+    },
+    onError: (error: unknown) => {
+      setEditError(error instanceof Error ? error.message : "Ошибка сохранения");
+    },
+  });
 
   const updateRoleMutation = useMutation({
     mutationFn: ({ username, role }: { username: string; role: string }) =>
@@ -448,6 +479,17 @@ function UserActionsMenu({ user }: Readonly<{ user: User }>) {
             )}
           </DropdownMenuItem>
           <DropdownMenuItem
+            onClick={() => {
+              setEditUsername(user.username);
+              setEditEmail(user.email);
+              setEditError(null);
+              setShowEditDialog(true);
+            }}
+          >
+            <Pencil className="h-4 w-4 mr-2" />
+            Редактировать
+          </DropdownMenuItem>
+          <DropdownMenuItem
             onClick={() => setShowResetDialog(true)}
             disabled={resetPasswordMutation.isPending}
             className="text-orange-600"
@@ -516,6 +558,50 @@ function UserActionsMenu({ user }: Readonly<{ user: User }>) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      <Dialog open={showEditDialog} onOpenChange={setShowEditDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Редактировать пользователя</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label htmlFor="edit-username">Username</Label>
+              <Input
+                id="edit-username"
+                value={editUsername}
+                onChange={(e) => setEditUsername(e.target.value)}
+                placeholder="Только A-Za-z0-9_-, 3–32 символа"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-email">Email</Label>
+              <Input
+                id="edit-email"
+                type="email"
+                value={editEmail}
+                onChange={(e) => setEditEmail(e.target.value)}
+                placeholder="user@example.com"
+              />
+            </div>
+            {editError && <p className="text-sm text-destructive">{editError}</p>}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowEditDialog(false)}>Отмена</Button>
+            <Button
+              onClick={() => {
+                const fields: { username?: string; email?: string } = {};
+                if (editUsername !== user.username) fields.username = editUsername;
+                if (editEmail !== user.email) fields.email = editEmail;
+                if (Object.keys(fields).length > 0) editFieldsMutation.mutate(fields);
+                else setShowEditDialog(false);
+              }}
+              disabled={editFieldsMutation.isPending}
+            >
+              {editFieldsMutation.isPending ? "Сохранение..." : "Сохранить"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

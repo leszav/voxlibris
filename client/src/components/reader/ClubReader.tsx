@@ -678,6 +678,10 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
     saveProgressNow,
   ]);
 
+  const liveReadersMobileBottom = studioEligibility.mode === "blocked"
+    ? "bottom-[calc(env(safe-area-inset-bottom)+5rem)]"
+    : "bottom-[calc(env(safe-area-inset-bottom)+8.5rem)]";
+
   return (
     <div className="flex h-[100dvh] flex-col overflow-hidden bg-background text-foreground">
       {suggestedProgress && (
@@ -981,8 +985,11 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
           <div className={cn(
             "fixed z-30 transition-transform duration-300 ease-out",
             isMobile
-              ? `right-3 translate-x-0 pr-0 ${studioEligibility.mode === "blocked" ? "bottom-[calc(env(safe-area-inset-bottom)+5rem)]" : "bottom-[calc(env(safe-area-inset-bottom)+8.5rem)]"}`
-              : `right-0 translate-x-[calc(100%-4rem)] pr-4 hover:translate-x-0 focus-within:translate-x-0 ${studioEligibility.mode === "blocked" ? "bottom-20" : "bottom-36"}`,
+              ? `right-3 translate-x-0 pr-0 ${liveReadersMobileBottom}`
+              : [
+                  "right-0 translate-x-[calc(100%-4rem)] pr-4 hover:translate-x-0 focus-within:translate-x-0",
+                  studioEligibility.mode === "blocked" ? "bottom-20" : "bottom-36",
+                ].join(" "),
           )}>
             <LiveReadersBubble
               readers={readers}

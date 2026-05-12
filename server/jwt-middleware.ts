@@ -174,7 +174,12 @@ export function requireActiveUser(req: Request, res: Response, next: NextFunctio
 export function optionalJwtAuth(req: Request, res: Response, next: NextFunction) {
   try {
     const authHeader = req.headers.authorization;
-    const token = authService.extractTokenFromHeader(authHeader);
+    let token = authService.extractTokenFromHeader(authHeader);
+
+    // Так же как jwtAuth — проверяем cookie если нет в заголовке
+    if (!token && req.cookies?.accessToken) {
+      token = req.cookies.accessToken;
+    }
 
     if (token) {
       const payload = authService.verifyAccessToken(token);

@@ -9,15 +9,20 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
-import { X, Plus, Upload, Trash2, Image as ImageIcon } from "lucide-react";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { ChevronsUpDown, X, Upload, Trash2, Image as ImageIcon } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { ImageCropDialog } from "@/components/ui/image-crop-dialog";
+import { useGenresCatalog } from "@/hooks/use-books-v2";
 
 const profileEditSchema = z.object({
   displayName: z.string().min(1, "Имя обязательно"),
   avatar: z.string().optional().or(z.literal("")),
   coverImage: z.string().optional().or(z.literal("")),
   bio: z.string().max(200, "Слишком длинное описание").optional(),
+  profileQuote: z.string().max(280, "Слишком длинная цитата").optional(),
+  profileQuoteAuthor: z.string().max(80, "Слишком длинное имя автора").optional(),
   favoriteGenres: z.string().optional(),
   isReader: z.boolean(),
 });
@@ -29,6 +34,8 @@ interface UserProfile {
   avatar: string | null;
   coverImage?: string | null;
   bio: string | null;
+  profileQuote?: string | null;
+  profileQuoteAuthor?: string | null;
   favoriteGenres: string | null;
   isReader: boolean;
 }
@@ -40,14 +47,20 @@ interface EditProfileDialogProps {
   readonly isLoading?: boolean;
 }
 
-const commonGenres = [
-  "Фантастика", "Детектив", "Роман", "Научная фантастика", "Фэнтези", 
-  "Исторический роман", "Биография", "Психология", "Бизнес", "Художественная литература"
-];
+function splitGenres(genresValue: string | null | undefined): string[] {
+  if (!genresValue) {
+    return [];
+  }
+
+  return genresValue
+    .split(/[;,\n]+/u)
+    .map((genre) => genre.trim())
+    .filter(Boolean);
+}
 
 export function EditProfileDialog({ profile, children, onSave, isLoading }: EditProfileDialogProps) {
   const [open, setOpen] = React.useState(false);
-  const [newGenre, setNewGenre] = React.useState("");
+  const [genresPopoverOpen, setGenresPopoverOpen] = React.useState(false);
   const [avatarPreview, setAvatarPreview] = React.useState(profile.avatar || "");
   const [coverPreview, setCoverPreview] = React.useState(profile.coverImage || "");
   
@@ -58,6 +71,11 @@ export function EditProfileDialog({ profile, children, onSave, isLoading }: Edit
   const [tempCoverImage, setTempCoverImage] = React.useState("");
   
   const { toast } = useToast();
+  const { data: genresCatalog = [], isLoading: isGenresCatalogLoading } = useGenresCatalog();
+  const catalogLabelSet = React.useMemo(
+    () => new Set(genresCatalog.map((genre) => genre.label)),
+    [genresCatalog],
+  );
   
   const form = useForm<ProfileEditForm>({
     resolver: zodResolver(profileEditSchema),
@@ -66,6 +84,8 @@ export function EditProfileDialog({ profile, children, onSave, isLoading }: Edit
       avatar: profile.avatar || "",
       coverImage: profile.coverImage || "",
       bio: profile.bio || "",
+      profileQuote: profile.profileQuote || "",
+      profileQuoteAuthor: profile.profileQuoteAuthor || "",
       favoriteGenres: profile.favoriteGenres || "",
       isReader: profile.isReader,
     },
@@ -83,6 +103,35 @@ export function EditProfileDialog({ profile, children, onSave, isLoading }: Edit
     });
     return () => subscription.unsubscribe();
   }, [form]);
+
+  // Синхронизируем форму когда profile загрузился/обновился извне (RHF defaultValues статичны)
+  React.useEffect(() => {
+    form.reset({
+      displayName: profile.displayName || "",
+      avatar: profile.avatar || "",
+      coverImage: profile.coverImage || "",
+      bio: profile.bio || "",
+      profileQuote: profile.profileQuote || "",
+      profileQuoteAuthor: profile.profileQuoteAuthor || "",
+      favoriteGenres: splitGenres(profile.favoriteGenres).join(", "),
+      isReader: profile.isReader,
+    });
+    setAvatarPreview(profile.avatar || "");
+    setCoverPreview(profile.coverImage || "");
+  }, [profile]);
+
+  React.useEffect(() => {
+    if (catalogLabelSet.size === 0) {
+      return;
+    }
+
+    const current = splitGenres(form.getValues("favoriteGenres"));
+    const normalizedFromCatalog = current.filter((genre) => catalogLabelSet.has(genre));
+
+    if (normalizedFromCatalog.length !== current.length) {
+      form.setValue("favoriteGenres", normalizedFromCatalog.join(", "), { shouldDirty: true });
+    }
+  }, [catalogLabelSet, form]);
 
   const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -164,28 +213,29 @@ export function EditProfileDialog({ profile, children, onSave, isLoading }: Edit
     });
   };
 
-  const currentGenres = form.watch("favoriteGenres") 
-    ? form.watch("favoriteGenres")!.split(",").filter(g => g.trim())
-    : [];
+  const currentGenres = splitGenres(form.watch("favoriteGenres"));
+
+  const availableCatalogGenres = React.useMemo(
+    () => genresCatalog.filter((genre) => !currentGenres.includes(genre.label)),
+    [genresCatalog, currentGenres],
+  );
+
+  let addGenreButtonLabel = "Добавить жанр из справочника";
+  if (isGenresCatalogLoading) {
+    addGenreButtonLabel = "Загрузка справочника жанров...";
+  } else if (availableCatalogGenres.length === 0) {
+    addGenreButtonLabel = "Все жанры выбраны";
+  }
 
   const addGenre = (genre: string) => {
-    const genres = [...currentGenres];
-    if (!genres.includes(genre)) {
-      genres.push(genre);
-      form.setValue("favoriteGenres", genres.join(","));
+    if (catalogLabelSet.has(genre) && !currentGenres.includes(genre)) {
+      form.setValue("favoriteGenres", [...currentGenres, genre].join(", "));
     }
-    setNewGenre("");
   };
 
   const removeGenre = (genreToRemove: string) => {
     const genres = currentGenres.filter(g => g !== genreToRemove);
-    form.setValue("favoriteGenres", genres.join(","));
-  };
-
-  const handleAddCustomGenre = () => {
-    if (newGenre.trim() && !currentGenres.includes(newGenre.trim())) {
-      addGenre(newGenre.trim());
-    }
+    form.setValue("favoriteGenres", genres.join(", "));
   };
 
   const onSubmit = (data: ProfileEditForm) => {
@@ -390,11 +440,44 @@ export function EditProfileDialog({ profile, children, onSave, isLoading }: Edit
 
             <FormField
               control={form.control}
+              name="profileQuote"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Любимая цитата</FormLabel>
+                  <FormControl>
+                    <Textarea
+                      placeholder="Добавьте цитату для профиля"
+                      className="resize-none"
+                      rows={2}
+                      {...field}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name="profileQuoteAuthor"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Автор цитаты</FormLabel>
+                  <FormControl>
+                    <Input placeholder="Например: А. П. Чехов" {...field} />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
               name="favoriteGenres"
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Любимые жанры</FormLabel>
-                    <div className="space-y-2">
+                    <div className="space-y-3">
                       <div className="flex flex-wrap gap-2">
                       {currentGenres.map((genre) => (
                         <Badge key={genre} variant="secondary" className="pr-1">
@@ -410,41 +493,56 @@ export function EditProfileDialog({ profile, children, onSave, isLoading }: Edit
                           </Button>
                         </Badge>
                       ))}
+                      {currentGenres.length === 0 && (
+                        <p className="text-sm text-muted-foreground">Жанры не выбраны</p>
+                      )}
                     </div>
-                    
-                      <div className="flex gap-2">
-                        <Input
-                          placeholder="Добавить жанр"
-                          value={newGenre}
-                        onChange={(e) => setNewGenre(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            e.preventDefault();
-                            handleAddCustomGenre();
-                          }
-                        }}
-                      />
-                        <Button type="button" size="sm" onClick={handleAddCustomGenre} className="shrink-0">
-                          <Plus className="h-4 w-4" />
-                        </Button>
-                      </div>
 
-                    <div className="flex flex-wrap gap-1">
-                      {commonGenres.map((genre) => (
-                        <Button
-                          key={genre}
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => addGenre(genre)}
-                          disabled={currentGenres.includes(genre)}
-                        >
-                          {genre}
-                        </Button>
-                      ))}
+                    <div className="space-y-2">
+                      <Popover open={genresPopoverOpen} onOpenChange={setGenresPopoverOpen}>
+                        <PopoverTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            role="combobox"
+                            aria-expanded={genresPopoverOpen}
+                            className="w-full justify-between"
+                            disabled={isGenresCatalogLoading || availableCatalogGenres.length === 0}
+                          >
+                            {addGenreButtonLabel}
+                            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                          <Command>
+                            <CommandInput placeholder="Поиск жанра..." />
+                            <CommandList>
+                              <CommandEmpty>Жанры не найдены</CommandEmpty>
+                              <CommandGroup>
+                                {availableCatalogGenres.map((genre) => (
+                                  <CommandItem
+                                    key={genre.id}
+                                    value={genre.label}
+                                    onSelect={() => {
+                                      addGenre(genre.label);
+                                      setGenresPopoverOpen(false);
+                                    }}
+                                  >
+                                    {genre.label}
+                                  </CommandItem>
+                                ))}
+                              </CommandGroup>
+                            </CommandList>
+                          </Command>
+                        </PopoverContent>
+                      </Popover>
+                      {!isGenresCatalogLoading && availableCatalogGenres.length === 0 && (
+                        <p className="text-sm text-muted-foreground">Все жанры из справочника уже выбраны</p>
+                      )}
                     </div>
                   </div>
                   <input type="hidden" {...field} />
+                  <FormMessage />
                 </FormItem>
               )}
             />

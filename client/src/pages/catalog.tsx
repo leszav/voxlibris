@@ -8,6 +8,9 @@ import { Separator } from "@/components/ui/separator";
 import { useInfiniteCatalogClubs } from "@/hooks/use-clubs";
 import { useGridColumns } from "@/hooks/use-grid-columns";
 import { AccountActivationBanner } from "@/components/AccountActivationBanner";
+import { UserCard, type UserCardData } from "@/components/social/UserCard";
+import { useQuery } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
 import { useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 
@@ -73,6 +76,17 @@ export default function Catalog() {
     fetchNextPage,
     error,
   } = useInfiniteCatalogClubs(debouncedSearch, pageSize);
+
+  const { data: foundUsers = [], isLoading: isUsersLoading } = useQuery({
+    queryKey: ["catalog-users-search", debouncedSearch],
+    queryFn: async (): Promise<UserCardData[]> => {
+      const params = new URLSearchParams({ q: debouncedSearch, type: "all", limit: "8" });
+      const res = await apiRequest<{ success: boolean; users: UserCardData[] }>(`/api/users/search?${params}`);
+      return res.users;
+    },
+    enabled: debouncedSearch.trim().length >= 2,
+    staleTime: 30_000,
+  });
 
   // Плоский список всех загруженных клубов
   const clubs = useMemo(() => data?.pages.flat() ?? [], [data]);
@@ -190,6 +204,36 @@ export default function Catalog() {
         </div>
 
         <AccountActivationBanner />
+
+        {debouncedSearch.trim().length >= 2 && (
+          <section className="mb-6 rounded-2xl border bg-card/40 p-4 sm:p-5">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold">Люди по запросу</h2>
+                <p className="text-sm text-muted-foreground">Чтецы и слушатели по запросу «{debouncedSearch.trim()}»</p>
+              </div>
+              {!isUsersLoading && foundUsers.length > 0 && (
+                <span className="text-xs text-muted-foreground">Найдено: {foundUsers.length}</span>
+              )}
+            </div>
+
+            {isUsersLoading && (
+              <div className="text-sm text-muted-foreground">Ищем пользователей...</div>
+            )}
+
+            {!isUsersLoading && foundUsers.length === 0 && (
+              <div className="text-sm text-muted-foreground">По запросу не найдено чтецов и слушателей</div>
+            )}
+
+            {!isUsersLoading && foundUsers.length > 0 && (
+              <div className="space-y-3">
+                {foundUsers.map((user) => (
+                  <UserCard key={user.id} user={user} />
+                ))}
+              </div>
+            )}
+          </section>
+        )}
 
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-4 lg:gap-8">
           {/* Filters Sidebar */}

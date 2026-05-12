@@ -126,6 +126,7 @@ export class ChatWebSocketClient {
       "history",
       "message_sent",
       "message_deleted",
+      "club:presence_update",
     ].forEach(forward);
   }
 
@@ -164,6 +165,16 @@ export class ChatWebSocketClient {
   getParticipants(payload: { clubId: string; channel?: string }) {
     if (!this.socket?.connected) return;
     this.socket.emit("get_participants", payload);
+  }
+
+  visitClub(clubId: string): void {
+    if (!this.socket?.connected) return;
+    this.socket.emit("club_visit", { clubId });
+  }
+
+  leaveClub(clubId: string): void {
+    if (!this.socket?.connected) return;
+    this.socket.emit("club_leave", { clubId });
   }
 
   on(event: string, handler: ChatEventHandler) {

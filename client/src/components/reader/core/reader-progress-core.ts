@@ -81,7 +81,8 @@ export function calculateReadingProgress(
   );
 
   if (currentChapter === safeTotalChapters) {
-    const fitsWithoutScroll = scrollHeight <= clientHeight + 1;
+    // scrollHeight=0 означает что DOM ещё не отрисован — в этом случае нельзя считать прогресс 100%
+    const fitsWithoutScroll = scrollHeight > 0 && scrollHeight <= clientHeight + 1;
     if (fitsWithoutScroll || scrollProgress >= 98) {
       totalProgress = 100;
     }

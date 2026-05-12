@@ -18,6 +18,8 @@ import { jwtAuth, requireActiveUser } from "./jwt-middleware.js";
 import { logger } from "./lib/logger.js";
 import { getPublicBaseUrl } from "./lib/public-base-url.js";
 import { storeOptimizedImageIfNeeded } from "./lib/uploaded-image-storage.js";
+import { activityService } from "./services/activity-service.js";
+import { gamificationService } from "./services/gamification-service.js";
 import {
   clearStudioStreamClosureIntent,
   setStudioStreamClosureIntent,
@@ -59,6 +61,40 @@ async function findInvitationByToken(token: string) {
   }
 
   return undefined;
+}
+
+function normalizeFavoriteGenresInput(input: unknown): string | null | undefined {
+  if (input === undefined) {
+    return undefined;
+  }
+
+  if (input === null) {
+    return null;
+  }
+
+  let rawValue = "";
+  if (Array.isArray(input)) {
+    const stringItems: string[] = [];
+    for (const item of input) {
+      if (typeof item === "string") {
+        stringItems.push(item);
+      }
+    }
+    rawValue = stringItems.join(",");
+  } else if (typeof input === "string") {
+    rawValue = input;
+  }
+
+  const normalized = rawValue
+    .split(/[,;\n]+/u)
+    .map((genre) => genre.trim())
+    .filter(Boolean);
+
+  if (normalized.length === 0) {
+    return null;
+  }
+
+  return Array.from(new Set(normalized)).join(", ");
 }
 
 // Улучшенный fileFilter с проверкой magic numbers
@@ -135,7 +171,12 @@ function validateStoragePath(path: string): { valid: boolean; normalizedPath?: s
     /^covers\/[a-zA-Z0-9-]+\.(jpg|jpeg|png|webp)$/,
     /^covers\/(club|personal)\/[a-fA-F0-9-]+\/[a-fA-F0-9-]+-cover\.(jpg|jpeg|png|webp)$/,
     /^books\/[a-fA-F0-9-]+\/content\.(epub|fb2|html)$/,
-    /^avatars\/[a-zA-Z0-9-]+\.(jpg|jpeg|png|webp)$/
+    /^avatars\/[a-zA-Z0-9-]+\.(jpg|jpeg|png|webp)$/,
+    /^avatars\/[a-fA-F0-9-]+\/[a-zA-Z0-9_-]+-[a-fA-F0-9-]+\.(jpg|jpeg|png|webp)$/,
+    /^profiles\/[a-fA-F0-9-]+\/[a-zA-Z0-9_-]+-[a-fA-F0-9-]+\.(jpg|jpeg|png|webp)$/,
+    /^gamification\/reward-assets\/[a-zA-Z0-9_-]+-[a-fA-F0-9-]+\.(jpg|jpeg|png|webp)$/,
+    /^gamification\/achievements\/[a-zA-Z0-9_-]+-[a-fA-F0-9-]+\.(jpg|jpeg|png|webp)$/,
+    /^clubs\/[a-fA-F0-9-]+\/[a-zA-Z0-9_-]+-[a-fA-F0-9-]+\.(jpg|jpeg|png|webp)$/,
   ];
 
   const isAllowed = allowedPatterns.some(pattern => {
@@ -318,7 +359,7 @@ export async function registerRoutes(
       if (inviter) {
         const baseUrl = await getPublicBaseUrl();
         await emailService.sendInvitationAccepted({
-          email: inviter.username, // assuming username is email
+          email: inviter.email,
           clubName: club.title,
           memberName: req.user.username,
           baseUrl,
@@ -326,6 +367,18 @@ export async function registerRoutes(
       }
 
       logger.debug(`[Clubs] User ${req.user.username} accepted invitation to club "${club.title}"`);
+
+      // Событие ленты: пользователь вступил в клуб
+      activityService.emit({
+        actorId: req.user.userId,
+        eventType: 'joined_club',
+        targetType: 'club',
+        targetId: club.id,
+        metadata: {
+          clubId: club.id,
+          clubName: club.title,
+        },
+      }).catch((err) => logger.warn('[activity] joined_club emit failed', err));
 
       res.json({
         message: 'Successfully joined the club',
@@ -1238,23 +1291,7 @@ export async function registerRoutes(
 
   // ===== USER PROFILES API =====
 
-  // Search users (для приглашений в клубы)
-  app.get("/api/users/search", jwtAuth, async (req: Request, res: Response) => {
-    try {
-      const { q } = req.query;
-      
-      if (!q || typeof q !== 'string' || q.length < 2) {
-        return res.json([]);
-      }
-
-      const results = await storage.searchUsers(q, 20);
-
-      res.json(results);
-    } catch (error) {
-      console.error("Search users error:", error);
-      res.status(500).json({ message: "Внутренняя ошибка сервера" });
-    }
-  });
+  // Search users — делегировано server/routes/users.ts (optionalJwtAuth, FTS, тип all|readers|listeners)
 
   // Get current user profile
   app.get("/api/users/current/profile", jwtAuth, async (req: Request, res: Response) => {
@@ -1328,7 +1365,14 @@ export async function registerRoutes(
         return res.status(401).json({ message: "Пользователь не аутентифицирован" });
       }
 
-      const { displayName, bio, favoriteGenres, isReader } = req.body;
+      const isReader = req.body.isReader;
+      const displayName = typeof req.body.displayName === 'string' ? req.body.displayName.trim() : null;
+      const bio = typeof req.body.bio === 'string' ? req.body.bio.trim() : null;
+      const hasProfileQuote = Object.hasOwn(req.body, 'profileQuote');
+      const hasProfileQuoteAuthor = Object.hasOwn(req.body, 'profileQuoteAuthor');
+      const profileQuote = typeof req.body.profileQuote === 'string' ? req.body.profileQuote.trim() : null;
+      const profileQuoteAuthor = typeof req.body.profileQuoteAuthor === 'string' ? req.body.profileQuoteAuthor.trim() : null;
+      const favoriteGenres = normalizeFavoriteGenresInput(req.body.favoriteGenres ?? req.body.favorite_genres);
       const avatar = await storeOptimizedImageIfNeeded(req.body.avatar, {
         type: "avatar",
         keyPrefix: `avatars/${currentUser.id}`,
@@ -1340,16 +1384,37 @@ export async function registerRoutes(
         filenamePrefix: "cover",
       });
 
-      const profileData = {
+      const profileData: {
+        displayName: string | null;
+        avatar: string | null;
+        coverImage: string | null;
+        bio: string | null;
+        profileQuote?: string | null;
+        profileQuoteAuthor?: string | null;
+        isReader: boolean;
+        favoriteGenres?: string | null;
+      } = {
         displayName,
-        avatar,
-        coverImage,
+        avatar: avatar ?? null,
+        coverImage: coverImage ?? null,
         bio,
-        favoriteGenres,
-        isReader: Boolean(isReader)
+        isReader: Boolean(isReader),
       };
+      if (hasProfileQuote) {
+        profileData.profileQuote = profileQuote || null;
+      }
+      if (hasProfileQuoteAuthor) {
+        profileData.profileQuoteAuthor = profileQuoteAuthor || null;
+      }
+      if (favoriteGenres !== undefined) {
+        profileData.favoriteGenres = favoriteGenres;
+      }
 
       const profile = await storage.createOrUpdateUserProfile(currentUser.id, profileData);
+
+      gamificationService.syncUserStateAndAward(currentUser.id, 'profile_updated').catch((err) => {
+        logger.warn({ err, userId: currentUser.id }, '[gamification] current profile sync failed');
+      });
 
       res.json({
         message: "Профиль обновлен",
@@ -1375,7 +1440,14 @@ export async function registerRoutes(
         return res.status(403).json({ message: "Недостаточно прав" });
       }
 
-      const { displayName, bio, favoriteGenres, isReader } = req.body;
+      const isReader = req.body.isReader;
+      const displayName = typeof req.body.displayName === 'string' ? req.body.displayName.trim() : null;
+      const bio = typeof req.body.bio === 'string' ? req.body.bio.trim() : null;
+      const hasProfileQuote = Object.hasOwn(req.body, 'profileQuote');
+      const hasProfileQuoteAuthor = Object.hasOwn(req.body, 'profileQuoteAuthor');
+      const profileQuote = typeof req.body.profileQuote === 'string' ? req.body.profileQuote.trim() : null;
+      const profileQuoteAuthor = typeof req.body.profileQuoteAuthor === 'string' ? req.body.profileQuoteAuthor.trim() : null;
+      const favoriteGenres = normalizeFavoriteGenresInput(req.body.favoriteGenres ?? req.body.favorite_genres);
       const avatar = await storeOptimizedImageIfNeeded(req.body.avatar, {
         type: "avatar",
         keyPrefix: `avatars/${profileUserId}`,
@@ -1387,16 +1459,37 @@ export async function registerRoutes(
         filenamePrefix: "cover",
       });
 
-      const profileData = {
+      const profileData: {
+        displayName: string | null;
+        avatar: string | null;
+        coverImage: string | null;
+        bio: string | null;
+        profileQuote?: string | null;
+        profileQuoteAuthor?: string | null;
+        isReader: boolean;
+        favoriteGenres?: string | null;
+      } = {
         displayName,
-        avatar,
-        coverImage,
+        avatar: avatar ?? null,
+        coverImage: coverImage ?? null,
         bio,
-        favoriteGenres,
-        isReader: Boolean(isReader)
+        isReader: Boolean(isReader),
       };
+      if (hasProfileQuote) {
+        profileData.profileQuote = profileQuote || null;
+      }
+      if (hasProfileQuoteAuthor) {
+        profileData.profileQuoteAuthor = profileQuoteAuthor || null;
+      }
+      if (favoriteGenres !== undefined) {
+        profileData.favoriteGenres = favoriteGenres;
+      }
 
       const profile = await storage.createOrUpdateUserProfile(profileUserId, profileData);
+
+      gamificationService.syncUserStateAndAward(profileUserId, 'profile_updated').catch((err) => {
+        logger.warn({ err, userId: profileUserId }, '[gamification] profile sync failed');
+      });
 
       res.json({
         message: "Профиль обновлен",

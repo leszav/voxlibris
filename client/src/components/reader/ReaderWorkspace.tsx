@@ -201,19 +201,26 @@ function usePersistProgressOnUnmount({
   scrollContainerRef,
   bookData,
   currentChapter,
+  contentLoading,
   clubId,
   bookId
 }: {
   scrollContainerRef: RefObject<HTMLDivElement | null>;
   bookData: ProcessedBookData;
   currentChapter: number | null;
+  contentLoading: boolean;
   clubId?: string;
   bookId?: string;
 }) {
+  const contentLoadingRef = useRef(contentLoading);
+  useEffect(() => { contentLoadingRef.current = contentLoading; }, [contentLoading]);
+
   useEffect(() => {
     return () => {
       const container = scrollContainerRef.current;
       if (!container || !bookData || bookData.totalChapters === 0 || currentChapter === null) return;
+      // Не сохраняем если контент ещё не загружен — иначе totalChapters=1 (дефолт) даст progress=100
+      if (contentLoadingRef.current) return;
 
       const payload = createReaderProgressPayload({
         currentChapter,
@@ -976,6 +983,7 @@ export function ReaderWorkspace({ bookId: propBookId, clubId, params }: Readonly
     scrollContainerRef,
     bookData,
     currentChapter,
+    contentLoading,
     clubId,
     bookId
   });

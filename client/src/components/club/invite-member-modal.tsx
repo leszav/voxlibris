@@ -52,7 +52,8 @@ export function InviteMemberModal({ clubId, clubTitle }: InviteMemberModalProps)
         headers: { 'Authorization': `Bearer ${token}` },
       });
       if (!response.ok) return [];
-      return response.json();
+      const data = await response.json();
+      return Array.isArray(data) ? data : (data.users ?? []);
     },
     enabled: searchQuery.length >= 2,
   });

@@ -40,8 +40,8 @@ interface ClubDiscussionBoardProps {
 
 function stripHtml(raw: string): string {
   return raw
-    .replace(/<[^>]+>/g, " ")
-    .replace(/\s+/g, " ")
+    .replaceAll(/<[^>]+>/g, " ")
+    .replaceAll(/\s+/g, " ")
     .trim();
 }
 

@@ -90,18 +90,64 @@ export class GenresRepository extends BaseRepository {
   }
 
   async updateGenre(code: string, payload: Partial<InsertGenre>): Promise<Genre | undefined> {
+    const genrePatch: Record<string, unknown> = {
+      updatedAt: sql`now()`,
+    };
+
+    if (payload.labelRu === undefined) {
+      // no-op
+    } else {
+      genrePatch.labelRu = payload.labelRu;
+    }
+
+    if (payload.labelEn === undefined) {
+      // no-op
+    } else {
+      genrePatch.labelEn = payload.labelEn ?? null;
+    }
+
+    if (payload.groupKey === undefined) {
+      // no-op
+    } else {
+      genrePatch.groupKey = payload.groupKey ?? null;
+    }
+
+    if (payload.description === undefined) {
+      // no-op
+    } else {
+      genrePatch.description = payload.description ?? null;
+    }
+
+    if (payload.aliasesJson === undefined) {
+      // no-op
+    } else {
+      genrePatch.aliasesJson = payload.aliasesJson ?? null;
+    }
+
+    if (payload.sortOrder === undefined) {
+      // no-op
+    } else {
+      genrePatch.sortOrder = payload.sortOrder;
+    }
+
+    if (payload.isActive === undefined) {
+      // no-op
+    } else {
+      genrePatch.isActive = payload.isActive;
+    }
+
     const result = await this.db
       .update(genres)
-      .set({
-        ...(payload.labelRu !== undefined ? { labelRu: payload.labelRu } : {}),
-        ...(payload.labelEn !== undefined ? { labelEn: payload.labelEn ?? null } : {}),
-        ...(payload.groupKey !== undefined ? { groupKey: payload.groupKey ?? null } : {}),
-        ...(payload.description !== undefined ? { description: payload.description ?? null } : {}),
-        ...(payload.aliasesJson !== undefined ? { aliasesJson: payload.aliasesJson ?? null } : {}),
-        ...(payload.sortOrder !== undefined ? { sortOrder: payload.sortOrder } : {}),
-        ...(payload.isActive !== undefined ? { isActive: payload.isActive } : {}),
-        updatedAt: sql`now()`,
-      })
+      .set(genrePatch)
+      .where(eq(genres.code, code))
+      .returning();
+
+    return result[0];
+  }
+
+  async deleteGenre(code: string): Promise<Genre | undefined> {
+    const result = await this.db
+      .delete(genres)
       .where(eq(genres.code, code))
       .returning();
 

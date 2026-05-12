@@ -44,6 +44,7 @@ const bookshelfStatuses = [
   { id: "completed", label: "Прочитано", color: "bg-green-500" },
   { id: "planned", label: "Хочу прочитать", color: "bg-yellow-500" },
   { id: "abandoned", label: "Брошено", color: "bg-gray-500" },
+  { id: "shelf", label: "Книжная полка", color: "bg-amber-600" },
 ];
 
 function parsePlannedYear(notes: string | null): number | null {
@@ -57,6 +58,18 @@ function parsePlannedYear(notes: string | null): number | null {
   }
 }
 
+function isShelvedCompletedStatus(item: BookWithStatus): boolean {
+  if (item.bookType !== "personal" || item.status !== "completed") return false;
+  if (!item.notes) return false;
+
+  try {
+    const parsed = JSON.parse(item.notes) as { shelved?: boolean };
+    return parsed.shelved === true;
+  } catch {
+    return false;
+  }
+}
+
 export function Bookshelf({ userId }: BookshelfProps) {
   const [activeStatus, setActiveStatus] = React.useState("reading");
   const { toast } = useToast();
@@ -65,6 +78,11 @@ export function Bookshelf({ userId }: BookshelfProps) {
   const { data: booksWithStatus = [], isLoading } = useQuery<BookWithStatus[]>({
     queryKey: ["reading-status", userId, activeStatus],
     queryFn: async () => {
+      if (activeStatus === "shelf") {
+        const completed = await apiRequest<BookWithStatus[]>("/api/reading-status?status=completed&bookType=personal");
+        return completed.filter(isShelvedCompletedStatus);
+      }
+
       return apiRequest<BookWithStatus[]>(`/api/reading-status?status=${activeStatus}`);
     },
   });
@@ -133,6 +151,7 @@ export function Bookshelf({ userId }: BookshelfProps) {
               {activeStatus === "completed" && "Пока нет прочитанных книг"}
               {activeStatus === "planned" && "Нет книг в планах"}
               {activeStatus === "abandoned" && "Нет брошенных книг"}
+              {activeStatus === "shelf" && "Полка пуста. Отмечайте книги как \"Прочитано\" и добавляйте их на полку в личной библиотеке."}
             </p>
           </CardContent>
         </Card>
@@ -194,7 +213,7 @@ export function Bookshelf({ userId }: BookshelfProps) {
                       )}
                       
                       {/* Меню смены статуса */}
-                      {item.status !== 'abandoned' && (
+                      {activeStatus !== 'shelf' && item.status !== 'abandoned' && (
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
                             <Button variant="ghost" size="sm" className="mt-2 h-7 text-xs">
