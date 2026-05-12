@@ -162,6 +162,27 @@ BEGIN
     FROM information_schema.tables
     WHERE table_schema = 'public' AND table_name = 'achievement_reward_assets'
   ) THEN
+    -- Удаляем старые reward_assets для идемпотентности
+    DELETE FROM "achievement_reward_assets"
+    WHERE "name_ru" IN (
+      'Звездный читатель',
+      'Мастер жанра',
+      'Социальная бабочка',
+      'Заметный критик',
+      'Первопроходец',
+      'Одна звезда',
+      'Две звезды',
+      'Три звезды',
+      'Четыре звезды',
+      'Пять звезд',
+      'Начинающий читатель',
+      'Преданный книголюб',
+      'Мудрец библиотеки',
+      'Чемпион чтения',
+      'Легенда библиотеки'
+    );
+
+    -- Вставляем свежие данные
     INSERT INTO "achievement_reward_assets" (
       "asset_type",
       "name_ru",
@@ -325,15 +346,6 @@ BEGIN
         '["титул","легенда"]',
         50,
         true
-      )
-    ON CONFLICT ("asset_type", "name_ru") DO UPDATE
-    SET
-      "image_url" = EXCLUDED."image_url",
-      "description_ru" = EXCLUDED."description_ru",
-      "group_key" = EXCLUDED."group_key",
-      "tags" = EXCLUDED."tags",
-      "sort_order" = EXCLUDED."sort_order",
-      "is_active" = EXCLUDED."is_active",
-      "updated_at" = now();
+      );
   END IF;
 END $$;
