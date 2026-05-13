@@ -624,6 +624,16 @@ const expensiveMax = parsePositiveIntEnv("RL_EXPENSIVE_MAX", 30);
 
 const shouldSkipRiskLimiter = (req: Request) => isHealthPath(req) || isAuthPath(req);
 
+// Check if user is admin (for skipping rate limits on expensive operations)
+function isAdminUser(req: Request): boolean {
+	const token = getAccessTokenFromRequest(req);
+	if (!token) {
+		return false;
+	}
+	const payload = authService.verifyAccessToken(token);
+	return payload?.role === 'admin';
+}
+
 // Anti-burst protection for unauthenticated traffic
 const anonymousBurstLimiter = rateLimit({
 	...rateLimitCommonOptions,
@@ -685,7 +695,7 @@ const expensiveLimiter = rateLimit({
 	windowMs: expensiveWindowMs,
 	max: expensiveMax,
 	keyGenerator: getGeneralRateLimitKey,
-	skip: (req) => shouldSkipRiskLimiter(req) || !isExpensivePath(req),
+	skip: (req) => shouldSkipRiskLimiter(req) || !isExpensivePath(req) || isAdminUser(req),
 	message: {
 		error: "Too many heavy requests. Please retry later.",
 		retryAfter: `${Math.ceil(expensiveWindowMs / 1000)} seconds`,

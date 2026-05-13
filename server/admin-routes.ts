@@ -1100,7 +1100,7 @@ type StatusConditionMap = Record<AdminBookStatus, SQL<unknown>>;
 function sourceWhere(conditions: SQL<unknown>[]): SQL<unknown> | undefined {
   if (conditions.length === 0) return undefined;
   if (conditions.length === 1) return conditions[0];
-  return and(...conditions) as SQL<unknown>;
+  return and(...conditions);
 }
 
 function compactConditions(conditions: Array<SQL<unknown> | undefined>): SQL<unknown>[] {
@@ -3843,7 +3843,7 @@ router.post('/dm/reports/:reportId/review', jwtAuth, requireFullAdmin, async (re
     }
 
     const actionType = status === 'reviewed' ? 'review_dm_report' : 'dismiss_dm_report';
-    await logAction(req, actionType as AdminActionType, 'message', reportId, JSON.stringify({ status }));
+    await logAction(req, actionType, 'message', reportId, JSON.stringify({ status }));
 
     res.json({ success: true, reportId, status });
   } catch (error) {

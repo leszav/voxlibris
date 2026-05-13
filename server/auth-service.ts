@@ -357,7 +357,7 @@ export class AuthService {
         password: hashedPassword,
         invitedBy: invitedBy || null,
         invitedToClub: invitedToClub || null,
-        status: 'pending' as UserStatus, // все пользователи начинают как pending
+        status: 'pending', // все пользователи начинают как pending
       };
       
       const dbNewUser = await storage.createUser(userCreateData);
