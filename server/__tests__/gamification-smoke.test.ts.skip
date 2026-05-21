@@ -1,0 +1,231 @@
+/**
+ * Smoke-тест полного цикла геймификации:
+ * создание достижения → syncUserStateAndAward → проверка user_achievements → streak → очистка
+ *
+ * Требует: DATABASE_URL в env (dev БД)
+ * Запуск: DATABASE_URL=... node --experimental-strip-types server/__tests__/gamification-smoke.test.ts
+ *   или через pnpm test (если БД доступна)
+ */
+import { describe, it, before, after } from 'node:test';
+import assert from 'node:assert/strict';
+
+import { eq, and, desc } from 'drizzle-orm';
+import {
+  achievements,
+  activityEvents,
+  userAchievements,
+  users,
+} from '../../shared/schema.js';
+import { getDbConnection } from '../repositories/BaseRepository.js';
+import { gamificationService } from '../services/gamification-service.js';
+
+// ────────────────────────────────────────────────────────────────────────────
+// Вспомогательные данные теста
+// ────────────────────────────────────────────────────────────────────────────
+
+const TEST_ACH_CODE = `smoke_tenure_zero_${Date.now()}`;
+let testAchievementId: string | null = null;
+let testUserId: string | null = null;
+
+describe('Gamification smoke-test (full cycle)', () => {
+  before(async () => {
+    const db = getDbConnection();
+
+    // 1. Берём первого пользователя из БД
+    const userRows = await db
+      .select({ id: users.id })
+      .from(users)
+      .limit(1);
+
+    assert.ok(userRows.length > 0, 'В БД нет ни одного пользователя — smoke-тест невозможен');
+    testUserId = userRows[0]!.id;
+
+    // 2. Создаём временное достижение (условие tenure_days >= 0 → всегда выполняется)
+    const inserted = await db
+      .insert(achievements)
+      .values({
+        code: TEST_ACH_CODE,
+        titleRu: '[SMOKE] Первый день',
+        descriptionRu: 'Автоматически выдаётся smoke-тестом',
+        iconType: 'badge',
+        status: 'active',
+        sortOrder: 9999,
+        conditionsPayload: {
+          logic: 'AND',
+          items: [
+            {
+              blockCode: 'tenure_days',
+              operator: '>=',
+              valueType: 'number',
+              value: 0,
+            },
+          ],
+        },
+      })
+      .returning({ id: achievements.id });
+
+    assert.ok(inserted.length > 0, 'Не удалось создать тестовое достижение');
+    testAchievementId = inserted[0]!.id;
+
+    console.log(`[smoke] Пользователь: ${testUserId}`);
+    console.log(`[smoke] Достижение создано: ${testAchievementId} (code=${TEST_ACH_CODE})`);
+  });
+
+  after(async () => {
+    const db = getDbConnection();
+
+    // Удаляем награды теста
+    if (testUserId && testAchievementId) {
+      await db
+        .delete(userAchievements)
+        .where(
+          and(
+            eq(userAchievements.userId, testUserId),
+            eq(userAchievements.achievementId, testAchievementId),
+          ),
+        );
+    }
+
+    // Удаляем тестовое достижение
+    if (testAchievementId) {
+      await db
+        .delete(achievements)
+        .where(eq(achievements.id, testAchievementId));
+    }
+
+    console.log('[smoke] Тестовые данные очищены');
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+
+  it('syncUserStateAndAward выдаёт тестовое достижение', async () => {
+    assert.ok(testUserId, 'testUserId не инициализирован');
+    assert.ok(testAchievementId, 'testAchievementId не инициализирован');
+
+    const result = await gamificationService.syncUserStateAndAward(testUserId, 'smoke_test');
+
+    console.log(`[smoke] checked=${result.checked}, awarded=${result.awarded.length}`);
+    assert.ok(result.checked > 0, 'Нет активных достижений для проверки');
+
+    const wasAwarded = result.awarded.some((a) => a.achievementId === testAchievementId);
+    assert.ok(wasAwarded, `Достижение ${testAchievementId} не было выдано. Выданы: ${JSON.stringify(result.awarded.map((a) => a.code))}`);
+  });
+
+  it('достижение записано в user_achievements', async () => {
+    assert.ok(testUserId, 'testUserId не инициализирован');
+    assert.ok(testAchievementId, 'testAchievementId не инициализирован');
+
+    const db = getDbConnection();
+    const rows = await db
+      .select()
+      .from(userAchievements)
+      .where(
+        and(
+          eq(userAchievements.userId, testUserId),
+          eq(userAchievements.achievementId, testAchievementId),
+        ),
+      );
+
+    assert.equal(rows.length, 1, 'Ожидается ровно 1 запись в user_achievements');
+    const row = rows[0]!;
+    assert.ok(row.awardedAt instanceof Date, 'awardedAt должен быть датой');
+    console.log(`[smoke] user_achievements запись: awardedAt=${row.awardedAt.toISOString()}`);
+  });
+
+  it('повторный вызов не дублирует достижение', async () => {
+    assert.ok(testUserId, 'testUserId не инициализирован');
+    assert.ok(testAchievementId, 'testAchievementId не инициализирован');
+
+    const result = await gamificationService.syncUserStateAndAward(testUserId, 'smoke_test_recheck');
+
+    const wasAwardedAgain = result.awarded.some((a) => a.achievementId === testAchievementId);
+    assert.ok(!wasAwardedAgain, 'Достижение не должно выдаваться повторно');
+
+    const db = getDbConnection();
+    const rows = await db
+      .select()
+      .from(userAchievements)
+      .where(
+        and(
+          eq(userAchievements.userId, testUserId),
+          eq(userAchievements.achievementId, testAchievementId),
+        ),
+      );
+    assert.equal(rows.length, 1, 'Дублей в user_achievements быть не должно');
+    console.log('[smoke] Дедупликация работает корректно');
+  });
+
+  it('getUserStreak возвращает корректную структуру', async () => {
+    assert.ok(testUserId, 'testUserId не инициализирован');
+
+    const streak = await gamificationService.getUserStreak(testUserId);
+
+    assert.ok(typeof streak.currentStreakDays === 'number', 'currentStreakDays должен быть числом');
+    assert.ok(typeof streak.bestStreakDays === 'number', 'bestStreakDays должен быть числом');
+    assert.ok(streak.currentStreakDays >= 0, 'currentStreakDays >= 0');
+    assert.ok(streak.bestStreakDays >= 0, 'bestStreakDays >= 0');
+    console.log(`[smoke] streak: current=${streak.currentStreakDays}, best=${streak.bestStreakDays}, lastActive=${streak.lastActiveDate}`);
+  });
+
+  it('markUserActive обновляет стрик', async () => {
+    assert.ok(testUserId, 'testUserId не инициализирован');
+
+    const streakBefore = await gamificationService.getUserStreak(testUserId);
+    await gamificationService.markUserActive(testUserId, new Date());
+    const streakAfter = await gamificationService.getUserStreak(testUserId);
+
+    // После markUserActive стрик должен быть >= 1
+    assert.ok(streakAfter.currentStreakDays >= 1, 'После markUserActive стрик должен быть >= 1');
+    assert.ok(streakAfter.bestStreakDays >= streakBefore.bestStreakDays, 'bestStreak не может уменьшиться');
+    console.log(`[smoke] markUserActive: before=${streakBefore.currentStreakDays} → after=${streakAfter.currentStreakDays}`);
+  });
+
+  it('listAwardedAchievements содержит тестовое достижение', async () => {
+    assert.ok(testUserId, 'testUserId не инициализирован');
+    assert.ok(testAchievementId, 'testAchievementId не инициализирован');
+
+    const list = await gamificationService.listAwardedAchievements(testUserId);
+    const found = list.find((a) => a.achievementId === testAchievementId);
+    assert.ok(found, 'Тестовое достижение должно быть в списке наград пользователя');
+    assert.equal(found.code, TEST_ACH_CODE);
+    console.log(`[smoke] listAwardedAchievements: найдено ${list.length} достижений`);
+  });
+
+  it('checkStreaksDaily выполняется без ошибок', async () => {
+    const count = await gamificationService.checkStreaksDaily(new Date());
+    assert.ok(typeof count === 'number', 'checkStreaksDaily должен вернуть число');
+    assert.ok(count >= 0, 'count >= 0');
+    console.log(`[smoke] checkStreaksDaily: сброшено стриков = ${count}`);
+  });
+
+  it('выдача достижения создаёт запись в activity_events', async () => {
+    assert.ok(testUserId, 'testUserId не инициализирован');
+    assert.ok(testAchievementId, 'testAchievementId не инициализирован');
+
+    const db = getDbConnection();
+    const rows = await db
+      .select({
+        actorId: activityEvents.actorId,
+        eventType: activityEvents.eventType,
+        targetType: activityEvents.targetType,
+        targetId: activityEvents.targetId,
+      })
+      .from(activityEvents)
+      .where(
+        and(
+          eq(activityEvents.actorId, testUserId),
+          eq(activityEvents.eventType, 'achievement_unlocked'),
+          eq(activityEvents.targetId, testAchievementId),
+        ),
+      )
+      .orderBy(desc(activityEvents.createdAt))
+      .limit(1);
+
+    assert.equal(rows.length, 1, 'В activity_events должна быть запись achievement_unlocked');
+    const row = rows[0]!;
+    assert.equal(row.eventType, 'achievement_unlocked');
+    assert.equal(row.targetType, 'achievement');
+    assert.equal(row.targetId, testAchievementId);
+    console.log(`[smoke] activity_events: eventType=${row.eventType}, targetType=${row.targetType}`);
+  });
+});

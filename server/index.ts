@@ -16,6 +16,7 @@ import { createClient } from "redis";
 import slowDown from "express-slow-down";
 import helmet from "helmet";
 import { Server as SocketIOServer } from "socket.io";
+import jwt, { type JwtPayload } from "jsonwebtoken";
 import adminRoutes from "./admin-routes.js";
 import analyticsRoutes from "./analytics-routes.js";
 import { setupAuthRoutes } from "./auth-routes.js";
@@ -26,7 +27,7 @@ import clubReaderRoutes from "./club-reader-routes.js";
 import clubRoutes from "./club-routes.js";
 import readingStatusRoutes from "./reading-status-routes.js";
 import { validateEnvironment } from "./config/validate.js";
-import { jwtAuth } from "./jwt-middleware.js";
+import { jwtAuth, optionalJwtAuth } from "./jwt-middleware.js";
 import { registerRoutes } from "./routes.js";
 import readerRoutes from "./routes/reader.js";
 import feedbackRoutes from "./routes/feedback.js";
@@ -34,6 +35,7 @@ import { serveStatic } from "./static.js";
 import { setupWebSocketHandlers } from "./websocket.js";
 import { initializeReaderWebSocket } from "./websocket-reader.js";
 import { initializeChatWebSocket } from "./websocket-chat.js";
+import { initializeDmHandlers } from "./websocket-dm.js";
 import { setupReadingSessionsHandlers } from "./websocket/reading-sessions.js";
 import { scheduler } from "./services/scheduler.js";
 import readingSessionsRoutes from "./routes/reading-sessions.js";
@@ -42,12 +44,36 @@ import { registerIO } from "./lib/socket-registry.js";
 import questionsRoutes from "./routes/questions.js";
 import scheduleRoutes from "./routes/schedule.js";
 import studioStreamRouter from "./routes/studio-stream.js";
+import socialRoutes from "./routes/social.js";
+import feedRoutes from "./routes/feed.js";
+import usersRoutes from "./routes/users.js";
+import presenceRoutes from "./routes/presence.js";
+import dmRoutes from "./routes/direct-messages.js";
+import recommendationsRoutes from "./routes/recommendations.js";
+import gamificationAdminRoutes from "./routes/gamification-admin.js";
+import gamificationRoutes from "./routes/gamification.js";
 import { logger } from "./lib/logger.js";
 import { loadFeatureFlags } from "./lib/feature-flags.js";
 import { responseCompression } from "./lib/response-compression.js";
 import { createIcecastLiveProxy } from "./lib/icecast-live-proxy.js";
 
 export const app = express();
+
+function formatUnknownError(error: unknown): string {
+	if (error instanceof Error) {
+		return error.message;
+	}
+
+	if (typeof error === "string") {
+		return error;
+	}
+
+	try {
+		return JSON.stringify(error);
+	} catch {
+		return "Unknown error";
+	}
+}
 
 // Trust proxy для корректной работы rate limiting за reverse proxy (CapRover/Traefik)
 // trust proxy: 1 — trust only first hop, предотвращает spoofing от пользователей
@@ -73,6 +99,43 @@ const io = new SocketIOServer(httpServer, {
 	transports: ["websocket", "polling"],
 });
 registerIO(io);
+
+// Опциональная аутентификация для главного Socket.IO.
+// Не блокирует анонимных клиентов — просто декодирует JWT если он есть
+// и сохраняет userId в socket.data для DM-обработчиков.
+io.use((socket, next) => {
+	try {
+		const auth = socket.handshake.auth as Record<string, unknown> | undefined;
+		const token =
+			(typeof auth?.token === 'string' ? auth.token : undefined) ||
+			socket.handshake.headers.authorization?.replace('Bearer ', '') ||
+			/accessToken=([^;]+)/.exec(socket.handshake.headers.cookie ?? '')?.[1];
+
+		if (token) {
+			const secret = process.env.JWT_SECRET;
+			if (secret) {
+				const decoded = jwt.verify(token, secret) as JwtPayload & { userId?: string };
+				if (decoded.userId) {
+					socket.data.userId = decoded.userId;
+				}
+			}
+		}
+	} catch {
+		// Игнорируем ошибки auth — разрешаем анонимные соединения
+	}
+	next();
+});
+
+// Главный Socket.IO: пользователи могут присоединяться к своей персональной комнате
+// для получения real-time событий ленты (feed:new_event).
+// Клиент должен вызвать emit('join_user_room', userId) после подключения.
+io.on('connection', (socket) => {
+	socket.on('join_user_room', (userId: unknown) => {
+		if (typeof userId === 'string' && userId.length > 0 && userId.length < 64) {
+			void socket.join(`user:${userId}`);
+		}
+	});
+});
 
 // Utility functions
 export function log(message: string, source = "express") {
@@ -148,10 +211,11 @@ app.use(
 					defaultSrc: ["'self'"],
 					styleSrc: ["'self'", "'unsafe-inline'"],
 					fontSrc: ["'self'"],
-					imgSrc: ["'self'", "data:", "https:"],
+					imgSrc: ["'self'", "data:", "https:", "blob:"],
 					scriptSrc: ["'self'", "https://mc.yandex.ru", "https://mc.yandex.com"],
 					connectSrc: ["'self'", "wss:", "https:"],
 					// blob: — для воспроизведения mic-check записи (createObjectURL)
+					// blob: в imgSrc — для загрузки локальных изображений через canvas (gamification админка)
 					// https://radio.voxlibris.ru — для воспроизведения Icecast потока слушателями
 					mediaSrc: ["'self'", "blob:", "https://radio.voxlibris.ru"],
 				frameSrc: ["'none'"],
@@ -561,6 +625,16 @@ const expensiveMax = parsePositiveIntEnv("RL_EXPENSIVE_MAX", 30);
 
 const shouldSkipRiskLimiter = (req: Request) => isHealthPath(req) || isAuthPath(req);
 
+// Check if user is admin (for skipping rate limits on expensive operations)
+function isAdminUser(req: Request): boolean {
+	const token = getAccessTokenFromRequest(req);
+	if (!token) {
+		return false;
+	}
+	const payload = authService.verifyAccessToken(token);
+	return payload?.role === 'admin';
+}
+
 // Anti-burst protection for unauthenticated traffic
 const anonymousBurstLimiter = rateLimit({
 	...rateLimitCommonOptions,
@@ -622,7 +696,7 @@ const expensiveLimiter = rateLimit({
 	windowMs: expensiveWindowMs,
 	max: expensiveMax,
 	keyGenerator: getGeneralRateLimitKey,
-	skip: (req) => shouldSkipRiskLimiter(req) || !isExpensivePath(req),
+	skip: (req) => shouldSkipRiskLimiter(req) || !isExpensivePath(req) || isAdminUser(req),
 	message: {
 		error: "Too many heavy requests. Please retry later.",
 		retryAfter: `${Math.ceil(expensiveWindowMs / 1000)} seconds`,
@@ -752,6 +826,9 @@ initializeReaderWebSocket(httpServer);
 // Initialize Club Chat WebSocket
 initializeChatWebSocket(httpServer);
 
+// Initialize DM real-time handlers
+initializeDmHandlers(io);
+
 // Initialize Reading Sessions WebSocket namespace
 const readingSessionsNamespace = io.of('/reading-sessions');
 setupReadingSessionsHandlers(io, readingSessionsNamespace);
@@ -794,7 +871,7 @@ try {
 	validateEnvironment();
 	log("Environment validation passed");
 } catch (error: unknown) {
-	const errorMessage = error instanceof Error ? error.message : String(error);
+	const errorMessage = formatUnknownError(error);
 	console.error("Environment validation failed:", errorMessage);
 	process.exit(1);
 }
@@ -849,6 +926,30 @@ try {
 	// Setup Feedback routes (no JWT required - public endpoint)
 	app.use("/api/v1/feedback", feedbackRoutes);
 
+	// Setup Social Graph routes (JWT protected)
+	app.use("/api/social", jwtAuth, socialRoutes);
+
+	// Setup Activity Feed routes (optionalJwtAuth — /activity/:userId публичен, остальные проверяют req.user сами)
+	app.use("/api/feed", optionalJwtAuth, feedRoutes);
+
+	// Setup Users search & public profiles (JWT optional — гости тоже могут искать)
+	app.use("/api/users", usersRoutes);
+
+	// Presence — онлайн-статус пользователей в клубах
+	app.use("/api/presence", presenceRoutes);
+
+	// Direct Messages
+	app.use("/api/dm", jwtAuth, dmRoutes);
+
+	// Recommendations (Sprint 2.6, Stage A)
+	app.use("/api/recommendations", jwtAuth, recommendationsRoutes);
+
+	// Gamification admin constructor
+	app.use("/api/admin/gamification", jwtAuth, gamificationAdminRoutes);
+
+	// Gamification user read API
+	app.use("/api/gamification", jwtAuth, gamificationRoutes);
+
 	// Start scheduler for notifications (only in production or if enabled)
 	if (process.env.NODE_ENV === 'production' || process.env.ENABLE_SCHEDULER === 'true') {
 		scheduler.start();
@@ -866,7 +967,7 @@ try {
 		logger.error(
 			{
 				status,
-				error: err instanceof Error ? { message: err.message, stack: err.stack } : String(err),
+				error: err instanceof Error ? { message: err.message, stack: err.stack } : formatUnknownError(err),
 			},
 			"Unhandled request error",
 		);

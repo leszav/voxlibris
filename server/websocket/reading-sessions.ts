@@ -3,6 +3,7 @@ import { storage, repositories } from '../repositories/index.js';
 import { logger } from '../lib/logger.js';
 import { authService } from '../auth-service.js';
 import { sessionAnalyticsService } from '../services/session-analytics-service.js';
+import { gamificationService } from '../services/gamification-service.js';
 
 interface AuthenticatedSocket extends Socket {
   userId?: string;
@@ -10,6 +11,22 @@ interface AuthenticatedSocket extends Socket {
 
 const readingSessionStatuses = ['active', 'paused', 'completed', 'cancelled'] as const;
 type ReadingSessionStatus = typeof readingSessionStatuses[number];
+
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  if (typeof error === 'string') {
+    return error;
+  }
+
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return 'Unknown error';
+  }
+}
 
 /**
  * WebSocket обработчики для сессий чтения
@@ -20,7 +37,7 @@ export function setupReadingSessionsHandlers(_io: SocketIOServer, namespace: Nam
       const auth = socket.handshake.auth as Record<string, unknown> | undefined;
       const authToken = typeof auth?.token === 'string' ? auth.token : undefined;
       const headerToken = socket.handshake.headers.authorization?.replace('Bearer ', '');
-      const cookieToken = socket.handshake.headers.cookie?.match(/(?:^|;\s*)accessToken=([^;]+)/)?.[1];
+      const cookieToken = /(?:^|;\s*)accessToken=([^;]+)/.exec(socket.handshake.headers.cookie ?? '')?.[1];
       const token = authToken || headerToken || cookieToken;
 
       if (!token) {
@@ -33,14 +50,14 @@ export function setupReadingSessionsHandlers(_io: SocketIOServer, namespace: Nam
       }
 
       const user = await storage.getUser(payload.userId);
-      if (!user || user.status !== 'active' || !user.emailConfirmed) {
+      if (user?.status !== 'active' || !user?.emailConfirmed) {
         return next(new Error('User not allowed'));
       }
 
       socket.userId = payload.userId;
       next();
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = formatUnknownError(error);
       logger.error({ error: errorMessage }, 'Reading sessions websocket authentication error');
       next(new Error('Authentication failed'));
     }
@@ -86,6 +103,10 @@ export function setupReadingSessionsHandlers(_io: SocketIOServer, namespace: Nam
         // Обновляем количество слушателей
         const listenerCount = await storage.readingSessions.getSessionListenerCount(sessionId);
         await storage.readingSessions.updateListenerCount(sessionId, listenerCount);
+
+        gamificationService.recordUserActivityAndAward(userId, 'session_join_socket').catch((err) => {
+          logger.warn({ err, userId, sessionId }, '[gamification] session join socket sync failed');
+        });
 
         // Уведомляем всех в комнате
         namespace.to(`session:${sessionId}`).emit('reading-session:listener-joined', {

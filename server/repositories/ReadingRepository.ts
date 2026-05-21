@@ -26,7 +26,6 @@ import {
   type InsertReaderRating,
   type UserProfile,
   type InsertUserProfile,
-  type User
 } from '../../shared/schema.js';
 
 /**
@@ -502,24 +501,25 @@ export class ReadingRepository extends BaseRepository {
   /**
    * Получение списка слушателей сессии
    */
-  async getSessionListeners(sessionId: string): Promise<User[]> {
+  async getSessionListeners(sessionId: string): Promise<{ id: string; username: string; displayName: string | null; avatar: string | null }[]> {
     try {
       const result = await this.db
         .select({
           id: users.id,
           username: users.username,
-          role: users.role,
-          createdAt: users.createdAt,
+          displayName: userProfiles.displayName,
+          avatar: userProfiles.avatar,
         })
         .from(sessionListeners)
         .innerJoin(users, eq(sessionListeners.listenerId, users.id))
+        .leftJoin(userProfiles, eq(userProfiles.userId, users.id))
         .where(and(
           eq(sessionListeners.sessionId, sessionId),
           eq(sessionListeners.isActive, true)
         ))
         .orderBy(asc(sessionListeners.joinedAt));
 
-      return result as User[];
+      return result;
     } catch (error) {
       this.logError('getSessionListeners', error);
       throw new Error('Failed to get session listeners');

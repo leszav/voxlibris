@@ -18,7 +18,7 @@ function isSystemElevated(req: Request): boolean {
 
 async function getClubRoleForUser(clubId: string, userId: string): Promise<'owner' | 'moderator' | 'member' | null> {
   const membership = await storage.getUserClubMembership(clubId, userId);
-  if (!membership || !membership.isActive) {
+  if (!membership?.isActive) {
     return null;
   }
 

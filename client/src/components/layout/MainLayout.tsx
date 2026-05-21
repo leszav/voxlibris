@@ -1,5 +1,5 @@
 import { Link, useLocation } from "wouter";
-import { Search, User, Menu, Settings, Construction, LogOut, House, Compass, BookOpen } from "lucide-react";
+import { Search, User, Menu, Settings, Construction, LogOut, House, Compass, BookOpen, LayoutDashboard, LibraryBig, Users, MessageCircle } from "lucide-react";
 import { Logo } from "@/components/logo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,6 +11,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+
 import {
   Dialog,
   DialogContent,
@@ -18,12 +19,16 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { FeedbackModal } from "@/components/ui/feedback-modal";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useState, useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
+import { useUnreadSummary } from "@/hooks/use-notifications";
+import { useSocket } from "@/hooks/use-socket";
 import { isImpersonating, getImpersonatedUsername, exitImpersonation } from "@/lib/token-store";
 import { GuestStatusBanner } from "@/components/guest/GuestStatusBanner";
 import { PwaInstallPrompt } from "@/components/layout/PwaInstallPrompt";
+import { NotificationPopover } from "@/components/layout/NotificationPopover";
 
 interface SearchClubResult {
   id: string;
@@ -61,6 +66,175 @@ interface GlobalSearchResponse {
   };
 }
 
+interface UserActionsProps {
+  isAuthenticated: boolean;
+  unreadSummary: { messagesUnread: number; notificationsUnread: number; totalUnread?: number } | undefined;
+  onOpenMessages: () => void;
+  setLocation: (path: string) => void;
+  authAvatar: string | null;
+  authUsername: string;
+  user: { username?: string; role?: string } | null;
+  impersonating: boolean;
+  impersonatedUser: string | null;
+  handleExitImpersonation: () => void;
+  handleLogout: () => Promise<void>;
+  isLoggingOut: boolean;
+}
+
+function UserActions({
+  isAuthenticated,
+  unreadSummary,
+  onOpenMessages,
+  setLocation,
+  authAvatar,
+  authUsername,
+  user,
+  impersonating,
+  impersonatedUser,
+  handleExitImpersonation,
+  handleLogout,
+  isLoggingOut,
+}: Readonly<UserActionsProps>) {
+  const messagesUnread = unreadSummary?.messagesUnread ?? 0;
+  const notificationsUnread = unreadSummary?.notificationsUnread ?? 0;
+  const bellUnread = unreadSummary?.totalUnread ?? (messagesUnread + notificationsUnread);
+  const showAdminPanel = (user?.role === "admin" || user?.role === "moderator") && !impersonating;
+
+  if (!isAuthenticated) {
+    return (
+      <div className="flex items-center gap-2">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setLocation("/auth/login")}
+        >
+          Войти
+        </Button>
+        <Button
+          variant="default"
+          size="sm"
+          onClick={() => setLocation("/auth/register")}
+        >
+          Регистрация
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="relative"
+        onClick={onOpenMessages}
+      >
+        <MessageCircle className="h-5 w-5" />
+        {messagesUnread > 0 && (
+          <span className="absolute -top-1 -right-1 h-4 min-w-4 px-0.5 rounded-full bg-red-500 text-[10px] font-bold text-white flex items-center justify-center leading-none">
+            {messagesUnread > 99 ? "99+" : messagesUnread}
+          </span>
+        )}
+        <span className="sr-only">Сообщения</span>
+      </Button>
+
+      <NotificationPopover
+        messagesUnread={messagesUnread}
+        notificationsUnread={notificationsUnread}
+        totalUnread={bellUnread}
+      />
+
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="secondary" size="icon" className="rounded-full">
+            <Avatar className="h-8 w-8">
+              {authAvatar && <AvatarImage src={authAvatar} alt={authUsername} />}
+              <AvatarFallback className="text-xs font-medium">
+                {authUsername.slice(0, 2).toUpperCase() || "VL"}
+              </AvatarFallback>
+            </Avatar>
+            <span className="sr-only">Меню пользователя</span>
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem className="font-medium">
+            {user?.username}
+            {impersonating && (
+              <span className="ml-2 text-orange-600 text-sm">
+                (как {impersonatedUser})
+              </span>
+            )}
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => setLocation("/dashboard")}>
+            <LayoutDashboard className="mr-2 h-4 w-4" />
+            Личный кабинет
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => setLocation("/profile")}>
+            <User className="mr-2 h-4 w-4" />
+            Профиль
+            {impersonating && (
+              <span className="ml-2 text-muted-foreground text-sm">
+                (как {impersonatedUser})
+              </span>
+            )}
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => setLocation("/library")}>
+            <LibraryBig className="mr-2 h-4 w-4" />
+            Моя библиотека
+            {impersonating && (
+              <span className="ml-2 text-muted-foreground text-sm">
+                (как {impersonatedUser})
+              </span>
+            )}
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => setLocation("/clubs")}>
+            <Users className="mr-2 h-4 w-4" />
+            Мои клубы
+            {impersonating && (
+              <span className="ml-2 text-muted-foreground text-sm">
+                (как {impersonatedUser})
+              </span>
+            )}
+          </DropdownMenuItem>
+          {impersonating && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onClick={handleExitImpersonation}
+                className="text-orange-600 hover:text-orange-700"
+              >
+                <LogOut className="mr-2 h-4 w-4" />
+                Выйти из профиля {impersonatedUser}
+              </DropdownMenuItem>
+            </>
+          )}
+          {(impersonating || showAdminPanel) && <DropdownMenuSeparator />}
+          {showAdminPanel && (
+            <DropdownMenuItem
+              onClick={() => setLocation("/admin")}
+              className="text-orange-600 hover:text-orange-700"
+            >
+              <Settings className="mr-2 h-4 w-4" />
+              Административная панель
+            </DropdownMenuItem>
+          )}
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            onSelect={(event) => {
+              event.preventDefault();
+              void handleLogout();
+            }}
+            disabled={isLoggingOut}
+          >
+            <LogOut className="mr-2 h-4 w-4" />
+            {isLoggingOut ? "Выходим..." : "Выйти"}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </>
+  );
+}
+
 export function MainLayout({ children }: { readonly children: React.ReactNode }) {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -81,6 +255,57 @@ export function MainLayout({ children }: { readonly children: React.ReactNode })
   const searchContainerRef = useRef<HTMLDivElement | null>(null);
   const [impersonating, setImpersonating] = useState(isImpersonating());
   const [impersonatedUser, setImpersonatedUser] = useState(getImpersonatedUsername());
+  const socket = useSocket();
+  const { data: unreadSummary } = useUnreadSummary(isAuthenticated);
+
+  // DM: присоединиться к персональной комнате при авторизации.
+  // Токен передаётся автоматически через cookie (withCredentials: true) при handshake.
+  // disconnect() + connect() гарантирует новый handshake с актуальным cookie после логина.
+  useEffect(() => {
+    if (!socket || !user) return;
+
+    const joinDmRoom = () => {
+      socket.emit("dm:join");
+    };
+
+    // Если сокет уже подключён с предыдущим handshake (без cookie) — переподключаем
+    if (socket.connected) {
+      socket.disconnect();
+    }
+    socket.connect();
+
+    const connectHandler = () => {
+      joinDmRoom();
+    };
+
+    socket.on("connect", connectHandler);
+
+    const unreadHandler = ({ count }: { count: number }) => {
+      // Инвалидируем сводку непрочитанных, чтобы бейдж обновился
+      queryClient.invalidateQueries({ queryKey: ["notifications", "unread-summary"] });
+      // Можно также напрямую патчить кэш для мгновенного обновления
+      queryClient.setQueryData<{ success: boolean; messagesUnread: number; notificationsUnread: number; totalUnread: number }>(
+        ["notifications", "unread-summary"],
+        (old) => old ? { ...old, messagesUnread: count, totalUnread: (old.notificationsUnread ?? 0) + count } : old
+      );
+    };
+
+    socket.on("dm:unread_count", unreadHandler);
+    return () => {
+      socket.off("connect", connectHandler);
+      socket.off("dm:unread_count", unreadHandler);
+    };
+  }, [socket, user, queryClient]);
+
+
+  // Отключаем сокет при выходе из системы
+  useEffect(() => {
+    if (!user && socket?.connected) {
+      socket.disconnect();
+    }
+  }, [user, socket]);
+  const authUsername = typeof user?.username === "string" ? user.username : "";
+  const authAvatar = typeof user?.avatar === "string" ? user.avatar : null;
 
   const profileHref = isAuthenticated ? "/profile" : "/auth/login";
   const profileLabel = isAuthenticated ? "Профиль" : "Войти";
@@ -386,102 +611,20 @@ export function MainLayout({ children }: { readonly children: React.ReactNode })
             </div>
             
             <div className="flex items-center gap-2">
-              
-              {isAuthenticated ? (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="secondary" size="icon" className="rounded-full">
-                      <User className="h-5 w-5" />
-                      <span className="sr-only">Меню пользователя</span>
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem className="font-medium">
-                      {user?.username}
-                      {impersonating && (
-                        <span className="ml-2 text-orange-600 text-sm">
-                          (как {impersonatedUser})
-                        </span>
-                      )}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setLocation("/profile")}>
-                      Профиль
-                      {impersonating && (
-                        <span className="ml-2 text-muted-foreground text-sm">
-                          (как {impersonatedUser})
-                        </span>
-                      )}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setLocation("/library")}>
-                      Моя библиотека
-                      {impersonating && (
-                        <span className="ml-2 text-muted-foreground text-sm">
-                          (как {impersonatedUser})
-                        </span>
-                      )}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setLocation("/clubs")}>
-                      Мои клубы
-                      {impersonating && (
-                        <span className="ml-2 text-muted-foreground text-sm">
-                          (как {impersonatedUser})
-                        </span>
-                      )}
-                    </DropdownMenuItem>
-                    {impersonating && (
-                      <>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem
-                          onClick={handleExitImpersonation}
-                          className="text-orange-600 hover:text-orange-700"
-                        >
-                          <LogOut className="mr-2 h-4 w-4" />
-                          Выйти из профиля {impersonatedUser}
-                        </DropdownMenuItem>
-                      </>
-                    )}
-                    {(user?.role === 'admin' || user?.role === 'moderator') && !impersonating && (
-                      <>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem
-                          onClick={() => setLocation("/admin")}
-                          className="text-orange-600 hover:text-orange-700"
-                        >
-                          <Settings className="mr-2 h-4 w-4" />
-                          Административная панель
-                        </DropdownMenuItem>
-                      </>
-                    )}
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem
-                      onSelect={(event) => {
-                        event.preventDefault();
-                        void handleLogout();
-                      }}
-                      disabled={isLoggingOut}
-                    >
-                      {isLoggingOut ? "Выходим..." : "Выйти"}
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              ) : (
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setLocation("/auth/login")}
-                  >
-                    Войти
-                  </Button>
-                  <Button
-                    variant="default"
-                    size="sm"
-                    onClick={() => setLocation("/auth/register")}
-                  >
-                    Регистрация
-                  </Button>
-                </div>
-              )}
+              <UserActions
+                isAuthenticated={isAuthenticated}
+                unreadSummary={unreadSummary}
+                onOpenMessages={() => setLocation('/dashboard?tab=messages')}
+                setLocation={setLocation}
+                authAvatar={authAvatar}
+                authUsername={authUsername}
+                user={user}
+                impersonating={impersonating}
+                impersonatedUser={impersonatedUser}
+                handleExitImpersonation={handleExitImpersonation}
+                handleLogout={handleLogout}
+                isLoggingOut={isLoggingOut}
+              />
             </div>
           </div>
         </div>

@@ -4,6 +4,8 @@ import { db } from './db.js';
 import { bookReadingStatus, userReadingGoals, personalBooks, clubBooks, type BookReadingStatusRecord, type InsertBookReadingStatus, type BookType, type BookReadingStatus } from '../shared/schema.js';
 import { eq, and, or, sql, isNull, gte, lte, inArray } from 'drizzle-orm';
 import { logger } from './lib/logger.js';
+import { activityService } from './services/activity-service.js';
+import { gamificationService } from './services/gamification-service.js';
 
 const router = express.Router();
 
@@ -424,6 +426,9 @@ router.post('/', jwtAuth, async (req, res) => {
       )
       .limit(1);
 
+    const shouldEmitReadingCompleted =
+      status === 'completed' && (existingStatus?.status !== 'completed');
+
     let result;
 
     if (existingStatus) {
@@ -446,6 +451,29 @@ router.post('/', jwtAuth, async (req, res) => {
     }
 
     logger.info(`Reading status ${existingStatus ? 'updated' : 'created'} for user ${userId}, book ${bookId}`);
+
+    if (shouldEmitReadingCompleted) {
+      const [book] = bookType === 'club'
+        ? await db.select({ title: clubBooks.title, author: clubBooks.author }).from(clubBooks).where(eq(clubBooks.id, bookId)).limit(1)
+        : await db.select({ title: personalBooks.title, author: personalBooks.author }).from(personalBooks).where(eq(personalBooks.id, bookId)).limit(1);
+
+      activityService.emit({
+        actorId: userId,
+        eventType: 'reading_completed',
+        targetType: 'book',
+        targetId: bookId,
+        metadata: {
+          bookId,
+          bookType,
+          bookTitle: book?.title,
+          bookAuthor: book?.author,
+        },
+      }).catch((err) => logger.warn('[activity] reading_completed emit failed', err));
+
+      gamificationService.recordUserActivityAndAward(userId, 'reading_completed').catch((err) => {
+        logger.warn('[gamification] reading_completed sync failed', err);
+      });
+    }
 
     res.json(result);
   } catch (error) {

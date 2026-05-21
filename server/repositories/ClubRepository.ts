@@ -5,6 +5,7 @@ import {
   clubMembers,
   clubInvitations,
   users,
+  userProfiles,
   clubBooks,
   tags,
   clubTags,
@@ -637,7 +638,19 @@ export class ClubRepository extends BaseRepository {
   /**
    * Получение участников с их ролями в клубе
    */
-  async getClubMembersWithRoles(clubId: string): Promise<Array<Omit<User, 'role'> & { role: ClubMemberRole; joinedAt: Date }>> {
+  async getClubMembersWithRoles(clubId: string): Promise<Array<{
+    id: string;
+    username: string;
+    displayName: string | null;
+    avatar: string | null;
+    readerRating: number | null;
+    email: string;
+    role: ClubMemberRole;
+    joinedAt: Date;
+    status: User['status'];
+    emailConfirmed: boolean;
+    createdAt: Date;
+  }>> {
     this.validateRequired(clubId, 'clubId');
     
     try {
@@ -645,6 +658,9 @@ export class ClubRepository extends BaseRepository {
         .select({
           id: users.id,
           username: users.username,
+          displayName: userProfiles.displayName,
+          avatar: userProfiles.avatar,
+          readerRating: userProfiles.readerRating,
           email: users.email,
           role: clubMembers.role,
           joinedAt: clubMembers.joinedAt,
@@ -654,7 +670,8 @@ export class ClubRepository extends BaseRepository {
         })
         .from(users)
         .innerJoin(clubMembers, eq(users.id, clubMembers.userId))
-        .where(eq(clubMembers.clubId, clubId)) as Array<Omit<User, 'role'> & { role: ClubMemberRole; joinedAt: Date }>;
+        .leftJoin(userProfiles, eq(users.id, userProfiles.userId))
+        .where(eq(clubMembers.clubId, clubId));
     } catch (error) {
       this.logError('getClubMembersWithRoles', error);
       return [];

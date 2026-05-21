@@ -3,6 +3,7 @@ import { Mic, MicOff, Pause, Play, Square, Users, Bookmark } from "lucide-react"
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { StudioWordmark } from "@/components/studio/StudioWordmark";
+import { SessionListenerAvatars } from "@/components/presence/SessionListenerAvatars";
 
 interface ControlBarProps {
   state: "prep" | "live" | "paused";
@@ -11,6 +12,7 @@ interface ControlBarProps {
   onMicToggle: () => void;
   elapsedTime: number;
   listenerCount: number;
+  sessionId?: string | null;
   /** RMS-уровень сигнала микрофона (0..100) */
   micLevel: number;
   /** 20-element array of VU bar heights (0..100) */
@@ -54,6 +56,7 @@ export function ControlBar({
   onMicToggle,
   elapsedTime,
   listenerCount,
+  sessionId,
   micLevel,
   micBars,
   onPause,
@@ -225,10 +228,14 @@ export function ControlBar({
           {isOnline ? "Онлайн" : "Офлайн"}
         </span>
 
-        <span className="flex items-center gap-1 text-xs text-muted-foreground px-1">
-          <Users className="w-3.5 h-3.5" />
-          {listenerCount}
-        </span>
+        {sessionId ? (
+          <SessionListenerAvatars sessionId={sessionId} maxVisible={5} />
+        ) : (
+          <span className="flex items-center gap-1 text-xs text-muted-foreground px-1">
+            <Users className="w-3.5 h-3.5" />
+            {listenerCount}
+          </span>
+        )}
 
         {onBookmark && (
           <Button

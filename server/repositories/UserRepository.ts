@@ -170,6 +170,24 @@ export class UserRepository extends BaseRepository {
   /**
    * Обновление email пользователя с переинициализацией подтверждения
    */
+  async updateUserUsername(userId: string, username: string): Promise<User | undefined> {
+    this.validateRequired(userId, 'userId');
+    this.validateRequired(username, 'username');
+
+    try {
+      const result = await this.db
+        .update(users)
+        .set({ username })
+        .where(eq(users.id, userId))
+        .returning();
+
+      return this.getFirstResult(result);
+    } catch (error) {
+      this.logError('updateUserUsername', error);
+      return undefined;
+    }
+  }
+
   async updateUserEmail(userId: string, email: string, confirmationToken: string): Promise<User | undefined> {
     this.validateRequired(userId, 'userId');
     this.validateRequired(email, 'email');

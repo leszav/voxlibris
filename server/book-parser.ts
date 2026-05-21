@@ -523,17 +523,31 @@ export class EPUBParser extends BaseBookParser {
       const dom = new JSDOM(htmlContent);
       const doc = dom.window.document;
 
-      // Удаляем наиболее частый "служебный" контент
+      // Удаляем только действительно служебные элементы
+      // Оставляем семантические HTML5 теги (section, article, aside, figure, figcaption)
+      // Оставляем MathML и SVG (допустимы в EPUB 3)
       const removeSelectors = [
-        "script", "style", "nav", "header", "footer", "aside", "form",
-        "iframe", "svg", "math", "link", "meta", "button", "input",
+        "script", "style", "header", "footer", "form",
+        "iframe", "link", "meta", "button", "input",
         "textarea", "select",
-        ".toc", "#toc", "[role='doc-toc']", "[role='navigation']",
-        String.raw`[epub\:type='toc']`,
-        String.raw`[epub\:type='landmarks']`,
-        String.raw`[epub\:type='pagebreak']`
+        ".toc", "#toc", "[role='doc-toc']",
+        // Удаляем nav только если это явно навигация (TOC)
+        "nav[role='navigation']",
+        String.raw`nav[epub\:type='toc']`,
+        String.raw`nav[epub\:type='landmarks']`,
+        // Удаляем pagebreak элементы (служебные)
+        String.raw`[epub\:type='pagebreak']`,
+        String.raw`span[epub\:type='pagebreak']`,
       ];
       doc.querySelectorAll(removeSelectors.join(",")).forEach(el => el.remove());
+
+      // Сохраняем важные атрибуты epub:type, преобразуя их в data-epub-type для HTML
+      doc.querySelectorAll(String.raw`[epub\:type]`).forEach(el => {
+        const epubType = el.getAttribute("epub:type");
+        if (epubType) {
+          el.setAttribute("data-epub-type", epubType);
+        }
+      });
 
       const body = doc.body || doc.documentElement;
       if (!body) {
@@ -957,8 +971,8 @@ export class FB2Parser extends BaseBookParser {
       // Извлечь метаданные
       const metadata = await this.extractMetadata(fictionBook);
 
-      // Извлечь главы
-      const chapters = this.extractChapters(fictionBook);
+      // Извлечь главы через DOM-парсинг (сохраняет порядок чередования элементов)
+      const chapters = this.extractChaptersFromDom(content);
 
       // Вычислить хеш содержимого
       const contentHash = this.calculateTextContentHash(chapters);
@@ -1352,41 +1366,20 @@ export class FB2Parser extends BaseBookParser {
       content += `<h3>${this.escapeHtml(sectionTitle)}</h3>\n`;
     }
 
-    // Извлечь параграфы с сохранением HTML структуры
-    const paragraphs = section?.p as XmlElement[] | undefined ?? [];
-    paragraphs.forEach((paragraph) => {
-      const paragraphText = this.extractTextFromFB2Element(paragraph);
-      if (paragraphText.trim()) {
-        content += `<p>${this.escapeHtml(paragraphText)}</p>\n`;
+    // Обработать все элементы секции в порядке их появления
+    Object.keys(section).forEach((key) => {
+      if (key === '$' || key === 'title' || key === 'section') {
+        return; // Пропускаем атрибуты, заголовок (уже обработан) и подсекции (обработаем позже)
       }
-    });
 
-    // Обработать эпиграфы
-    const epigraphs = section?.epigraph as XmlElement[] | undefined ?? [];
-    epigraphs.forEach((epigraph) => {
-      const epigraphText = this.extractTextFromFB2Element(epigraph);
-      if (epigraphText.trim()) {
-        content += `<blockquote class="epigraph">${this.escapeHtml(epigraphText)}</blockquote>\n`;
-      }
-    });
+      const elements = asArray<XmlElement>(section[key]);
 
-    // Обработать стихи/поэмы
-    const poems = section?.poem as XmlElement[] | undefined ?? [];
-    poems.forEach((poem) => {
-      content += '<div class="poem">';
-      const stanzas = poem?.stanza as XmlElement[] | undefined ?? [];
-      stanzas.forEach((stanza) => {
-        content += '<div class="stanza">';
-        const verses = stanza?.v as XmlElement[] | undefined ?? [];
-        verses.forEach((verse) => {
-          const verseText = this.extractTextFromFB2Element(verse);
-          if (verseText.trim()) {
-            content += `<p class="verse">${this.escapeHtml(verseText)}</p>`;
-          }
-        });
-        content += '</div>';
+      elements.forEach((element) => {
+        const elementContent = this.processFB2Element(key, element);
+        if (elementContent) {
+          content += elementContent;
+        }
       });
-      content += '</div>\n';
     });
 
     // Рекурсивно обработать подсекции
@@ -1398,6 +1391,324 @@ export class FB2Parser extends BaseBookParser {
     return content;
   }
 
+  /**
+   * Обработка отдельного FB2 элемента с сохранением структуры
+   */
+  private processFB2Element(tagName: string, element: XmlElement): string {
+    switch (tagName) {
+      case 'p':
+        return this.processFB2Paragraph(element);
+      
+      case 'subtitle':
+        return `<h4>${this.processFB2InlineContent(element)}</h4>\n`;
+      
+      case 'epigraph':
+        return this.processFB2Epigraph(element);
+      
+      case 'cite':
+        return this.processFB2Cite(element);
+      
+      case 'annotation':
+        return this.processFB2Annotation(element);
+      
+      case 'poem':
+        return this.processFB2Poem(element);
+      
+      case 'stanza':
+        return this.processFB2Stanza(element);
+      
+      case 'table':
+        return this.processFB2Table(element);
+      
+      case 'empty-line':
+        return '<br>\n';
+      
+      case 'image':
+        return this.processFB2Image(element);
+      
+      case 'text-author':
+        return `<p class="text-author"><em>${this.processFB2InlineContent(element)}</em></p>\n`;
+      
+      default: {
+        // Для неизвестных тегов просто извлекаем текст
+        const text = this.extractTextFromFB2Element(element);
+        return text.trim() ? `<p>${this.escapeHtml(text)}</p>\n` : '';
+      }
+    }
+  }
+
+  /**
+   * Обработка параграфа с поддержкой inline форматирования
+   */
+  private processFB2Paragraph(element: XmlElement): string {
+    const content = this.processFB2InlineContent(element);
+    return content.trim() ? `<p>${content}</p>\n` : '';
+  }
+
+  /**
+   * Обработка inline содержимого (с форматированием)
+   */
+  private processFB2InlineContent(element: XmlElement): string {
+    if (typeof element === 'string') {
+      return this.escapeHtml(element);
+    }
+
+    let result = '';
+
+    // Прямой текст узла
+    if (typeof element._ === 'string') {
+      result += this.escapeHtml(element._);
+    }
+
+    // Обработка дочерних элементов
+    Object.keys(element).forEach((key) => {
+      if (key === '$' || key === '_') {
+        return;
+      }
+
+      const children = asArray<XmlElement>(element[key]);
+
+      children.forEach((child) => {
+        switch (key) {
+          case 'strong':
+            result += `<strong>${this.processFB2InlineContent(child)}</strong>`;
+            break;
+          
+          case 'emphasis':
+            result += `<em>${this.processFB2InlineContent(child)}</em>`;
+            break;
+          
+          case 'strikethrough':
+            result += `<del>${this.processFB2InlineContent(child)}</del>`;
+            break;
+          
+          case 'sub':
+            result += `<sub>${this.processFB2InlineContent(child)}</sub>`;
+            break;
+          
+          case 'sup':
+            result += `<sup>${this.processFB2InlineContent(child)}</sup>`;
+            break;
+          
+          case 'code':
+            result += `<code>${this.processFB2InlineContent(child)}</code>`;
+            break;
+          
+          case 'a':
+            result += this.processFB2Link(child);
+            break;
+          
+          case 'image':
+            result += this.processFB2Image(child);
+            break;
+          
+          default:
+            // Для неизвестных inline элементов просто извлекаем текст
+            result += this.processFB2InlineContent(child);
+        }
+      });
+    });
+
+    return result;
+  }
+
+  /**
+   * Обработка ссылок
+   */
+  private processFB2Link(element: XmlElement): string {
+    const href = element.$?.['l:href'] || element.$?.href || '#';
+    const text = this.processFB2InlineContent(element);
+    
+    // Внешние ссылки открываем в новом окне
+    const isExternal = href.startsWith('http://') || href.startsWith('https://');
+    const target = isExternal ? ' target="_blank" rel="noopener noreferrer"' : '';
+    
+    return `<a href="${this.escapeHtml(href)}"${target}>${text}</a>`;
+  }
+
+  /**
+   * Обработка изображений
+   */
+  private processFB2Image(element: XmlElement): string {
+    const href = element.$?.['l:href'] || element.$?.href;
+    if (!href) return '';
+    
+    // В FB2 изображения ссылаются на binary элементы через #id
+    // Для отображения нужна дополнительная логика на клиенте
+    const alt = element.$?.alt || 'Image';
+    return `<img src="${this.escapeHtml(href)}" alt="${this.escapeHtml(alt)}" class="fb2-image">`;
+  }
+
+  /**
+   * Обработка эпиграфа
+   */
+  private processFB2Epigraph(element: XmlElement): string {
+    let content = '<blockquote class="epigraph">\n';
+    
+    const paragraphs = asArray<XmlElement>(element.p);
+    paragraphs.forEach((p) => {
+      content += `<p>${this.processFB2InlineContent(p)}</p>\n`;
+    });
+    
+    const textAuthors = asArray<XmlElement>(element['text-author']);
+    textAuthors.forEach((author) => {
+      content += `<p class="text-author"><em>${this.processFB2InlineContent(author)}</em></p>\n`;
+    });
+    
+    content += '</blockquote>\n';
+    return content;
+  }
+
+  /**
+   * Обработка цитаты
+   */
+  private processFB2Cite(element: XmlElement): string {
+    let content = '<blockquote class="cite">\n';
+    
+    const paragraphs = asArray<XmlElement>(element.p);
+    paragraphs.forEach((p) => {
+      content += `<p>${this.processFB2InlineContent(p)}</p>\n`;
+    });
+    
+    const subtitles = asArray<XmlElement>(element.subtitle);
+    subtitles.forEach((subtitle) => {
+      content += `<h5>${this.processFB2InlineContent(subtitle)}</h5>\n`;
+    });
+    
+    const textAuthors = asArray<XmlElement>(element['text-author']);
+    textAuthors.forEach((author) => {
+      content += `<p class="text-author"><em>${this.processFB2InlineContent(author)}</em></p>\n`;
+    });
+    
+    content += '</blockquote>\n';
+    return content;
+  }
+
+  /**
+   * Обработка аннотации
+   */
+  private processFB2Annotation(element: XmlElement): string {
+    let content = '<div class="annotation">\n';
+    
+    const paragraphs = asArray<XmlElement>(element.p);
+    paragraphs.forEach((p) => {
+      content += `<p>${this.processFB2InlineContent(p)}</p>\n`;
+    });
+    
+    const poems = asArray<XmlElement>(element.poem);
+    poems.forEach((poem) => {
+      content += this.processFB2Poem(poem);
+    });
+    
+    const subtitles = asArray<XmlElement>(element.subtitle);
+    subtitles.forEach((subtitle) => {
+      content += `<h5>${this.processFB2InlineContent(subtitle)}</h5>\n`;
+    });
+    
+    content += '</div>\n';
+    return content;
+  }
+
+  /**
+   * Обработка поэмы/стихотворения
+   */
+  private processFB2Poem(element: XmlElement): string {
+    let content = '<div class="poem">\n';
+    
+    const titles = asArray<XmlElement>(element.title);
+    titles.forEach((title) => {
+      const titleText = this.extractTextFromFB2Element(title);
+      if (titleText.trim()) {
+        content += `<h5 class="poem-title">${this.escapeHtml(titleText)}</h5>\n`;
+      }
+    });
+    
+    const stanzas = asArray<XmlElement>(element.stanza);
+    stanzas.forEach((stanza) => {
+      content += this.processFB2Stanza(stanza);
+    });
+    
+    const textAuthors = asArray<XmlElement>(element['text-author']);
+    textAuthors.forEach((author) => {
+      content += `<p class="text-author"><em>${this.processFB2InlineContent(author)}</em></p>\n`;
+    });
+    
+    content += '</div>\n';
+    return content;
+  }
+
+  /**
+   * Обработка строфы
+   */
+  private processFB2Stanza(element: XmlElement): string {
+    let content = '<div class="stanza">\n';
+    
+    const titles = asArray<XmlElement>(element.title);
+    titles.forEach((title) => {
+      const titleText = this.extractTextFromFB2Element(title);
+      if (titleText.trim()) {
+        content += `<h6 class="stanza-title">${this.escapeHtml(titleText)}</h6>\n`;
+      }
+    });
+    
+    const subtitles = asArray<XmlElement>(element.subtitle);
+    subtitles.forEach((subtitle) => {
+      content += `<p class="stanza-subtitle"><em>${this.processFB2InlineContent(subtitle)}</em></p>\n`;
+    });
+    
+    const verses = asArray<XmlElement>(element.v);
+    verses.forEach((verse) => {
+      const verseText = this.processFB2InlineContent(verse);
+      if (verseText.trim()) {
+        content += `<p class="verse">${verseText}</p>\n`;
+      }
+    });
+    
+    content += '</div>\n';
+    return content;
+  }
+
+  /**
+   * Обработка таблицы
+   */
+  private processFB2Table(element: XmlElement): string {
+    let content = '<table class="fb2-table">\n';
+    
+    const rows = asArray<XmlElement>(element.tr);
+    rows.forEach((row) => {
+      content += '<tr>\n';
+      
+      const cells = [
+        ...asArray<XmlElement>(row.th).map(cell => ({ cell, isHeader: true })),
+        ...asArray<XmlElement>(row.td).map(cell => ({ cell, isHeader: false }))
+      ];
+      
+      cells.forEach(({ cell, isHeader }) => {
+        const tag = isHeader ? 'th' : 'td';
+        const cellContent = this.processFB2InlineContent(cell);
+        
+        // Обработка атрибутов colspan, rowspan, align, valign
+        const colspan = cell.$?.colspan;
+        const rowspan = cell.$?.rowspan;
+        const align = cell.$?.align;
+        const valign = cell.$?.valign;
+        
+        let attrs = '';
+        if (colspan) attrs += ` colspan="${this.escapeHtml(String(colspan))}"`;
+        if (rowspan) attrs += ` rowspan="${this.escapeHtml(String(rowspan))}"`;
+        if (align) attrs += ` align="${this.escapeHtml(String(align))}"`;
+        if (valign) attrs += ` valign="${this.escapeHtml(String(valign))}"`;
+        
+        content += `<${tag}${attrs}>${cellContent}</${tag}>\n`;
+      });
+      
+      content += '</tr>\n';
+    });
+    
+    content += '</table>\n';
+    return content;
+  }
+
   private extractSectionOwnContent(section: XmlElement): string {
     let content = '';
 
@@ -1406,42 +1717,356 @@ export class FB2Parser extends BaseBookParser {
       content += `<h3>${this.escapeHtml(sectionTitle)}</h3>\n`;
     }
 
-    const paragraphs = section?.p as XmlElement[] | undefined ?? [];
-    paragraphs.forEach((paragraph) => {
-      const paragraphText = this.extractTextFromFB2Element(paragraph);
-      if (paragraphText.trim()) {
-        content += `<p>${this.escapeHtml(paragraphText)}</p>\n`;
+    // Обработать все элементы секции (кроме подсекций) в порядке их появления
+    Object.keys(section).forEach((key) => {
+      if (key === '$' || key === 'title' || key === 'section') {
+        return; // Пропускаем атрибуты, заголовок (уже обработан) и подсекции
       }
-    });
 
-    const epigraphs = section?.epigraph as XmlElement[] | undefined ?? [];
-    epigraphs.forEach((epigraph) => {
-      const epigraphText = this.extractTextFromFB2Element(epigraph);
-      if (epigraphText.trim()) {
-        content += `<blockquote class="epigraph">${this.escapeHtml(epigraphText)}</blockquote>\n`;
-      }
-    });
+      const elements = asArray<XmlElement>(section[key]);
 
-    const poems = section?.poem as XmlElement[] | undefined ?? [];
-    poems.forEach((poem) => {
-      content += '<div class="poem">';
-      const stanzas = poem?.stanza as XmlElement[] | undefined ?? [];
-      stanzas.forEach((stanza) => {
-        content += '<div class="stanza">';
-        const verses = stanza?.v as XmlElement[] | undefined ?? [];
-        verses.forEach((verse) => {
-          const verseText = this.extractTextFromFB2Element(verse);
-          if (verseText.trim()) {
-            content += `<p class="verse">${this.escapeHtml(verseText)}</p>`;
-          }
-        });
-        content += '</div>';
+      elements.forEach((element) => {
+        const elementContent = this.processFB2Element(key, element);
+        if (elementContent) {
+          content += elementContent;
+        }
       });
-      content += '</div>\n';
     });
 
     return content;
   }
+
+  // ─── DOM-based chapter extraction ───────────────────────────────────────────
+  // Используем JSDOM для обхода FB2 body, чтобы сохранить порядок чередования
+  // элементов (xml2js группирует все <p> вместе, теряя чередование p/cite/p).
+
+  private extractChaptersFromDom(xmlContent: string): BookChapter[] {
+    let dom: InstanceType<typeof JSDOM>;
+    try {
+      dom = new JSDOM(xmlContent, { contentType: 'text/xml' });
+    } catch (error) {
+      logger.warn({ error }, '[FB2Parser] JSDOM parse failed for body extraction');
+      return [];
+    }
+
+    const doc = dom.window.document;
+    const chapters: BookChapter[] = [];
+    let chapterNumber = 1;
+
+    const bodyEls = Array.from(doc.getElementsByTagName('body'));
+    for (const body of bodyEls) {
+      const bodyName = body.getAttribute('name')?.toLowerCase();
+      if (bodyName === 'notes' || bodyName === 'comments') continue;
+
+      const sectionEls = Array.from(body.children).filter(el => el.localName === 'section');
+      for (const section of sectionEls) {
+        if (chapters.length >= MAX_BOOK_CHAPTERS) break;
+        chapterNumber = this.appendDomSectionChapters(section, chapters, chapterNumber, []);
+      }
+    }
+
+    return chapters;
+  }
+
+  private appendDomSectionChapters(
+    sectionEl: Element,
+    chapters: BookChapter[],
+    chapterNumber: number,
+    ancestorTitles: string[],
+  ): number {
+    if (chapters.length >= MAX_BOOK_CHAPTERS) return chapterNumber;
+
+    const sectionTitle = this.getDomSectionTitle(sectionEl);
+    const childSectionEls = Array.from(sectionEl.children).filter(el => el.localName === 'section');
+    const directContent = this.getDomSectionOwnContent(sectionEl);
+    const directWordCount = this.countWords(directContent);
+
+    const nextAncestorTitles = sectionTitle?.trim()
+      ? [...ancestorTitles, sectionTitle.trim()]
+      : ancestorTitles;
+
+    if (this.shouldSplitDomSection(sectionEl, childSectionEls, directWordCount)) {
+      if (directWordCount >= 80) {
+        const title = sectionTitle || this.buildFallbackSectionTitle(ancestorTitles, chapterNumber, true);
+        chapters.push({ chapterNumber, title, content: directContent, wordCount: directWordCount });
+        chapterNumber += 1;
+      }
+
+      for (const childSection of childSectionEls) {
+        if (chapters.length >= MAX_BOOK_CHAPTERS) break;
+        chapterNumber = this.appendDomSectionChapters(childSection, chapters, chapterNumber, nextAncestorTitles);
+      }
+
+      return chapterNumber;
+    }
+
+    const content = this.getDomSectionContent(sectionEl);
+    if (content.trim()) {
+      const title = sectionTitle || this.buildFallbackSectionTitle(ancestorTitles, chapterNumber, true);
+      chapters.push({ chapterNumber, title, content, wordCount: this.countWords(content) });
+      return chapterNumber + 1;
+    }
+
+    return chapterNumber;
+  }
+
+  private shouldSplitDomSection(
+    sectionEl: Element,
+    childSectionEls: Element[],
+    directWordCount: number,
+  ): boolean {
+    if (childSectionEls.length === 0) return false;
+
+    const titledChildren = childSectionEls.filter(el => Boolean(this.getDomSectionTitle(el)?.trim()));
+    if (titledChildren.length === 0) return false;
+
+    const sectionTitle = this.getDomSectionTitle(sectionEl);
+    const isContainerLike = directWordCount < 80;
+
+    const nonStructural = titledChildren.filter(el => {
+      const t = this.getDomSectionTitle(el);
+      return t ? !this.isStructuralSubsectionTitle(t) : false;
+    });
+    const structural = titledChildren.filter(el => {
+      const t = this.getDomSectionTitle(el);
+      return t ? this.isStructuralSubsectionTitle(t) : false;
+    });
+
+    if (childSectionEls.length >= 2 && isContainerLike && nonStructural.length >= 2) return true;
+    if (childSectionEls.length >= 2 && isContainerLike && structural.length >= 1) return true;
+    if (childSectionEls.length === 1 && !sectionTitle && directWordCount < 30 && nonStructural.length === 1) return true;
+
+    return false;
+  }
+
+  private getDomSectionTitle(sectionEl: Element): string | undefined {
+    const titleEl = Array.from(sectionEl.children).find(el => el.localName === 'title');
+    if (!titleEl) return undefined;
+
+    const paragraphs = Array.from(titleEl.children).filter(el => el.localName === 'p');
+    if (paragraphs.length > 1) {
+      const parts = paragraphs.map(p => p.textContent?.trim() || '').filter(Boolean);
+      return parts.length > 0 ? parts.join('. ') : undefined;
+    }
+
+    return titleEl.textContent?.trim() || undefined;
+  }
+
+  private getDomSectionOwnContent(sectionEl: Element): string {
+    let content = '';
+
+    const sectionTitle = this.getDomSectionTitle(sectionEl);
+    if (sectionTitle?.trim()) {
+      content += `<h3>${this.escapeHtml(sectionTitle)}</h3>\n`;
+    }
+
+    for (const child of Array.from(sectionEl.childNodes)) {
+      if (child.nodeType !== 1) continue;
+      const el = child as Element;
+      if (el.localName === 'title' || el.localName === 'section') continue;
+      content += this.renderFB2DomElement(el);
+    }
+
+    return content;
+  }
+
+  private getDomSectionContent(sectionEl: Element): string {
+    let content = '';
+
+    const sectionTitle = this.getDomSectionTitle(sectionEl);
+    if (sectionTitle?.trim()) {
+      content += `<h3>${this.escapeHtml(sectionTitle)}</h3>\n`;
+    }
+
+    for (const child of Array.from(sectionEl.childNodes)) {
+      if (child.nodeType !== 1) continue;
+      const el = child as Element;
+      if (el.localName === 'title') continue;
+      if (el.localName === 'section') {
+        content += this.getDomSectionContent(el);
+        continue;
+      }
+      content += this.renderFB2DomElement(el);
+    }
+
+    return content;
+  }
+
+  private renderFB2DomElement(el: Element): string {
+    switch (el.localName) {
+      case 'p':
+        return `<p>${this.renderFB2DomInline(el)}</p>\n`;
+      case 'subtitle':
+        return `<h4>${this.renderFB2DomInline(el)}</h4>\n`;
+      case 'empty-line':
+        return '<br>\n';
+      case 'epigraph':
+        return this.renderFB2DomEpigraph(el);
+      case 'cite':
+        return this.renderFB2DomCite(el);
+      case 'poem':
+        return this.renderFB2DomPoem(el);
+      case 'table':
+        return this.renderFB2DomTable(el);
+      case 'image':
+        return this.renderFB2DomImage(el);
+      case 'text-author':
+        return `<p class="text-author"><em>${this.renderFB2DomInline(el)}</em></p>\n`;
+      case 'annotation':
+        return this.renderFB2DomAnnotation(el);
+      default: {
+        const text = el.textContent?.trim() || '';
+        return text ? `<p>${this.escapeHtml(text)}</p>\n` : '';
+      }
+    }
+  }
+
+  private renderFB2DomInline(el: Element): string {
+    let result = '';
+    for (const child of Array.from(el.childNodes)) {
+      if (child.nodeType === 3) {
+        result += this.escapeHtml(child.textContent || '');
+      } else if (child.nodeType === 1) {
+        const c = child as Element;
+        switch (c.localName) {
+          case 'strong':       result += `<strong>${this.renderFB2DomInline(c)}</strong>`; break;
+          case 'emphasis':     result += `<em>${this.renderFB2DomInline(c)}</em>`; break;
+          case 'strikethrough': result += `<del>${this.renderFB2DomInline(c)}</del>`; break;
+          case 'sub':          result += `<sub>${this.renderFB2DomInline(c)}</sub>`; break;
+          case 'sup':          result += `<sup>${this.renderFB2DomInline(c)}</sup>`; break;
+          case 'code':         result += `<code>${this.renderFB2DomInline(c)}</code>`; break;
+          case 'a':            result += this.renderFB2DomLink(c); break;
+          case 'image':        result += this.renderFB2DomImage(c); break;
+          default:             result += this.renderFB2DomInline(c);
+        }
+      }
+    }
+    return result;
+  }
+
+  private renderFB2DomLink(el: Element): string {
+    const href = el.getAttributeNS('http://www.w3.org/1999/xlink', 'href')
+      || el.getAttribute('href')
+      || '#';
+    const isExternal = href.startsWith('http://') || href.startsWith('https://');
+    const target = isExternal ? ' target="_blank" rel="noopener noreferrer"' : '';
+    return `<a href="${this.escapeHtml(href)}"${target}>${this.renderFB2DomInline(el)}</a>`;
+  }
+
+  private renderFB2DomImage(el: Element): string {
+    const href = el.getAttributeNS('http://www.w3.org/1999/xlink', 'href')
+      || el.getAttribute('href')
+      || '';
+    if (!href) return '';
+    const alt = el.getAttribute('alt') || 'Image';
+    return `<img src="${this.escapeHtml(href)}" alt="${this.escapeHtml(alt)}" class="fb2-image">`;
+  }
+
+  private renderFB2DomEpigraph(el: Element): string {
+    let content = '<blockquote class="epigraph">\n';
+    for (const child of Array.from(el.childNodes)) {
+      if (child.nodeType !== 1) continue;
+      const c = child as Element;
+      if (c.localName === 'p') {
+        content += `<p>${this.renderFB2DomInline(c)}</p>\n`;
+      } else if (c.localName === 'text-author') {
+        content += `<p class="text-author"><em>${this.renderFB2DomInline(c)}</em></p>\n`;
+      } else if (c.localName === 'poem') {
+        content += this.renderFB2DomPoem(c);
+      }
+    }
+    content += '</blockquote>\n';
+    return content;
+  }
+
+  private renderFB2DomCite(el: Element): string {
+    let content = '<blockquote class="cite">\n';
+    for (const child of Array.from(el.childNodes)) {
+      if (child.nodeType !== 1) continue;
+      const c = child as Element;
+      switch (c.localName) {
+        case 'p':          content += `<p>${this.renderFB2DomInline(c)}</p>\n`; break;
+        case 'subtitle':   content += `<h5>${this.renderFB2DomInline(c)}</h5>\n`; break;
+        case 'text-author': content += `<p class="text-author"><em>${this.renderFB2DomInline(c)}</em></p>\n`; break;
+        case 'poem':       content += this.renderFB2DomPoem(c); break;
+      }
+    }
+    content += '</blockquote>\n';
+    return content;
+  }
+
+  private renderFB2DomPoem(el: Element): string {
+    let content = '<div class="poem">\n';
+    for (const child of Array.from(el.childNodes)) {
+      if (child.nodeType !== 1) continue;
+      const c = child as Element;
+      switch (c.localName) {
+        case 'title': {
+          const t = c.textContent?.trim() || '';
+          if (t) content += `<h5 class="poem-title">${this.escapeHtml(t)}</h5>\n`;
+          break;
+        }
+        case 'stanza':      content += this.renderFB2DomStanza(c); break;
+        case 'text-author': content += `<p class="text-author"><em>${this.renderFB2DomInline(c)}</em></p>\n`; break;
+      }
+    }
+    content += '</div>\n';
+    return content;
+  }
+
+  private renderFB2DomStanza(el: Element): string {
+    let content = '<div class="stanza">\n';
+    for (const child of Array.from(el.childNodes)) {
+      if (child.nodeType !== 1) continue;
+      const c = child as Element;
+      switch (c.localName) {
+        case 'title': {
+          const t = c.textContent?.trim() || '';
+          if (t) content += `<h6 class="stanza-title">${this.escapeHtml(t)}</h6>\n`;
+          break;
+        }
+        case 'subtitle': content += `<p class="stanza-subtitle"><em>${this.renderFB2DomInline(c)}</em></p>\n`; break;
+        case 'v': {
+          const v = this.renderFB2DomInline(c);
+          if (v.trim()) content += `<p class="verse">${v}</p>\n`;
+          break;
+        }
+      }
+    }
+    content += '</div>\n';
+    return content;
+  }
+
+  private renderFB2DomTable(el: Element): string {
+    let content = '<table class="fb2-table">\n';
+    for (const row of Array.from(el.children).filter(c => c.localName === 'tr')) {
+      content += '<tr>\n';
+      for (const cell of Array.from(row.children)) {
+        const tag = cell.localName === 'th' ? 'th' : 'td';
+        let attrs = '';
+        for (const a of ['colspan', 'rowspan', 'align', 'valign']) {
+          const v = cell.getAttribute(a);
+          if (v) attrs += ` ${a}="${this.escapeHtml(v)}"`;
+        }
+        content += `<${tag}${attrs}>${this.renderFB2DomInline(cell)}</${tag}>\n`;
+      }
+      content += '</tr>\n';
+    }
+    content += '</table>\n';
+    return content;
+  }
+
+  private renderFB2DomAnnotation(el: Element): string {
+    let content = '<div class="annotation">\n';
+    for (const child of Array.from(el.childNodes)) {
+      if (child.nodeType !== 1) continue;
+      content += this.renderFB2DomElement(child as Element);
+    }
+    content += '</div>\n';
+    return content;
+  }
+
+  // ────────────────────────────────────────────────────────────────────────────
 
   private escapeHtml(text: string): string {
     return text

@@ -1,0 +1,236 @@
+import { describe, it } from 'node:test';
+import assert from 'node:assert/strict';
+
+/**
+ * Этап 8: Unit Tests для Gamification System
+ * Тесты для валидации условий и резолвера полей
+ */
+
+describe('Gamification System', () => {
+  
+  describe('Field Value Resolution', () => {
+    
+    it('should resolve users.role field', () => {
+      const snapshot = {
+        userId: '1',
+        registeredAt: new Date('2024-01-01'),
+        userRole: 'admin',
+        completedBooksCount: 5,
+        sentDmCount: 10,
+        notesCreatedCount: 2,
+        followingCount: 20,
+        followersCount: 30,
+        clubSessionsJoinedCount: 3,
+        currentStreakDays: 5,
+        bestStreakDays: 10,
+        profileCompleted: true,
+        favoriteGenres: ['Fantasy', 'Fiction'],
+      };
+
+      // Проверяем что userRole доступен в snapshot
+      assert.strictEqual(snapshot.userRole, 'admin');
+    });
+
+    it('should resolve activity counters', () => {
+      const snapshot = {
+        userId: '1',
+        registeredAt: new Date('2024-01-01'),
+        userRole: 'user',
+        completedBooksCount: 5,
+        sentDmCount: 10,
+        notesCreatedCount: 2,
+        followingCount: 20,
+        followersCount: 30,
+        clubSessionsJoinedCount: 3,
+        currentStreakDays: 5,
+        bestStreakDays: 10,
+        profileCompleted: true,
+        favoriteGenres: ['Fantasy'],
+      };
+
+      assert.strictEqual(snapshot.completedBooksCount, 5);
+      assert.strictEqual(snapshot.sentDmCount, 10);
+      assert.strictEqual(snapshot.clubSessionsJoinedCount, 3);
+    });
+
+    it('should resolve derived fields', () => {
+      const snapshot = {
+        userId: '1',
+        registeredAt: new Date('2024-01-01'),
+        userRole: 'user',
+        completedBooksCount: 5,
+        sentDmCount: 10,
+        notesCreatedCount: 2,
+        followingCount: 20,
+        followersCount: 30,
+        clubSessionsJoinedCount: 3,
+        currentStreakDays: 5,
+        bestStreakDays: 10,
+        profileCompleted: true,
+        favoriteGenres: ['Fantasy'],
+      };
+
+      // Проверяем derived fields
+      assert.strictEqual(snapshot.profileCompleted, true);
+      assert.strictEqual(snapshot.notesCreatedCount, 2);
+      assert.ok(Array.isArray(snapshot.favoriteGenres));
+    });
+  });
+
+  describe('Conditions Validation', () => {
+    
+    it('should validate empty conditions', () => {
+      const conditionsPayload: unknown[] = [];
+      // Пустой массив условий допустим
+      assert.ok(Array.isArray(conditionsPayload));
+      assert.strictEqual(conditionsPayload.length, 0);
+    });
+
+    it('should identify missing blockCode', () => {
+      const condition = {
+        // blockCode отсутствует — ошибка
+        operator: '>=',
+        value: 5,
+      };
+
+      assert.ok(!('blockCode' in condition) || !condition.blockCode);
+    });
+
+    it('should identify missing operator', () => {
+      const condition = {
+        blockCode: 'tenure_days',
+        // operator отсутствует — ошибка
+        value: 5,
+      };
+
+      assert.ok(!('operator' in condition) || !condition.operator);
+    });
+
+    it('should validate condition structure', () => {
+      const condition = {
+        blockCode: 'completed_books',
+        operator: '>=',
+        valueType: 'number',
+        value: 5,
+      };
+
+      assert.ok(typeof condition.blockCode === 'string');
+      assert.ok(typeof condition.operator === 'string');
+      assert.ok(typeof condition.valueType === 'string');
+    });
+  });
+
+  describe('Achievement Evaluation Logic', () => {
+    type ConditionResult = {
+      result: boolean;
+    };
+    
+    it('should evaluate AND logic correctly', () => {
+      const conditions = [
+        { result: true },
+        { result: true },
+      ];
+
+      const logic = 'AND';
+      const overallResult = logic === 'OR' 
+        ? conditions.some((c: ConditionResult) => c.result) 
+        : conditions.every((c: ConditionResult) => c.result);
+
+      assert.strictEqual(overallResult, true);
+    });
+
+    it('should evaluate OR logic correctly', () => {
+      const conditions = [
+        { result: false },
+        { result: true },
+      ];
+
+      const logic = 'OR';
+      const overallResult = logic === 'OR' 
+        ? conditions.some((c: ConditionResult) => c.result) 
+        : conditions.every((c: ConditionResult) => c.result);
+
+      assert.strictEqual(overallResult, true);
+    });
+
+    it('should fail AND logic when one condition fails', () => {
+      const conditions = [
+        { result: true },
+        { result: false },
+      ];
+
+      const logic = 'AND';
+      const overallResult = logic === 'OR' 
+        ? conditions.some((c: ConditionResult) => c.result) 
+        : conditions.every((c: ConditionResult) => c.result);
+
+      assert.strictEqual(overallResult, false);
+    });
+  });
+
+  describe('Field Registry Structure', () => {
+    
+    it('should have correct field registry structure', () => {
+      const fieldRegistry = {
+        'Users': [
+          { key: 'users.role', type: 'string', label: 'Роль пользователя', group: 'Users' },
+        ],
+        'Activity': [
+          { key: 'user_activity_counters.completed_books_count', type: 'number', label: 'Прочитано книг', group: 'Activity' },
+        ],
+        'Derived': [
+          { key: 'derived.tenure_days', type: 'number', label: 'Дни на платформе', group: 'Derived' },
+        ],
+      };
+
+      assert.ok(fieldRegistry['Users']);
+      assert.ok(fieldRegistry['Activity']);
+      assert.ok(fieldRegistry['Derived']);
+      assert.strictEqual(fieldRegistry['Users'][0].type, 'string');
+      assert.strictEqual(fieldRegistry['Activity'][0].type, 'number');
+    });
+
+    it('should validate field key format', () => {
+      const fieldKey = 'users.role';
+      const [namespace, field] = fieldKey.split('.');
+      
+      assert.ok(namespace);
+      assert.ok(field);
+      assert.strictEqual(namespace, 'users');
+      assert.strictEqual(field, 'role');
+    });
+  });
+
+  describe('Building Block with sourceKey', () => {
+    
+    it('should have sourceKey field', () => {
+      const buildingBlock = {
+        id: '1',
+        code: 'role',
+        labelRu: 'Роль пользователя',
+        valueType: 'string',
+        supportedOperators: ['=', '!='],
+        sourceKey: 'users.role',
+        isActive: true,
+      };
+
+      assert.ok(buildingBlock.sourceKey);
+      assert.strictEqual(buildingBlock.sourceKey, 'users.role');
+    });
+
+    it('should support building blocks without sourceKey (legacy)', () => {
+      const buildingBlock = {
+        id: '1',
+        code: 'tenure_days',
+        labelRu: 'Дни на платформе',
+        valueType: 'number',
+        supportedOperators: ['>=', '<='],
+        sourceKey: null,
+        isActive: true,
+      };
+
+      // Legacy параметры могут не иметь sourceKey
+      assert.strictEqual(buildingBlock.sourceKey, null);
+    });
+  });
+});

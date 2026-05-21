@@ -22,6 +22,9 @@ import { ClubSubscriptionsRepository } from './ClubSubscriptionsRepository.js';
 import { ReadingScheduleRepository } from './ReadingScheduleRepository.js';
 import { SessionRecordingsRepository } from './SessionRecordingsRepository.js';
 import { ReaderQualityRatingsRepository } from './ReaderQualityRatingsRepository.js';
+import { SocialRepository } from './SocialRepository.js';
+import { DmRepository } from './DmRepository.js';
+import { GamificationRepository } from './GamificationRepository.js';
 import type { BookType, GenreSource, ReadingSessionWithDetails, InvitationStatus } from '../../shared/schema.js';
 
 /**
@@ -72,6 +75,9 @@ export class RepositoryContainer {
   private _readingSchedule?: ReadingScheduleRepository;
   private _sessionRecordings?: SessionRecordingsRepository;
   private _readerQualityRatings?: ReaderQualityRatingsRepository;
+  private _social?: SocialRepository;
+  private _dm?: DmRepository;
+  private _gamification?: GamificationRepository;
 
   // Ленивая инициализация репозиториев
   get users(): UserRepository {
@@ -183,6 +189,21 @@ export class RepositoryContainer {
   get readerQualityRatings(): ReaderQualityRatingsRepository {
     this._readerQualityRatings ??= new ReaderQualityRatingsRepository();
     return this._readerQualityRatings;
+  }
+
+  get social(): SocialRepository {
+    this._social ??= new SocialRepository();
+    return this._social;
+  }
+
+  get dm(): DmRepository {
+    this._dm ??= new DmRepository();
+    return this._dm;
+  }
+
+  get gamification(): GamificationRepository {
+    this._gamification ??= new GamificationRepository();
+    return this._gamification;
   }
 }
 
@@ -385,6 +406,10 @@ class StorageAdapter implements Partial<IStorage> {
 
   async updateUserPassword(userId: string, passwordHash: string) {
     return this.repos.users.updateUserPassword(userId, passwordHash);
+  }
+
+  async updateUserUsername(userId: string, username: string) {
+    return this.repos.users.updateUserUsername(userId, username);
   }
 
   async updateUserEmail(userId: string, email: string, confirmationToken: string) {
@@ -752,6 +777,10 @@ class StorageAdapter implements Partial<IStorage> {
 
   async updateGenre(code: string, payload: Parameters<GenresRepository['updateGenre']>[1]) {
     return this.repos.genres.updateGenre(code, payload);
+  }
+
+  async deleteGenre(code: string) {
+    return this.repos.genres.deleteGenre(code);
   }
 
   async getGenresByCodes(codes: string[]) {

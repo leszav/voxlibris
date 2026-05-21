@@ -14,11 +14,12 @@ import {
   Home,
   Target,
   Eye,
-  Headphones
+  Headphones,
+  Trophy
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/hooks/use-auth";
 import { cn } from "@/lib/utils";
@@ -42,6 +43,7 @@ const navigation = [
   { name: "Аналитика", href: "/admin/analytics", icon: TrendingUp },
   { name: "KPI Метрики", href: "/admin/kpi", icon: Target },
   { name: "Аудит", href: "/admin/audit", icon: Eye },
+  { name: "Геймификация", href: "/admin/gamification", icon: Trophy },
   { name: "Записи эфиров", href: "/admin/recordings", icon: Headphones },
   { name: "Настройки", href: "/admin/settings", icon: Settings },
 ];
@@ -104,6 +106,7 @@ function AdminSidebar({ mobile = false }: AdminSidebarProps) {
       <div className="border-t px-4 py-4">
         <div className="flex items-center gap-3 mb-3">
           <Avatar className="h-8 w-8">
+            {user?.avatar && <AvatarImage src={user.avatar} alt={user.username} />}
             <AvatarFallback className="bg-blue-100 text-blue-700 text-sm font-medium">
               {user?.username.charAt(0).toUpperCase()}
             </AvatarFallback>
@@ -201,6 +204,7 @@ export function AdminLayout({ children }: Readonly<AdminLayoutProps>) {
           </div>
           
           <Avatar className="h-8 w-8">
+            {user?.avatar && <AvatarImage src={user.avatar} alt={user.username} />}
             <AvatarFallback className="bg-blue-100 text-blue-700 text-sm">
               {user?.username.charAt(0).toUpperCase()}
             </AvatarFallback>

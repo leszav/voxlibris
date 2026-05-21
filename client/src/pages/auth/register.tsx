@@ -10,6 +10,7 @@ import { Mic, Eye, EyeOff, Check, X } from 'lucide-react';
 
 export default function Register() {
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const usernameRegex = /^[A-Za-z0-9_-]{3,32}$/;
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -39,9 +40,10 @@ export default function Register() {
     match: password === confirmPassword && password.length > 0,
   };
   const isEmailValid = emailRegex.test(email.trim());
+  const isUsernameValid = usernameRegex.test(username.trim());
 
   const isFormValid = username && email && password && confirmPassword && 
-    passwordRequirements.length && passwordRequirements.match && isEmailValid;
+    passwordRequirements.length && passwordRequirements.match && isEmailValid && isUsernameValid;
 
   const parseRegisterError = (error: unknown): string => {
     if (!(error instanceof Error)) {
@@ -72,7 +74,7 @@ export default function Register() {
     setIsLoading(true);
     try {
       await register(username.trim(), email.trim().toLowerCase(), password, rememberMe, inviteToken);
-      setLocation('/');
+      setLocation('/onboarding/genres');
     } catch (error) {
       setErrorMessage(parseRegisterError(error));
       setShowErrorModal(true);
@@ -114,12 +116,17 @@ export default function Register() {
                 <Input
                   id="username"
                   type="text"
-                  placeholder="Ваше имя в системе"
+                  placeholder="Например: ivan_petrov"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   required
                   autoComplete="username"
                 />
+                {username && !isUsernameValid && (
+                  <p className="text-sm text-red-600">
+                    Только буквы A–Z, a–z, цифры, _ и -. От 3 до 32 символов.
+                  </p>
+                )}
               </div>
 
               <div className="space-y-2">

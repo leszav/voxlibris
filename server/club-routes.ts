@@ -13,6 +13,7 @@ import { getPublicBaseUrl } from './lib/public-base-url.js';
 import { sanitizeClubSettingsInput } from './lib/club-settings-sanitizer.js';
 import { storeOptimizedImageIfNeeded } from './lib/uploaded-image-storage.js';
 import { liveSessionsStore } from './lib/live-sessions-store.js';
+import { gamificationService } from './services/gamification-service.js';
 
 const router = express.Router();
 
@@ -377,10 +378,92 @@ router.get('/:id/members', jwtAuth, async (req, res) => {
     }
 
     const members = await storage.getClubMembersWithRoles(req.params.id);
-    res.json(serializeClubMembers(members));
+    const membersWithAchievements = await Promise.all(
+      members.map(async (member) => {
+        const awarded = await gamificationService.listAwardedAchievements(member.id);
+        return {
+          ...member,
+          achievements: awarded.slice(0, 3),
+        };
+      }),
+    );
+
+    res.json(serializeClubMembers(membersWithAchievements));
   } catch (error) {
     console.error('Error getting club members:', error);
     res.status(500).json({ message: 'Failed to get club members' });
+  }
+});
+
+/**
+ * GET /api/clubs/:id/leaderboard
+ * Лидерборд клуба по активности участников
+ */
+router.get('/:id/leaderboard', jwtAuth, async (req, res) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ message: 'Authentication required' });
+    }
+
+    const club = await storage.getClub(req.params.id);
+    if (!club) {
+      return res.status(404).json({ message: 'Club not found' });
+    }
+
+    const userRole = req.user.role as UserRole;
+    const isSystemAdmin = userRole === 'admin' || userRole === 'moderator';
+    const membership = await storage.getUserClubMembership(club.id, req.user.userId);
+
+    if (!isSystemAdmin && !membership) {
+      return res.status(403).json({
+        message: 'Рейтинг клуба доступен только участникам клуба',
+        code: 'CLUB_MEMBERSHIP_REQUIRED',
+      });
+    }
+
+    const members = await storage.getClubMembersWithRoles(req.params.id);
+    const withProfiles = await Promise.all(
+      members.map(async (member) => {
+        const profile = await storage.getUserProfile(member.id);
+        const readerRating = profile?.readerRating ?? 0;
+        const totalReadingSessions = profile?.totalReadingSessions ?? 0;
+        const totalListeners = profile?.totalListeners ?? 0;
+        const score = readerRating + (totalReadingSessions * 20) + (totalListeners * 2);
+
+        return {
+          userId: member.id,
+          username: member.username,
+          displayName: member.displayName ?? null,
+          avatar: member.avatar ?? null,
+          role: member.role,
+          joinedAt: member.joinedAt,
+          readerRating,
+          totalReadingSessions,
+          totalListeners,
+          score,
+        };
+      }),
+    );
+
+    const sortedProfiles = [...withProfiles].sort((a, b) => b.score - a.score);
+
+    const leaderboard = sortedProfiles
+      .slice(0, 10)
+      .map((entry, index) => ({
+        rank: index + 1,
+        ...entry,
+      }));
+
+    return res.json({
+      club: {
+        id: club.id,
+        title: club.title,
+      },
+      leaderboard,
+    });
+  } catch (error) {
+    console.error('Error getting club leaderboard:', error);
+    return res.status(500).json({ message: 'Failed to get club leaderboard' });
   }
 });
 
@@ -496,8 +579,17 @@ router.post('/:id/invite', jwtAuth, async (req, res) => {
       return res.status(401).json({ message: 'Authentication required' });
     }
 
-    const { email } = req.body;
-    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+    const atIndex = email.indexOf('@');
+    const dotAfterAt = email.lastIndexOf('.');
+    const hasWhitespace = email.includes(' ');
+    const isEmailValid = email.length > 5
+      && atIndex > 0
+      && dotAfterAt > atIndex + 1
+      && dotAfterAt < email.length - 1
+      && !hasWhitespace;
+
+    if (!isEmailValid) {
       return res.status(400).json({ message: 'Valid email is required' });
     }
 

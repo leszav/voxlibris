@@ -36,7 +36,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { apiRequest } from "@/lib/queryClient";
 import { modalAlert, modalConfirm } from "@/hooks/use-toast";
@@ -129,6 +129,7 @@ async function updateClubPrivacy(clubId: string, isPublic: boolean): Promise<voi
 interface ClubMember {
   id: string;
   username: string;
+  avatar?: string | null;
   role: 'owner' | 'moderator' | 'member';
   joinedAt: Date;
   status: string;
@@ -1030,6 +1031,7 @@ export default function AdminClubs() {
                             }`}
                           >
                             <Avatar className="h-10 w-10">
+                              {member.avatar && <AvatarImage src={member.avatar} alt={member.username} />}
                               <AvatarFallback>
                                 {member.username[0].toUpperCase()}
                               </AvatarFallback>

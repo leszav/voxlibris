@@ -1,4 +1,11 @@
 import { User } from '../../../shared/schema';
+
+export interface AuthUserClient extends Pick<
+  User,
+  'id' | 'username' | 'email' | 'role' | 'status' | 'emailConfirmed' | 'createdAt' | 'lastActivityAt'
+> {
+  avatar: string | null;
+}
 import { getAccessToken, isTokenExpired, syncTokenFromCookie } from './token-store';
 import { apiRequest } from './queryClient';
 
@@ -19,7 +26,7 @@ interface RegisterRequest {
 }
 
 interface AuthResponse {
-  user: User;
+  user: AuthUserClient;
 }
 
 interface RefreshResponse {

@@ -155,8 +155,15 @@ export function useChat(options: UseChatOptions) {
 
   const sendMessage = useCallback((text: string) => {
     if (!clientRef.current || !text.trim()) return;
-    clientRef.current.sendMessage({ clubId, channel, text: text.trim() });
-  }, [clubId, channel]);
+    const trimmed = text.trim();
+    const mentionedUsernames = [...trimmed.matchAll(/@(\S+)/g)].map(m => m[1]);
+    const mentions = mentionedUsernames.length
+      ? state.participants
+          .filter(p => mentionedUsernames.includes(p.username))
+          .map(p => String(p.id))
+      : undefined;
+    clientRef.current.sendMessage({ clubId, channel, text: trimmed, mentions });
+  }, [clubId, channel, state.participants]);
 
   const deleteMessage = useCallback((messageId: string) => {
     if (!clientRef.current) return;

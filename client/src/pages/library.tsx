@@ -13,6 +13,7 @@ import {
   MoreVertical,
   CalendarClock,
   Trash2,
+  Share2,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -39,6 +40,7 @@ import { HistoryBookCard } from "@/components/ui/history-book-card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -57,6 +59,7 @@ import { useAllBookmarks, useDeleteBookmarkEntry } from "@/hooks/use-reader";
 import { savePendingReaderBookmarkNavigation } from "@/lib/reader-bookmark-navigation";
 import { apiRequest } from "@/lib/queryClient";
 import { toast } from "@/hooks/use-toast";
+import { socialApi, type FollowUser } from "@/api/social";
 
 interface ReadingStatusRecord {
   id: string;
@@ -75,12 +78,64 @@ interface ReadingStatusRecord {
   } | null;
 }
 
+interface PersonalLibraryBookCardProps {
+  book: PersonalBook;
+  fallbackCover: string;
+  formatBookGenres: (book: PersonalBook) => string;
+  onRead: (book: PersonalBook) => void;
+  onEdit: (book: PersonalBook) => void;
+  onDelete: (book: PersonalBook) => void;
+  onMarkAsCompleted: (book: PersonalBook) => void;
+  onPlan: (book: PersonalBook) => void;
+  onRecommend: (book: PersonalBook) => void;
+  onNotInterested: (book: PersonalBook) => void;
+  canMarkAsCompleted: boolean;
+  markAsCompletedPending: boolean;
+}
+
 type ShelfSort = "completed_desc" | "completed_asc" | "title_asc" | "title_desc";
 type ShelfFormatFilter = "all" | "EPUB" | "FB2";
 type LibrarySort = "created_desc" | "created_asc" | "title_asc" | "title_desc" | "author_asc" | "author_desc" | "genre_asc";
 type GenreGroupMode = "none" | "primary_genre";
 
 const SHELF_PAGE_SIZE = 9;
+const RECOMMEND_PREFIX = "[RECOMMEND]";
+
+type RecommendationPayload = {
+  type: "book";
+  entityId: string;
+  title: string;
+  subtitle: string;
+  imageUrl?: string | null;
+  comment?: string | null;
+};
+
+type DmConversationCreateResponse = {
+  conversation: {
+    id: string;
+  };
+};
+
+function encodeRecommendationPayload(payload: RecommendationPayload): string {
+  return `${RECOMMEND_PREFIX}${JSON.stringify(payload)}`;
+}
+
+async function loadAllFollowUsers(
+  loader: (userId: string, limit: number, cursor?: string) => Promise<{ users: FollowUser[]; nextCursor: string | null }>,
+  userId: string,
+): Promise<FollowUser[]> {
+  const all: FollowUser[] = [];
+  let cursor: string | undefined;
+
+  while (true) {
+    const page = await loader(userId, 50, cursor);
+    all.push(...page.users);
+    if (!page.nextCursor) break;
+    cursor = page.nextCursor;
+  }
+
+  return all;
+}
 
 function isShelvedCompletedStatus(item: ReadingStatusRecord): boolean {
   if (item.bookType !== "personal" || item.status !== "completed") return false;
@@ -98,8 +153,181 @@ function generateDeleteCode(): string {
   return String(Math.floor(100000 + Math.random() * 900000));
 }
 
+function getPersonalBookFormatLabel(book: PersonalBook): string {
+  if (book.format === "EPUB") return "EPUB";
+  if (book.format === "FB2") return "FB2";
+  return "Книга";
+}
+
+function getLocalStorageValue<T>(key: string, fallback: T): T {
+  if (globalThis.window === undefined) return fallback;
+  try {
+    const value = globalThis.window.localStorage.getItem(key);
+    if (value === null) return fallback;
+    return JSON.parse(value) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function setLocalStorageValue<T>(key: string, value: T): void {
+  if (globalThis.window === undefined) return;
+  try {
+    globalThis.window.localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // localStorage can be unavailable in private mode or denied by browser settings.
+  }
+}
+
+function useLocalStorageState<T>(key: string, fallback: T): readonly [T, (value: T) => void] {
+  const [value, setValue] = useState<T>(() => getLocalStorageValue(key, fallback));
+
+  const setPersistedValue = (nextValue: T) => {
+    setValue(nextValue);
+    setLocalStorageValue(key, nextValue);
+  };
+
+  return [value, setPersistedValue] as const;
+}
+
+function serializeHistoryCompletedAt(value: Date | string | null | undefined): string {
+  if (!value) return "";
+  return value instanceof Date ? value.toISOString() : value;
+}
+
+function PersonalLibraryBookCard({
+  book,
+  fallbackCover,
+  formatBookGenres,
+  onRead,
+  onEdit,
+  onDelete,
+  onMarkAsCompleted,
+  onPlan,
+  onRecommend,
+  onNotInterested,
+  canMarkAsCompleted,
+  markAsCompletedPending,
+}: Readonly<PersonalLibraryBookCardProps>) {
+  return (
+    <div className="group flex flex-col gap-4 rounded-xl border bg-card p-4 transition-all hover:border-primary/20 sm:flex-row sm:gap-6 sm:p-6">
+      <div className="w-full sm:w-48 aspect-[2/3] shrink-0 rounded-lg overflow-hidden shadow-md">
+        <img
+          src={book.coverUrl || fallbackCover}
+          alt={book.title}
+          className="w-full h-full object-cover"
+          onError={(e) => {
+            e.currentTarget.src = fallbackCover;
+          }}
+        />
+      </div>
+
+      <div className="flex-1 flex flex-col justify-between space-y-4">
+        <div>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h3 className="text-lg font-serif font-bold sm:text-xl">{book.title}</h3>
+              <p className="text-muted-foreground">{book.author}</p>
+            </div>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-8 w-8">
+                  <MoreVertical className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => onRead(book)} className="flex items-center gap-2">
+                  <Eye className="h-4 w-4" />
+                  Читать
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => onEdit(book)} className="flex items-center gap-2">
+                  <Edit className="h-4 w-4" />
+                  Редактировать
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => onDelete(book)} className="text-destructive flex items-center gap-2">
+                  <Trash2 className="h-4 w-4" />
+                  Удалить из библиотеки
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+
+          <div className="mt-4 flex items-center gap-2 text-sm text-accent-foreground/80 font-medium bg-accent/10 w-fit px-2 py-1 rounded">
+            <LibraryIcon className="w-3.5 h-3.5" />
+            {getPersonalBookFormatLabel(book)}
+          </div>
+
+          {formatBookGenres(book) && (
+            <div className="mt-2 text-xs text-muted-foreground">
+              Жанры: {formatBookGenres(book)}
+            </div>
+          )}
+
+          {book.description && (
+            <p className="text-sm text-muted-foreground mt-3 line-clamp-2">
+              {book.description}
+            </p>
+          )}
+        </div>
+
+        <div className="space-y-2">
+          {book.progress !== undefined && book.progress > 0 && (
+            <div className="space-y-1">
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Прогресс</span>
+                <span className="font-medium">{book.progress}%</span>
+              </div>
+              <Progress value={book.progress} className="h-2" />
+            </div>
+          )}
+
+          <div className="flex justify-end text-sm">
+            <span className="text-muted-foreground">
+              {book.language && <span className="uppercase">{book.language}</span>}
+            </span>
+          </div>
+          <p className="text-xs text-muted-foreground flex items-center gap-1">
+            <Clock className="w-3 h-3" />
+            Добавлено: {new Date(book.createdAt ?? book.uploadedAt).toLocaleDateString("ru-RU")}
+          </p>
+        </div>
+
+        <div className="flex flex-col gap-2 pt-1 sm:flex-row sm:gap-3">
+          <Button className="flex-1 gap-2 sm:flex-none" onClick={() => onRead(book)}>
+            <Book className="w-4 h-4" /> Читать
+          </Button>
+          {canMarkAsCompleted && (
+            <Button
+              variant="secondary"
+              className="flex-1 gap-2 sm:flex-none"
+              onClick={() => onMarkAsCompleted(book)}
+              disabled={markAsCompletedPending}
+            >
+              <BookOpen className="w-4 h-4" />
+              {markAsCompletedPending ? "Сохраняем..." : "Прочитано"}
+            </Button>
+          )}
+          <Button variant="outline" className="flex-1 gap-2 sm:flex-none" onClick={() => onPlan(book)}>
+            <CalendarClock className="w-4 h-4" /> Запланировать
+          </Button>
+          <Button variant="outline" className="flex-1 gap-2 sm:flex-none" onClick={() => onRecommend(book)}>
+            <Share2 className="w-4 h-4" /> Порекомендовать
+          </Button>
+          <Button
+            variant="outline"
+            className="flex-1 gap-2 text-muted-foreground hover:text-destructive sm:flex-none"
+            onClick={() => onNotInterested(book)}
+          >
+            <Trash2 className="w-4 h-4" /> Не интересно
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Library() {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
   const [, setLocation] = useLocation();
   const queryClient = useQueryClient();
   const currentYear = new Date().getFullYear();
@@ -137,14 +365,21 @@ export default function Library() {
   const [shelfDeleteInput, setShelfDeleteInput] = useState<string>("");
   const [shelfDeletionUnlocked, setShelfDeletionUnlocked] = useState(false);
   const [shelfSearch, setShelfSearch] = useState("");
-  const [shelfSort, setShelfSort] = useState<ShelfSort>("completed_desc");
-  const [shelfFormatFilter, setShelfFormatFilter] = useState<ShelfFormatFilter>("all");
-  const [shelfVisibleCount, setShelfVisibleCount] = useState(SHELF_PAGE_SIZE);
+
+  const [shelfSort, setShelfSort] = useLocalStorageState<ShelfSort>("vl.shelfSort", "completed_desc");
+  const [shelfFormatFilter, setShelfFormatFilter] = useLocalStorageState<ShelfFormatFilter>("vl.shelfFormatFilter", "all");
+  const [shelfVisibleCount, setShelfVisibleCount] = useState<number>(SHELF_PAGE_SIZE);
   const [plannedYear, setPlannedYear] = useState<number>(currentYear + 1);
-  const [librarySearch, setLibrarySearch] = useState("");
-  const [librarySort, setLibrarySort] = useState<LibrarySort>("created_desc");
-  const [libraryGenreFilter, setLibraryGenreFilter] = useState<string>("all");
-  const [libraryGroupMode, setLibraryGroupMode] = useState<GenreGroupMode>("none");
+  const [librarySearch, setLibrarySearch] = useState<string>("");
+  const [librarySort, setLibrarySort] = useLocalStorageState<LibrarySort>("vl.librarySort", "created_desc");
+  const [libraryGenreFilter, setLibraryGenreFilter] = useLocalStorageState<string>("vl.libraryGenreFilter", "all");
+  const [libraryGroupMode, setLibraryGroupMode] = useLocalStorageState<GenreGroupMode>("vl.libraryGroupMode", "none");
+  const [recommendBook, setRecommendBook] = useState<PersonalBook | null>(null);
+  const [recommendTargets, setRecommendTargets] = useState<FollowUser[]>([]);
+  const [recommendSelectedUserIds, setRecommendSelectedUserIds] = useState<Set<string>>(new Set());
+  const [recommendComment, setRecommendComment] = useState("");
+  const [recommendLoading, setRecommendLoading] = useState(false);
+  const [recommendSending, setRecommendSending] = useState(false);
   const [editForm, setEditForm] = useState({
     title: "",
     author: "",
@@ -152,6 +387,47 @@ export default function Library() {
     genre: "",
   });
   const fallbackCover = "/placeholder-book.png";
+
+  const allTargetsSelected = recommendTargets.length > 0 && recommendSelectedUserIds.size === recommendTargets.length;
+
+  const renderRecommendTargetsList = () => {
+    if (recommendLoading) {
+      return (
+        <div className="flex items-center justify-center p-6 text-sm text-muted-foreground gap-2">
+          <Loader2 className="h-4 w-4 animate-spin" /> Загрузка списка пользователей...
+        </div>
+      );
+    }
+
+    if (recommendTargets.length === 0) {
+      return (
+        <div className="p-4 text-sm text-muted-foreground text-center">
+          Нет доступных пользователей для рекомендации.
+        </div>
+      );
+    }
+
+    return (
+      <div className="divide-y">
+        {recommendTargets.map((target) => {
+          const checked = recommendSelectedUserIds.has(target.id);
+          const displayName = target.displayName || target.username;
+          return (
+            <label key={target.id} className="flex cursor-pointer items-center gap-3 p-3 hover:bg-muted/40">
+              <Checkbox
+                checked={checked}
+                onCheckedChange={(value) => toggleRecommendTarget(target.id, value === true)}
+              />
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium">{displayName}</p>
+                <p className="truncate text-xs text-muted-foreground">@{target.username}</p>
+              </div>
+            </label>
+          );
+        })}
+      </div>
+    );
+  };
 
   // Mutations for book management
   const deleteBookMutation = useDeletePersonalBook();
@@ -379,6 +655,109 @@ export default function Library() {
     markAsNotInterestedMutation.mutate(notInterestedBook.id);
   };
 
+  const loadRecommendationTargets = async () => {
+    if (!user?.id) return;
+
+    setRecommendLoading(true);
+    try {
+      const [followers, following] = await Promise.all([
+        loadAllFollowUsers(socialApi.getFollowers, user.id),
+        loadAllFollowUsers(socialApi.getFollowing, user.id),
+      ]);
+
+      const uniqueMap = new Map<string, FollowUser>();
+      [...followers, ...following].forEach((item) => {
+        uniqueMap.set(item.id, item);
+      });
+
+      const uniqueTargets = Array.from(uniqueMap.values()).sort((a, b) => {
+        const left = a.displayName || a.username;
+        const right = b.displayName || b.username;
+        return left.localeCompare(right, "ru");
+      });
+
+      setRecommendTargets(uniqueTargets);
+      setRecommendSelectedUserIds(new Set(uniqueTargets.map((u) => u.id)));
+    } catch {
+      toast({
+        title: "Не удалось загрузить список пользователей",
+        description: "Проверьте соединение и попробуйте снова",
+        variant: "destructive",
+      });
+    } finally {
+      setRecommendLoading(false);
+    }
+  };
+
+  const handleOpenRecommendDialog = (book: PersonalBook) => {
+    setRecommendBook(book);
+    setRecommendComment("");
+    setRecommendTargets([]);
+    setRecommendSelectedUserIds(new Set());
+    void loadRecommendationTargets();
+  };
+
+  const toggleRecommendTarget = (targetId: string, checked: boolean) => {
+    setRecommendSelectedUserIds((prev) => {
+      const next = new Set(prev);
+      if (checked) {
+        next.add(targetId);
+      } else {
+        next.delete(targetId);
+      }
+      return next;
+    });
+  };
+
+  const handleToggleSelectAllTargets = (checked: boolean) => {
+    if (checked) {
+      setRecommendSelectedUserIds(new Set(recommendTargets.map((u) => u.id)));
+      return;
+    }
+    setRecommendSelectedUserIds(new Set());
+  };
+
+  const handleSendBookRecommendation = async () => {
+    if (!recommendBook) return;
+    if (recommendSelectedUserIds.size === 0) {
+      toast({ title: "Выберите хотя бы одного получателя", variant: "destructive" });
+      return;
+    }
+
+    const payload = encodeRecommendationPayload({
+      type: "book",
+      entityId: recommendBook.id,
+      title: recommendBook.title,
+      subtitle: `Автор: ${recommendBook.author}`,
+      imageUrl: recommendBook.coverUrl ?? null,
+      comment: recommendComment.trim() || null,
+    });
+
+    setRecommendSending(true);
+    try {
+      const recipientIds = Array.from(recommendSelectedUserIds);
+
+      await Promise.all(recipientIds.map(async (recipientId) => {
+        const conv = await apiRequest<DmConversationCreateResponse>("/api/dm/conversations", {
+          method: "POST",
+          body: JSON.stringify({ recipientId }),
+        });
+
+        await apiRequest(`/api/dm/conversations/${conv.conversation.id}/messages`, {
+          method: "POST",
+          body: JSON.stringify({ body: payload }),
+        });
+      }));
+
+      toast({ title: "Рекомендация отправлена" });
+      setRecommendBook(null);
+    } catch {
+      toast({ title: "Не удалось отправить рекомендацию", variant: "destructive" });
+    } finally {
+      setRecommendSending(false);
+    }
+  };
+
   const handleOpenBookmark = (bookmark: {
     bookId: string;
     position: string;
@@ -556,6 +935,127 @@ export default function Library() {
     return book.primaryGenre?.label || book.genre || "";
   };
 
+  const renderCurrentTabContent = () => {
+    if (isLoading) {
+      return (
+        <div className="space-y-6">
+          {[1, 2].map((i) => (
+            <div
+              key={i}
+              className="flex flex-col gap-4 rounded-xl border bg-card p-4 sm:flex-row sm:gap-6 sm:p-6"
+            >
+              <Skeleton className="w-full sm:w-48 aspect-[2/3] shrink-0 rounded-lg" />
+              <div className="flex-1 space-y-4">
+                <div className="space-y-2">
+                  <Skeleton className="h-6 w-2/3" />
+                  <Skeleton className="h-4 w-1/3" />
+                </div>
+                <Skeleton className="h-4 w-1/4" />
+                <div className="space-y-2">
+                  <Skeleton className="h-4 w-full" />
+                  <Skeleton className="h-2 w-full" />
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    return (
+      <>
+        <Card>
+          <CardContent className="p-4 sm:p-5">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <Input
+                placeholder="Поиск: название, автор, жанр"
+                value={librarySearch}
+                onChange={(e) => setLibrarySearch(e.target.value)}
+              />
+
+              <Select value={libraryGenreFilter} onValueChange={setLibraryGenreFilter}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Жанр" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Все жанры</SelectItem>
+                  <SelectItem value="none">Без жанра</SelectItem>
+                  {genreCatalog.map((genre) => (
+                    <SelectItem key={genre.id} value={genre.code}>{genre.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <Select value={librarySort} onValueChange={(value) => setLibrarySort(value as LibrarySort)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Сортировка" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="created_desc">Сначала новые</SelectItem>
+                  <SelectItem value="created_asc">Сначала старые</SelectItem>
+                  <SelectItem value="title_asc">Название: А-Я</SelectItem>
+                  <SelectItem value="title_desc">Название: Я-А</SelectItem>
+                  <SelectItem value="author_asc">Автор: А-Я</SelectItem>
+                  <SelectItem value="author_desc">Автор: Я-А</SelectItem>
+                  <SelectItem value="genre_asc">По жанру</SelectItem>
+                </SelectContent>
+              </Select>
+
+              <Select value={libraryGroupMode} onValueChange={(value) => setLibraryGroupMode(value as GenreGroupMode)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Группировка" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Без группировки</SelectItem>
+                  <SelectItem value="primary_genre">По основному жанру</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </CardContent>
+        </Card>
+
+        {filteredAndSortedBooks.length > 0 ? (
+          groupedBooks.map((group) => (
+            <div key={group.key} className="space-y-3">
+              {libraryGroupMode === "primary_genre" && (
+                <div className="flex items-center gap-2">
+                  <Layers className="h-4 w-4 text-muted-foreground" />
+                  <h3 className="font-semibold">{group.label}</h3>
+                </div>
+              )}
+              {group.books.map((book) => (
+                <PersonalLibraryBookCard
+                  key={book.id}
+                  book={book}
+                  fallbackCover={fallbackCover}
+                  formatBookGenres={formatBookGenres}
+                  onRead={handleReadBook}
+                  onEdit={handleEditBook}
+                  onDelete={setDeletingBook}
+                  onMarkAsCompleted={handleMarkAsCompleted}
+                  onPlan={handlePlanBook}
+                  onRecommend={handleOpenRecommendDialog}
+                  onNotInterested={setNotInterestedBook}
+                  canMarkAsCompleted={(book.progress ?? 0) > 95 && !shelvedCompletedBookIds.has(book.id)}
+                  markAsCompletedPending={markAsCompletedMutation.isPending}
+                />
+              ))}
+            </div>
+          ))
+        ) : (
+          <div className="text-center py-16 bg-secondary/20 rounded-xl border border-dashed">
+            <LibraryIcon className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
+            <h3 className="font-medium">Ваша библиотека пуста</h3>
+            <p className="text-muted-foreground max-w-sm mx-auto mt-2">
+              Добавьте свою первую книгу, загрузив файл EPUB или FB2 через кнопку "Загрузить
+              книгу" выше.
+            </p>
+          </div>
+        )}
+      </>
+    );
+  };
+
   if (!isAuthenticated) {
     return (
       <MainLayout>
@@ -620,243 +1120,7 @@ export default function Library() {
           </TabsList>
 
           <TabsContent value="current" className="space-y-6">
-            {(() => {
-              if (isLoading) {
-                return (
-                  <div className="space-y-6">
-                    {[1, 2].map((i) => (
-                      <div
-                        key={i}
-                        className="flex flex-col gap-4 rounded-xl border bg-card p-4 sm:flex-row sm:gap-6 sm:p-6"
-                      >
-                        <Skeleton className="w-full sm:w-48 aspect-[2/3] shrink-0 rounded-lg" />
-                        <div className="flex-1 space-y-4">
-                          <div className="space-y-2">
-                            <Skeleton className="h-6 w-2/3" />
-                            <Skeleton className="h-4 w-1/3" />
-                          </div>
-                          <Skeleton className="h-4 w-1/4" />
-                          <div className="space-y-2">
-                            <Skeleton className="h-4 w-full" />
-                            <Skeleton className="h-2 w-full" />
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                );
-              }
-
-              <Card>
-                <CardContent className="p-4 sm:p-5">
-                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                    <Input
-                      placeholder="Поиск: название, автор, жанр"
-                      value={librarySearch}
-                      onChange={(e) => setLibrarySearch(e.target.value)}
-                    />
-
-                    <Select value={libraryGenreFilter} onValueChange={setLibraryGenreFilter}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Жанр" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">Все жанры</SelectItem>
-                        <SelectItem value="none">Без жанра</SelectItem>
-                        {genreCatalog.map((genre) => (
-                          <SelectItem key={genre.id} value={genre.code}>{genre.label}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-
-                    <Select value={librarySort} onValueChange={(value) => setLibrarySort(value as LibrarySort)}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Сортировка" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="created_desc">Сначала новые</SelectItem>
-                        <SelectItem value="created_asc">Сначала старые</SelectItem>
-                        <SelectItem value="title_asc">Название: А-Я</SelectItem>
-                        <SelectItem value="title_desc">Название: Я-А</SelectItem>
-                        <SelectItem value="author_asc">Автор: А-Я</SelectItem>
-                        <SelectItem value="author_desc">Автор: Я-А</SelectItem>
-                        <SelectItem value="genre_asc">По жанру</SelectItem>
-                      </SelectContent>
-                    </Select>
-
-                    <Select value={libraryGroupMode} onValueChange={(value) => setLibraryGroupMode(value as GenreGroupMode)}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Группировка" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">Без группировки</SelectItem>
-                        <SelectItem value="primary_genre">По основному жанру</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </CardContent>
-              </Card>
-
-              if (filteredAndSortedBooks.length > 0) {
-                return groupedBooks.map((group) => (
-                <div key={group.key} className="space-y-3">
-                  {libraryGroupMode === "primary_genre" && (
-                    <div className="flex items-center gap-2">
-                      <Layers className="h-4 w-4 text-muted-foreground" />
-                      <h3 className="font-semibold">{group.label}</h3>
-                    </div>
-                  )}
-                  {group.books.map((book) => (
-                <div
-                  key={book.id}
-                  className="group flex flex-col gap-4 rounded-xl border bg-card p-4 transition-all hover:border-primary/20 sm:flex-row sm:gap-6 sm:p-6"
-                >
-                  <div className="w-full sm:w-48 aspect-[2/3] shrink-0 rounded-lg overflow-hidden shadow-md">
-                    <img
-                      src={book.coverUrl || fallbackCover}
-                      alt={book.title}
-                      className="w-full h-full object-cover"
-                      onError={(e) => {
-                        e.currentTarget.src = fallbackCover;
-                      }}
-                    />
-                  </div>
-
-                  <div className="flex-1 flex flex-col justify-between space-y-4">
-                    <div>
-                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                        <div>
-                          <h3 className="text-lg font-serif font-bold sm:text-xl">{book.title}</h3>
-                          <p className="text-muted-foreground">{book.author}</p>
-                        </div>
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon" className="h-8 w-8">
-                              <MoreVertical className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem
-                              onClick={() => handleReadBook(book)}
-                              className="flex items-center gap-2"
-                            >
-                              <Eye className="h-4 w-4" />
-                              Читать
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              onClick={() => handleEditBook(book)}
-                              className="flex items-center gap-2"
-                            >
-                              <Edit className="h-4 w-4" />
-                              Редактировать
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              onClick={() => setDeletingBook(book)}
-                              className="text-destructive flex items-center gap-2"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                              Удалить из библиотеки
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </div>
-
-                      <div className="mt-4 flex items-center gap-2 text-sm text-accent-foreground/80 font-medium bg-accent/10 w-fit px-2 py-1 rounded">
-                        <LibraryIcon className="w-3.5 h-3.5" />
-                        {(() => {
-                          if (book.format === "EPUB") return "EPUB";
-                          if (book.format === "FB2") return "FB2";
-                          return "Книга";
-                        })()}
-                      </div>
-
-                      {formatBookGenres(book) && (
-                        <div className="mt-2 text-xs text-muted-foreground">
-                          Жанры: {formatBookGenres(book)}
-                        </div>
-                      )}
-
-                      {book.description && (
-                        <p className="text-sm text-muted-foreground mt-3 line-clamp-2">
-                          {book.description}
-                        </p>
-                      )}
-                    </div>
-
-                    <div className="space-y-2">
-                      {/* Прогресс чтения */}
-                      {book.progress !== undefined && book.progress > 0 && (
-                        <div className="space-y-1">
-                          <div className="flex justify-between text-sm">
-                            <span className="text-muted-foreground">Прогресс</span>
-                            <span className="font-medium">{book.progress}%</span>
-                          </div>
-                          <Progress value={book.progress} className="h-2" />
-                        </div>
-                      )}
-
-                      <div className="flex justify-end text-sm">
-                        <span className="text-muted-foreground">
-                          {book.language && <span className="uppercase">{book.language}</span>}
-                        </span>
-                      </div>
-                      <p className="text-xs text-muted-foreground flex items-center gap-1">
-                        <Clock className="w-3 h-3" />
-                        Добавлено: {new Date(book.createdAt ?? book.uploadedAt).toLocaleDateString("ru-RU")}
-                      </p>
-                    </div>
-
-                    <div className="flex flex-col gap-2 pt-1 sm:flex-row sm:gap-3">
-                      <Button
-                        className="flex-1 gap-2 sm:flex-none"
-                        onClick={() => handleReadBook(book)}
-                      >
-                        <Book className="w-4 h-4" /> Читать
-                      </Button>
-                          {(book.progress ?? 0) > 95 && !shelvedCompletedBookIds.has(book.id) && (
-                            <Button
-                              variant="secondary"
-                              className="flex-1 gap-2 sm:flex-none"
-                              onClick={() => handleMarkAsCompleted(book)}
-                          disabled={markAsCompletedMutation.isPending}
-                        >
-                          <BookOpen className="w-4 h-4" />
-                          {markAsCompletedMutation.isPending ? "Сохраняем..." : "Прочитано"}
-                        </Button>
-                      )}
-                      <Button
-                        variant="outline"
-                        className="flex-1 gap-2 sm:flex-none"
-                        onClick={() => handlePlanBook(book)}
-                      >
-                        <CalendarClock className="w-4 h-4" /> Запланировать
-                      </Button>
-                      <Button
-                        variant="outline"
-                        className="flex-1 gap-2 text-muted-foreground hover:text-destructive sm:flex-none"
-                        onClick={() => setNotInterestedBook(book)}
-                      >
-                        <Trash2 className="w-4 h-4" /> Не интересно
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              ))}
-              </div>
-              ));
-              }
-
-              return (
-                <div className="text-center py-16 bg-secondary/20 rounded-xl border border-dashed">
-                  <LibraryIcon className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
-                  <h3 className="font-medium">Ваша библиотека пуста</h3>
-                  <p className="text-muted-foreground max-w-sm mx-auto mt-2">
-                    Добавьте свою первую книгу, загрузив файл EPUB или FB2 через кнопку "Загрузить
-                    книгу" выше.
-                  </p>
-                </div>
-              );
-            })()}
+            {renderCurrentTabContent()}
           </TabsContent>
 
           <TabsContent value="shelf" className="space-y-4">
@@ -1027,7 +1291,7 @@ export default function Library() {
                         bookTitle={book.bookTitle}
                         bookAuthor={book.bookAuthor}
                         bookCoverUrl={book.bookCoverUrl ?? undefined}
-                        completedAt={(book.completedAt as unknown as string) || ""}
+                        completedAt={serializeHistoryCompletedAt(book.completedAt)}
                         readingTimeMinutes={book.readingTimeMinutes ?? undefined}
                       />
                     ))}
@@ -1271,6 +1535,63 @@ export default function Library() {
         </DialogContent>
       </Dialog>
 
+      {/* Recommend Book Dialog */}
+      <Dialog open={!!recommendBook} onOpenChange={() => setRecommendBook(null)}>
+        <DialogContent className="max-w-[calc(100vw-2rem)] sm:max-w-[560px]">
+          <DialogHeader>
+            <DialogTitle>Порекомендовать книгу</DialogTitle>
+            <DialogDescription>
+              Выберите подписчиков и/или пользователей, на которых вы подписаны. Отправятся только метаданные книги и ваш комментарий.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="rounded-md border bg-muted/30 p-3 text-sm">
+              <p className="font-medium">{recommendBook?.title}</p>
+              <p className="text-muted-foreground">{recommendBook?.author}</p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="recommend-comment">Комментарий</Label>
+              <Textarea
+                id="recommend-comment"
+                placeholder="Почему рекомендуете эту книгу?"
+                maxLength={500}
+                value={recommendComment}
+                onChange={(e) => setRecommendComment(e.target.value)}
+              />
+            </div>
+
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="recommend-select-all"
+                  checked={allTargetsSelected}
+                  onCheckedChange={(checked) => handleToggleSelectAllTargets(checked === true)}
+                />
+                <Label htmlFor="recommend-select-all">Выбрать всех</Label>
+              </div>
+              <span className="text-xs text-muted-foreground">
+                Выбрано: {recommendSelectedUserIds.size}
+              </span>
+            </div>
+
+            <div className="max-h-64 overflow-y-auto rounded-md border">
+              {renderRecommendTargetsList()}
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRecommendBook(null)}>
+              Отмена
+            </Button>
+            <Button onClick={() => void handleSendBookRecommendation()} disabled={recommendSending || recommendLoading}>
+              {recommendSending ? "Отправляем..." : "Отправить рекомендацию"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Shelf Delete Confirmation Dialog */}
       <Dialog
         open={!!shelfDeleteItem}
@@ -1300,7 +1621,7 @@ export default function Library() {
                 inputMode="numeric"
                 maxLength={6}
                 value={shelfDeleteInput}
-                onChange={(e) => setShelfDeleteInput(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                onChange={(e) => setShelfDeleteInput(e.target.value.replaceAll(/\D/g, "").slice(0, 6))}
                 placeholder="6 цифр"
               />
             </div>

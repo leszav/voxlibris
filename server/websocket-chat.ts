@@ -9,13 +9,14 @@ import {
   clubs,
   clubMembers,
   chatMessages,
+  notifications,
   type ChatMessage,
-  type ChatUser,
   type ChatMessageWithUser,
 } from "../shared/schema.js";
 import { logger } from "./lib/logger.js";
+import { presenceService } from "./services/presence-service.js";
 
-interface AuthenticatedSocket extends Socket {
+interface AuthenticatedUser {
   userId: string;
   username: string;
 }
@@ -39,6 +40,24 @@ interface LoadHistoryPayload {
   offset?: number;
   limit?: number;
 }
+
+interface DeleteMessagePayload {
+  messageId: string;
+  clubId: string;
+  channel?: string;
+}
+
+interface ChatSocketContext {
+  io: Server;
+  socket: Socket;
+  user: AuthenticatedUser;
+}
+
+type ChatHistoryRow = ChatMessage & {
+  username: string;
+  displayName: string | null;
+  avatar: string | null;
+};
 
 const DEFAULT_CHANNEL = "general";
 const MAX_MESSAGES_PER_CLUB = 1000;
@@ -109,17 +128,17 @@ async function authenticateSocket(socket: Socket, next: (err?: Error) => void) {
 
     // Проверяем срок действия токена
     const now = Math.floor(Date.now() / 1000);
-    if (decoded.exp && decoded.exp < now) {
+    if ((decoded.exp ?? Number.POSITIVE_INFINITY) < now) {
       return next(new Error("Token expired"));
     }
 
     const [user] = await db.select().from(users).where(eq(users.id, decoded.userId)).limit(1);
-    if (!user || user.status !== "active" || !user.emailConfirmed) {
+    if (user?.status !== "active" || user?.emailConfirmed !== true) {
       return next(new Error("User not found, inactive, or not confirmed"));
     }
 
-    (socket as AuthenticatedSocket).userId = decoded.userId;
-    (socket as AuthenticatedSocket).username = decoded.username;
+    socket.data.userId = decoded.userId;
+    socket.data.username = decoded.username;
 
     logger.info(`[WS Chat] User ${decoded.username} (${decoded.userId}) authenticated successfully`);
     next();
@@ -138,7 +157,7 @@ async function authenticateSocket(socket: Socket, next: (err?: Error) => void) {
 async function verifyClubAccess(userId: string, clubId: string): Promise<boolean> {
   try {
     const [club] = await db.select().from(clubs).where(eq(clubs.id, clubId)).limit(1);
-    if (!club || !club.isActive) return false;
+    if (club?.isActive !== true) return false;
 
     const [membership] = await db
       .select()
@@ -221,6 +240,487 @@ function getParticipants(room: string): Array<{ userId: string; username: string
   return map ? Array.from(map.values()) : [];
 }
 
+function toChatMessageWithUser(row: ChatHistoryRow): ChatMessageWithUser {
+  const {
+    username,
+    displayName,
+    avatar,
+    id,
+    clubId,
+    channel,
+    userId,
+    text,
+    mentions,
+    attachments,
+    createdAt,
+    updatedAt,
+    deletedAt,
+  } = row;
+
+  return {
+    id,
+    clubId,
+    channel,
+    userId,
+    text,
+    mentions,
+    attachments,
+    createdAt,
+    updatedAt,
+    deletedAt,
+    user: {
+      id: userId,
+      username,
+      displayName,
+      avatar,
+    },
+  };
+}
+
+function resolveChannel(channel?: string): string {
+  return channel || DEFAULT_CHANNEL;
+}
+
+function getAuthenticatedUser(socket: Socket): AuthenticatedUser {
+  const { userId, username } = socket.data;
+  if (typeof userId !== "string" || typeof username !== "string") {
+    throw new TypeError("Socket is not authenticated");
+  }
+
+  return { userId, username };
+}
+
+function emitParticipants(
+  io: Server,
+  room: string,
+  clubId: string,
+  channel: string | undefined,
+): void {
+  io.to(room).emit("participants", {
+    room,
+    clubId,
+    channel: resolveChannel(channel),
+    participants: getParticipants(room),
+  });
+}
+
+async function handleJoinRoom(
+  { io, socket, user }: ChatSocketContext,
+  payload: JoinRoomPayload,
+): Promise<void> {
+  try {
+    const { clubId, channel } = payload;
+    if (!clubId) {
+      socket.emit("error", { message: "clubId is required" });
+      return;
+    }
+
+    const hasAccess = await verifyClubAccess(user.userId, clubId);
+    if (!hasAccess) {
+      socket.emit("error", { message: "Access denied to this club" });
+      return;
+    }
+
+    const room = buildRoomName(clubId, channel);
+    await socket.join(room);
+    const added = addParticipant(room, user.userId, user.username);
+    if (!added) {
+      await socket.leave(room);
+      socket.emit("error", { message: "Room is at participant capacity" });
+      return;
+    }
+
+    logger.info(`[WS Chat] ${user.username} joined room ${room}`);
+
+    emitParticipants(io, room, clubId, channel);
+    socket.emit("joined_room", { room, clubId, channel: resolveChannel(channel) });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error({ error: errorMessage }, "[WS Chat] join_room error");
+    socket.emit("error", { message: "Failed to join room" });
+  }
+}
+
+async function handleChatMessage(
+  { io, socket, user }: ChatSocketContext,
+  payload: ChatMessagePayload,
+): Promise<void> {
+  try {
+    const { clubId, channel, text: rawText, mentions, attachments } = payload;
+    const text = typeof rawText === "string" ? rawText.trim() : "";
+    if (!clubId || !text) {
+      socket.emit("error", { message: "clubId and text are required" });
+      return;
+    }
+
+    const hasAccess = await verifyClubAccess(user.userId, clubId);
+    if (!hasAccess) {
+      socket.emit("error", { message: "Access denied to this club" });
+      return;
+    }
+
+    const room = buildRoomName(clubId, channel);
+    const resolvedChannel = resolveChannel(channel);
+
+    const [inserted] = await db
+      .insert(chatMessages)
+      .values({
+        clubId,
+        channel: resolvedChannel,
+        userId: user.userId,
+        text,
+        mentions: mentions?.length ? JSON.stringify(mentions) : null,
+        attachments: attachments?.length ? JSON.stringify(attachments) : null,
+      })
+      .returning();
+
+    const userProfile = await db
+      .select({ displayName: userProfiles.displayName, avatar: userProfiles.avatar })
+      .from(userProfiles)
+      .where(eq(userProfiles.userId, user.userId))
+      .limit(1);
+
+    const messageWithUser: ChatMessageWithUser = {
+      ...inserted,
+      user: {
+        id: user.userId,
+        username: user.username,
+        displayName: userProfile[0]?.displayName || null,
+        avatar: userProfile[0]?.avatar || null,
+      },
+    };
+
+    io.to(room).emit("chat_message", {
+      room,
+      clubId,
+      channel: resolvedChannel,
+      message: messageWithUser,
+    });
+
+    socket.emit("message_sent", {
+      room,
+      clubId,
+      channel: resolvedChannel,
+      message: messageWithUser,
+    });
+
+    // Создать notification для каждого упомянутого пользователя (не для себя)
+    if (mentions && mentions.length > 0) {
+      const uniqueMentions = [...new Set(mentions)].filter(uid => uid !== user.userId);
+      if (uniqueMentions.length > 0) {
+        await db.insert(notifications).values(
+          uniqueMentions.map(mentionedUserId => ({
+            userId: mentionedUserId,
+            type: "mention" as const,
+            sourceUserId: user.userId,
+            sourceMessageId: inserted.id,
+            message: `${user.username} упомянул вас в чате`,
+          }))
+        );
+      }
+    }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error({ error: errorMessage }, "[WS Chat] chat_message error");
+    socket.emit("error", { message: "Failed to send message" });
+  }
+}
+
+async function handleLoadHistory(
+  { socket, user }: ChatSocketContext,
+  payload: LoadHistoryPayload,
+): Promise<void> {
+  try {
+    const { clubId, channel, offset = 0, limit = 50 } = payload;
+    if (!clubId) {
+      socket.emit("error", { message: "clubId is required" });
+      return;
+    }
+
+    const hasAccess = await verifyClubAccess(user.userId, clubId);
+    if (!hasAccess) {
+      socket.emit("error", { message: "Access denied to this club" });
+      return;
+    }
+
+    const room = buildRoomName(clubId, channel);
+    const resolvedChannel = resolveChannel(channel);
+
+    const rows = await db
+      .select({
+        id: chatMessages.id,
+        clubId: chatMessages.clubId,
+        channel: chatMessages.channel,
+        userId: chatMessages.userId,
+        text: chatMessages.text,
+        mentions: chatMessages.mentions,
+        attachments: chatMessages.attachments,
+        createdAt: chatMessages.createdAt,
+        updatedAt: chatMessages.updatedAt,
+        deletedAt: chatMessages.deletedAt,
+        username: users.username,
+        displayName: userProfiles.displayName,
+        avatar: userProfiles.avatar,
+      })
+      .from(chatMessages)
+      .innerJoin(users, eq(chatMessages.userId, users.id))
+      .leftJoin(userProfiles, eq(chatMessages.userId, userProfiles.userId))
+      .where(
+        and(
+          eq(chatMessages.clubId, clubId),
+          eq(chatMessages.channel, resolvedChannel),
+        ),
+      )
+      .orderBy(desc(chatMessages.createdAt))
+      .offset(offset)
+      .limit(Math.min(limit, 100));
+
+    socket.emit("history", {
+      room,
+      clubId,
+      channel: resolvedChannel,
+      offset,
+      limit,
+      messages: rows.map(toChatMessageWithUser),
+    });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error({ error: errorMessage }, "[WS Chat] load_history error");
+    socket.emit("error", { message: "Failed to load history" });
+  }
+}
+
+function handleGetParticipants(socket: Socket, payload: JoinRoomPayload): void {
+  const { clubId, channel } = payload;
+  if (!clubId) {
+    return;
+  }
+
+  const room = buildRoomName(clubId, channel);
+  socket.emit("participants", {
+    room,
+    clubId,
+    channel: resolveChannel(channel),
+    participants: getParticipants(room),
+  });
+}
+
+async function handleDeleteMessage(
+  { io, socket, user }: ChatSocketContext,
+  payload: DeleteMessagePayload,
+): Promise<void> {
+  try {
+    const { messageId, clubId, channel } = payload;
+    if (!messageId || !clubId) {
+      socket.emit("error", { message: "messageId and clubId are required" });
+      return;
+    }
+
+    const hasAccess = await verifyClubAccess(user.userId, clubId);
+    if (!hasAccess) {
+      socket.emit("error", { message: "Access denied to this club" });
+      return;
+    }
+
+    const room = buildRoomName(clubId, channel);
+
+    const [member] = await db
+      .select({ role: clubMembers.role })
+      .from(clubMembers)
+      .where(
+        and(
+          eq(clubMembers.clubId, clubId),
+          eq(clubMembers.userId, user.userId),
+          eq(clubMembers.isActive, true),
+        ),
+      )
+      .limit(1);
+
+    const [message] = await db
+      .select()
+      .from(chatMessages)
+      .where(eq(chatMessages.id, messageId))
+      .limit(1);
+
+    if (message?.clubId !== clubId) {
+      socket.emit("error", { message: "Message not found" });
+      return;
+    }
+
+    const isOwner = member?.role === "owner";
+    const isAuthor = message.userId === user.userId;
+
+    if (!isOwner && !isAuthor) {
+      socket.emit("error", { message: "Not allowed to delete this message" });
+      return;
+    }
+
+    await db
+      .update(chatMessages)
+      .set({
+        text: "[deleted]",
+        deletedAt: new Date(),
+      })
+      .where(eq(chatMessages.id, messageId));
+
+    io.to(room).emit("message_deleted", {
+      room,
+      clubId,
+      channel: resolveChannel(channel),
+      messageId,
+    });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error({ error: errorMessage }, "[WS Chat] delete_message error");
+    socket.emit("error", { message: "Failed to delete message" });
+  }
+}
+
+function handleLeaveRoom({ io, socket, user }: ChatSocketContext, payload: JoinRoomPayload): void {
+  const { clubId, channel } = payload;
+  if (!clubId) {
+    return;
+  }
+
+  const room = buildRoomName(clubId, channel);
+  socket.leave(room);
+  removeParticipant(room, user.userId);
+  const participants = getParticipants(room);
+
+  io.to(room).emit("participants", {
+    room,
+    clubId,
+    channel: resolveChannel(channel),
+    participants,
+  });
+
+  logger.info(`[WS Chat] ${user.username} left room ${room}`);
+}
+
+function handleDisconnect(io: Server, user: AuthenticatedUser): void {
+  logger.info(`[WS Chat] User ${user.username} (${user.userId}) disconnected`);
+
+  for (const [room, participants] of roomParticipants.entries()) {
+    if (!participants.has(user.userId)) {
+      continue;
+    }
+
+    participants.delete(user.userId);
+
+    if (participants.size === 0) {
+      roomParticipants.delete(room);
+      roomTouchedAt.delete(room);
+      continue;
+    }
+
+    io.to(room).emit("participants", {
+      room,
+      participants: Array.from(participants.values()),
+    });
+  }
+}
+
+function registerChatSocketHandlers(context: ChatSocketContext): void {
+  const { socket } = context;
+
+  socket.on("join_room", (payload: JoinRoomPayload) => {
+    void handleJoinRoom(context, payload);
+  });
+
+  socket.on("chat_message", (payload: ChatMessagePayload) => {
+    void handleChatMessage(context, payload);
+  });
+
+  socket.on("load_history", (payload: LoadHistoryPayload) => {
+    void handleLoadHistory(context, payload);
+  });
+
+  socket.on("get_participants", (payload: JoinRoomPayload) => {
+    handleGetParticipants(socket, payload);
+  });
+
+  socket.on("delete_message", (payload: DeleteMessagePayload) => {
+    void handleDeleteMessage(context, payload);
+  });
+
+  socket.on("leave_room", (payload: JoinRoomPayload) => {
+    handleLeaveRoom(context, payload);
+  });
+
+  socket.on("club_visit", async (payload: { clubId?: string }) => {
+    const { clubId } = payload ?? {};
+    if (typeof clubId !== "string" || !clubId) return;
+
+    try {
+      await presenceService.markOnlineInClub(clubId, context.user.userId);
+
+      if (!Array.isArray(socket.data.visitedClubs)) socket.data.visitedClubs = [];
+      const visited = new Set(socket.data.visitedClubs as string[]);
+      visited.add(clubId);
+      socket.data.visitedClubs = Array.from(visited);
+
+      // join в presence-комнату чтобы получать обновления
+      void socket.join(`presence:${clubId}`);
+
+      // уведомляем всех в клубе о новом онлайн-участнике
+      const onlineUserIds = await presenceService.getClubOnlineUserIds(clubId);
+      context.io.to(`presence:${clubId}`).emit("club:presence_update", {
+        clubId,
+        onlineUserIds,
+      });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.error({ error: errorMessage, clubId }, "[WS Chat] club_visit error");
+    }
+  });
+
+  socket.on("club_leave", async (payload: { clubId?: string }) => {
+    const { clubId } = payload ?? {};
+    if (typeof clubId !== "string" || !clubId) return;
+
+    try {
+      await presenceService.leaveClub(clubId, context.user.userId);
+
+      if (Array.isArray(socket.data.visitedClubs)) {
+        socket.data.visitedClubs = (socket.data.visitedClubs as string[]).filter((id) => id !== clubId);
+      }
+
+      void socket.leave(`presence:${clubId}`);
+      const onlineUserIds = await presenceService.getClubOnlineUserIds(clubId);
+      context.io.to(`presence:${clubId}`).emit("club:presence_update", {
+        clubId,
+        onlineUserIds,
+      });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.error({ error: errorMessage, clubId }, "[WS Chat] club_leave error");
+    }
+  });
+
+  socket.on("disconnect", async () => {
+    const visited = socket.data.visitedClubs as string[] | undefined;
+    if (Array.isArray(visited) && visited.length > 0) {
+      const uniqueVisited = Array.from(new Set(visited));
+
+      try {
+        await presenceService.leaveAllClubs(context.user.userId);
+        for (const clubId of uniqueVisited) {
+          const onlineUserIds = await presenceService.getClubOnlineUserIds(clubId);
+          context.io.to(`presence:${clubId}`).emit("club:presence_update", {
+            clubId,
+            onlineUserIds,
+          });
+        }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        logger.error({ error: errorMessage }, "[WS Chat] disconnect presence cleanup error");
+      }
+    }
+
+    handleDisconnect(context.io, context.user);
+  });
+}
+
 export function initializeChatWebSocket(httpServer: HttpServer) {
   const allowedOrigins = process.env.ALLOWED_ORIGINS
     ? process.env.ALLOWED_ORIGINS.split(",")
@@ -243,321 +743,10 @@ export function initializeChatWebSocket(httpServer: HttpServer) {
   historyCleanupInterval.unref();
 
   io.on("connection", (socket: Socket) => {
-    const authSocket = socket as AuthenticatedSocket;
-    logger.info(`[WS Chat] User ${authSocket.username} (${authSocket.userId}) connected`);
+    const user = getAuthenticatedUser(socket);
+    logger.info(`[WS Chat] User ${user.username} (${user.userId}) connected`);
 
-    socket.on("join_room", async (payload: JoinRoomPayload) => {
-      try {
-        const { clubId, channel } = payload;
-        if (!clubId) {
-          socket.emit("error", { message: "clubId is required" });
-          return;
-        }
-
-        const hasAccess = await verifyClubAccess(authSocket.userId, clubId);
-        if (!hasAccess) {
-          socket.emit("error", { message: "Access denied to this club" });
-          return;
-        }
-
-        const room = buildRoomName(clubId, channel);
-        await socket.join(room);
-        const added = addParticipant(room, authSocket.userId, authSocket.username);
-        if (!added) {
-          await socket.leave(room);
-          socket.emit("error", { message: "Room is at participant capacity" });
-          return;
-        }
-
-        logger.info(`[WS Chat] ${authSocket.username} joined room ${room}`);
-
-        io.to(room).emit("participants", {
-          room,
-          clubId,
-          channel: channel || DEFAULT_CHANNEL,
-          participants: getParticipants(room),
-        });
-
-        socket.emit("joined_room", { room, clubId, channel: channel || DEFAULT_CHANNEL });
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        logger.error({ error: errorMessage }, "[WS Chat] join_room error");
-        socket.emit("error", { message: "Failed to join room" });
-      }
-    });
-
-    socket.on("chat_message", async (payload: ChatMessagePayload) => {
-      try {
-        const { clubId, channel, text, mentions, attachments } = payload;
-        if (!clubId || !text?.trim()) {
-          socket.emit("error", { message: "clubId and text are required" });
-          return;
-        }
-
-        const hasAccess = await verifyClubAccess(authSocket.userId, clubId);
-        if (!hasAccess) {
-          socket.emit("error", { message: "Access denied to this club" });
-          return;
-        }
-
-        const room = buildRoomName(clubId, channel);
-
-        const [inserted] = await db
-          .insert(chatMessages)
-          .values({
-            clubId,
-            channel: channel || DEFAULT_CHANNEL,
-            userId: authSocket.userId,
-            text: text.trim(),
-            mentions: mentions && mentions.length > 0 ? JSON.stringify(mentions) : null,
-            attachments: attachments && attachments.length > 0 ? JSON.stringify(attachments) : null,
-          })
-          .returning();
-
-        // Получаем displayName из профиля пользователя
-        const userProfile = await db
-          .select({ displayName: userProfiles.displayName })
-          .from(userProfiles)
-          .where(eq(userProfiles.userId, authSocket.userId))
-          .limit(1);
-
-        const messageWithUser: ChatMessageWithUser = {
-          ...(inserted as ChatMessage),
-          user: {
-            id: authSocket.userId,
-            username: authSocket.username,
-            displayName: userProfile[0]?.displayName || null,
-          } as ChatUser,
-        };
-
-        io.to(room).emit("chat_message", {
-          room,
-          clubId,
-          channel: channel || DEFAULT_CHANNEL,
-          message: messageWithUser,
-        });
-
-        // Ack для отправителя
-        socket.emit("message_sent", {
-          room,
-          clubId,
-          channel: channel || DEFAULT_CHANNEL,
-          message: messageWithUser,
-        });
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        logger.error({ error: errorMessage }, "[WS Chat] chat_message error");
-        socket.emit("error", { message: "Failed to send message" });
-      }
-    });
-
-    socket.on("load_history", async (payload: LoadHistoryPayload) => {
-      try {
-        const { clubId, channel, offset = 0, limit = 50 } = payload;
-        if (!clubId) {
-          socket.emit("error", { message: "clubId is required" });
-          return;
-        }
-
-        const hasAccess = await verifyClubAccess(authSocket.userId, clubId);
-        if (!hasAccess) {
-          socket.emit("error", { message: "Access denied to this club" });
-          return;
-        }
-
-        const room = buildRoomName(clubId, channel);
-
-        const rows = await db
-          .select({
-            id: chatMessages.id,
-            clubId: chatMessages.clubId,
-            channel: chatMessages.channel,
-            userId: chatMessages.userId,
-            text: chatMessages.text,
-            mentions: chatMessages.mentions,
-            attachments: chatMessages.attachments,
-            createdAt: chatMessages.createdAt,
-            updatedAt: chatMessages.updatedAt,
-            deletedAt: chatMessages.deletedAt,
-            username: users.username,
-            displayName: userProfiles.displayName,
-          })
-          .from(chatMessages)
-          .innerJoin(users, eq(chatMessages.userId, users.id))
-          .leftJoin(userProfiles, eq(chatMessages.userId, userProfiles.userId))
-          .where(
-            and(
-              eq(chatMessages.clubId, clubId),
-              eq(chatMessages.channel, channel || DEFAULT_CHANNEL),
-            ),
-          )
-          .orderBy(desc(chatMessages.createdAt))
-          .offset(offset)
-          .limit(Math.min(limit, 100));
-
-        const messages: ChatMessageWithUser[] = rows.map((row: {
-          id: string;
-          clubId: string;
-          channel: string;
-          userId: string;
-          text: string;
-          mentions: string | null;
-          attachments: string | null;
-          createdAt: Date;
-          updatedAt: Date;
-          deletedAt: Date | null;
-          username: string;
-          displayName: string | null;
-        }) => ({
-          ...((
-            ({ username: _username, displayName: _displayName, ...rest }) => rest
-          )(row) as ChatMessage),
-          user: { 
-            id: row.userId,
-            username: row.username,
-            displayName: row.displayName,
-          } as ChatUser,
-        }));
-
-        socket.emit("history", {
-          room,
-          clubId,
-          channel: channel || DEFAULT_CHANNEL,
-          offset,
-          limit,
-          messages,
-        });
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        logger.error({ error: errorMessage }, "[WS Chat] load_history error");
-        socket.emit("error", { message: "Failed to load history" });
-      }
-    });
-
-    socket.on("get_participants", (payload: JoinRoomPayload) => {
-      const { clubId, channel } = payload;
-      if (!clubId) return;
-      const room = buildRoomName(clubId, channel);
-      socket.emit("participants", {
-        room,
-        clubId,
-        channel: channel || DEFAULT_CHANNEL,
-        participants: getParticipants(room),
-      });
-    });
-
-    // Удаление сообщения (только владелец клуба или автор, можно расширить под модераторов)
-    socket.on(
-      "delete_message",
-      async (payload: { messageId: string; clubId: string; channel?: string }) => {
-        try {
-          const { messageId, clubId, channel } = payload;
-          if (!messageId || !clubId) {
-            socket.emit("error", { message: "messageId and clubId are required" });
-            return;
-          }
-
-          const hasAccess = await verifyClubAccess(authSocket.userId, clubId);
-          if (!hasAccess) {
-            socket.emit("error", { message: "Access denied to this club" });
-            return;
-          }
-
-          const room = buildRoomName(clubId, channel);
-
-          // Получаем участника и его роль
-          const [member] = await db
-            .select({ role: clubMembers.role })
-            .from(clubMembers)
-            .where(
-              and(
-                eq(clubMembers.clubId, clubId),
-                eq(clubMembers.userId, authSocket.userId),
-                eq(clubMembers.isActive, true),
-              ),
-            )
-            .limit(1);
-
-          // Получаем сообщение
-          const [message] = await db
-            .select()
-            .from(chatMessages)
-            .where(eq(chatMessages.id, messageId))
-            .limit(1);
-
-          if (!message || message.clubId !== clubId) {
-            socket.emit("error", { message: "Message not found" });
-            return;
-          }
-
-          const isOwner = member?.role === "owner";
-          const isAuthor = message.userId === authSocket.userId;
-
-          if (!isOwner && !isAuthor) {
-            socket.emit("error", { message: "Not allowed to delete this message" });
-            return;
-          }
-
-          await db
-            .update(chatMessages)
-            .set({
-              text: "[deleted]",
-              deletedAt: new Date(),
-            })
-            .where(eq(chatMessages.id, messageId));
-
-          io.to(room).emit("message_deleted", {
-            room,
-            clubId,
-            channel: channel || DEFAULT_CHANNEL,
-            messageId,
-          });
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          logger.error({ error: errorMessage }, "[WS Chat] delete_message error");
-          socket.emit("error", { message: "Failed to delete message" });
-        }
-      },
-    );
-
-    socket.on("leave_room", (payload: JoinRoomPayload) => {
-      const { clubId, channel } = payload;
-      if (!clubId) return;
-      const room = buildRoomName(clubId, channel);
-      socket.leave(room);
-      removeParticipant(room, authSocket.userId);
-      const participants = getParticipants(room);
-
-      io.to(room).emit("participants", {
-        room,
-        clubId,
-        channel: channel || DEFAULT_CHANNEL,
-        participants,
-      });
-
-      logger.info(`[WS Chat] ${authSocket.username} left room ${room}`);
-    });
-
-    socket.on("disconnect", () => {
-      logger.info(`[WS Chat] User ${authSocket.username} (${authSocket.userId}) disconnected`);
-      // Очистка участника из всех комнат
-      for (const [room, participants] of roomParticipants.entries()) {
-        if (participants.has(authSocket.userId)) {
-          participants.delete(authSocket.userId);
-
-          if (participants.size === 0) {
-            roomParticipants.delete(room);
-            roomTouchedAt.delete(room);
-            continue;
-          }
-
-          io.to(room).emit("participants", {
-            room,
-            participants: Array.from(participants.values()),
-          });
-        }
-      }
-    });
+    registerChatSocketHandlers({ io, socket, user });
   });
 
   logger.info("[WS Chat] WebSocket server initialized at /ws/chat");

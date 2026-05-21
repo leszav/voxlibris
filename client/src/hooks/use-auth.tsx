@@ -1,10 +1,9 @@
 import React, { createContext, useContext, useEffect, useState, useMemo, useRef, ReactNode } from 'react';
-import { User } from '../../../shared/schema';
-import { authAPI } from '@/lib/auth';
+import { authAPI, type AuthUserClient } from '@/lib/auth';
 import { syncTokenFromCookie } from '@/lib/token-store';
 
 interface AuthContextType {
-  user: User | null;
+  user: AuthUserClient | null;
   isAuthenticated: boolean;
   isLoading: boolean;
   login: (username: string, password: string, rememberMe?: boolean) => Promise<void>;
@@ -22,7 +21,7 @@ interface AuthProviderProps {
 
 export function AuthProvider({ children }: AuthProviderProps) {
   // Безопасное состояние без кэширования в localStorage
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<AuthUserClient | null>(null);
  const [isLoading, setIsLoading] = useState(true);
   const isInitializedRef = useRef(false);
   const hasExplicitLogoutRef = useRef(false);

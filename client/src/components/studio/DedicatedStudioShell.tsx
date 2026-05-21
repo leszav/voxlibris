@@ -102,6 +102,7 @@ export function DedicatedStudioShell({
             onMicToggle={onMicToggle}
             elapsedTime={elapsedTime}
             listenerCount={listenerCount}
+            sessionId={sessionId}
             micLevel={micLevel}
             micBars={micBars}
             onPause={onPause}

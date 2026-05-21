@@ -8,9 +8,9 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { apiRequest } from "@/lib/queryClient";
-import { modalAlert } from "@/hooks/use-toast";
+import { modalAlert, modalConfirm } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
-import { Search, Save } from "lucide-react";
+import { Search, Save, Trash2 } from "lucide-react";
 
 interface AdminGenre {
   id: string;
@@ -89,6 +89,12 @@ async function updateGenre(code: string, payload: GenreFormState): Promise<void>
   });
 }
 
+async function deleteGenre(code: string): Promise<void> {
+  await apiRequest(`/api/v1/admin/genres/${code}`, {
+    method: "DELETE",
+  });
+}
+
 function mapGenreToForm(genre: AdminGenre): GenreFormState {
   return {
     code: genre.code,
@@ -136,6 +142,22 @@ export default function AdminGenres() {
     onError: async (error: Error) => {
       await modalAlert({
         title: "Не удалось сохранить жанр",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (code: string) => deleteGenre(code),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["admin-genres"] });
+      setSelectedCode(null);
+      setForm(emptyForm);
+    },
+    onError: async (error: Error) => {
+      await modalAlert({
+        title: "Не удалось удалить жанр",
         description: error.message,
         variant: "destructive",
       });
@@ -211,15 +233,41 @@ export default function AdminGenres() {
             <CardContent className="p-4 space-y-4">
               <div className="flex items-center justify-between">
                 <h2 className="text-lg font-semibold">{selectedGenre ? "Редактирование жанра" : "Новый жанр"}</h2>
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    setSelectedCode(null);
-                    setForm(emptyForm);
-                  }}
-                >
-                  Новый
-                </Button>
+                <div className="flex items-center gap-2">
+                  {selectedGenre && (
+                    <Button
+                      variant="destructive"
+                      onClick={async () => {
+                        const confirmed = await modalConfirm({
+                          title: "Удалить жанр?",
+                          description: `Жанр «${selectedGenre.labelRu}» будет удален без возможности восстановления.`,
+                          confirmLabel: "Удалить",
+                          cancelLabel: "Отмена",
+                        });
+
+                        if (!confirmed) {
+                          return;
+                        }
+
+                        deleteMutation.mutate(selectedGenre.code);
+                      }}
+                      disabled={!canEdit || deleteMutation.isPending}
+                    >
+                      <Trash2 className="mr-2 h-4 w-4" />
+                      Удалить
+                    </Button>
+                  )}
+
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setSelectedCode(null);
+                      setForm(emptyForm);
+                    }}
+                  >
+                    Новый
+                  </Button>
+                </div>
               </div>
 
               <div className="space-y-2">
@@ -300,12 +348,12 @@ export default function AdminGenres() {
                   checked={form.isActive}
                   onChange={(e) => setForm((prev) => ({ ...prev, isActive: e.target.checked }))}
                 />
-                Жанр активен
+                <span>Жанр активен</span>
               </label>
 
               <Button
                 onClick={() => saveMutation.mutate()}
-                disabled={!canEdit || saveMutation.isPending || !form.code.trim() || !form.labelRu.trim()}
+                disabled={!canEdit || saveMutation.isPending || deleteMutation.isPending || !form.code.trim() || !form.labelRu.trim()}
                 className="w-full"
               >
                 <Save className="mr-2 h-4 w-4" />

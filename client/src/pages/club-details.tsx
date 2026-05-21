@@ -1,4 +1,4 @@
-import type { ClubMemberRole, ClubWithDetails, User } from "@shared/schema";
+import type { ClubMemberRole, ClubWithDetails } from "@shared/schema";
 import { useState } from "react";
 import {
   ArrowLeft,
@@ -12,13 +12,14 @@ import {
   LogOut,
   MessageCircle,
   MoreHorizontal,
+  Share2,
   Star,
   Trash2,
   Users,
   Layers,
 } from "lucide-react";
 import { Link, useLocation, useRoute } from "wouter";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
 import { ClubSettingsModal } from "@/components/club/club-settings-modal";
 import { EditClubBookDialog } from "@/components/club/EditClubBookDialog";
@@ -34,8 +35,9 @@ import { LiveReadersBubble, ActiveReadersModal } from "@/components/studio/LiveR
 import { ListenerOverlay } from "@/components/studio/ListenerOverlay";
 import { useLiveReaders } from "@/hooks/use-live-readers";
 import { useClubLiveListening } from "@/hooks/use-club-live-listening";
+import { useClubPresence } from "@/hooks/use-club-presence";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -46,15 +48,23 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
 import { VoxLibrisUpload } from "@/components/ui/voxlibris-upload";
 import { useAuth } from "@/hooks/use-auth";
 import { useClubBooks, useDeleteClubBook, useSetActiveBook, type ClubBook } from "@/hooks/use-books-v2";
 import { useClub, useClubMembers, useRemoveMember, type ClubDetailsResponse, type ClubMemberWithUser } from "@/hooks/use-clubs";
 import { modalConfirm, useToast } from "@/hooks/use-toast";
+import type { AuthUserClient } from "@/lib/auth";
 import { getAccessToken } from "@/lib/token-store";
+import { authFetch } from "@/lib/queryClient";
+import { UserContextMenu } from "@/components/social/UserContextMenu";
+import { socialApi, type FollowUser } from "@/api/social";
 import DOMPurify from "dompurify";
 
 interface ScheduleItem {
@@ -73,6 +83,43 @@ interface ClubSettings {
 }
 
 type ClubWithOptionalBook = ClubDetailsResponse & { book?: ClubDetailsResponse["book"] | null };
+const RECOMMEND_PREFIX = "[RECOMMEND]";
+
+type BookRecommendationPayload = {
+  type: "book";
+  entityId: string;
+  title: string;
+  subtitle: string;
+  imageUrl?: string | null;
+  comment?: string | null;
+};
+
+type DmConversationCreateResponse = {
+  conversation: {
+    id: string;
+  };
+};
+
+function encodeBookRecommendationPayload(payload: BookRecommendationPayload): string {
+  return `${RECOMMEND_PREFIX}${JSON.stringify(payload)}`;
+}
+
+async function loadAllFollowUsers(
+  loader: (userId: string, limit: number, cursor?: string) => Promise<{ users: FollowUser[]; nextCursor: string | null }>,
+  userId: string,
+): Promise<FollowUser[]> {
+  const all: FollowUser[] = [];
+  let cursor: string | undefined;
+
+  while (true) {
+    const page = await loader(userId, 50, cursor);
+    all.push(...page.users);
+    if (!page.nextCursor) break;
+    cursor = page.nextCursor;
+  }
+
+  return all;
+}
 
 // Вспомогательная функция для получения варианта badge по роли
 const getMemberRoleBadgeVariant = (role: ClubMemberRole): "default" | "secondary" | "outline" => {
@@ -115,6 +162,13 @@ const parseSchedule = (schedule: string | null): ScheduleItem[] => {
     return [];
   }
 };
+
+// Получение символа для иконки достижения
+function getAchievementIconSymbol(iconType: string): string {
+  if (iconType === "star") return "★";
+  if (iconType === "title") return "T";
+  return "🏅";
+}
 
 const ClubNotFound = () => (
   <MainLayout>
@@ -229,7 +283,7 @@ function useClubErrorHandling(error: unknown, setLocation: (path: string) => voi
   );
 }
 
-function useClubPermissions(currentUserRole: ClubMemberRole | null | undefined, user: User | null) {
+function useClubPermissions(currentUserRole: ClubMemberRole | null | undefined, user: AuthUserClient | null) {
   const isOwner = currentUserRole === "owner";
   const isModerator = currentUserRole === "moderator";
   const isMember = Boolean(currentUserRole);
@@ -256,7 +310,7 @@ function useClubActions({
 }: {
   clubId: string;
   club: ClubWithDetails | null;
-  user: User | null;
+  user: AuthUserClient | null;
   isOwner: boolean;
   toast: ToastFn;
   setLocation: (path: string) => void;
@@ -388,7 +442,7 @@ interface ClubHeaderProps {
   readonly removeMemberMutation: RemoveMemberMutation;
   readonly handleLeaveClub: () => void;
   readonly setLocation: (path: string) => void;
-  readonly user: User | null;
+  readonly user: AuthUserClient | null;
   readonly onOwnershipTransferred: () => void;
 }
 
@@ -666,6 +720,13 @@ interface MembersListCardProps {
 }
 
 function MembersListCard({ clubId, clubTitle, members, memberCount, membersLoading, canViewMembers, isOwner, isModerator, canRemove, handleRemoveMember }: MembersListCardProps) {
+  const { data: presenceData } = useQuery<{ onlineUserIds: string[] }>({
+    queryKey: ["/api/presence/club", clubId],
+    queryFn: () => authFetch(`/api/presence/club/${clubId}`).then(r => r.json()) as Promise<{ onlineUserIds: string[] }>,
+    refetchInterval: 15_000,
+    staleTime: 0,
+  });
+  const onlineSet = new Set(presenceData?.onlineUserIds ?? []);
   return (
     <div className="rounded-xl border bg-card p-4 shadow-sm sm:p-6">
       <h3 className="mb-4 flex flex-col gap-3 font-serif text-lg font-bold sm:flex-row sm:items-center sm:justify-between sm:text-xl">
@@ -690,20 +751,56 @@ function MembersListCard({ clubId, clubTitle, members, memberCount, membersLoadi
             </div>
           ) : (
             <div className="max-h-[28rem] space-y-4 overflow-y-auto pr-1 sm:max-h-[32rem]">
-              {members.map((member) => (
+              {members.map((member) => {
+                const memberRating = (member.readerRating ?? 0) / 100;
+                const compactAchievements = (member.achievements ?? []).slice(0, 3);
+
+                return (
                 <div key={member.id} className="flex flex-col gap-3 rounded-xl border border-border/60 p-3 2xl:flex-row 2xl:items-center 2xl:justify-between 2xl:border-0 2xl:p-0">
                   <div className="flex min-w-0 items-center gap-3">
-                    <Avatar>
-                      <AvatarFallback className="bg-primary/10 text-primary font-bold">
-                        {member.username.substring(0, 2).toUpperCase()}
-                      </AvatarFallback>
-                    </Avatar>
+                    <div className="relative shrink-0">
+                      <UserContextMenu user={{ id: member.id, username: member.username, displayName: member.displayName }} actions={["profile"]}>
+                        <div className="cursor-pointer">
+                          <Avatar>
+                            {member.avatar && <AvatarImage src={member.avatar} alt={member.displayName || member.username} />}
+                            <AvatarFallback className="bg-primary/10 text-primary font-bold">
+                              {(member.displayName || member.username).substring(0, 2).toUpperCase()}
+                            </AvatarFallback>
+                          </Avatar>
+                        </div>
+                      </UserContextMenu>
+                      {onlineSet.has(String(member.id)) && (
+                        <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full bg-green-500 ring-2 ring-background" />
+                      )}
+                    </div>
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium">{member.username}</p>
+                      <p className="truncate text-sm font-medium">{member.displayName || member.username}</p>
                       <div className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
                         <span>
                           Присоединился {new Date(member.joinedAt).toLocaleDateString()}
                         </span>
+                        <span>•</span>
+                        <span>Рейтинг: {memberRating.toFixed(1)}</span>
+                      </div>
+                      <div className="mt-1 hidden items-center gap-1 md:flex">
+                        {compactAchievements.map((achievement) => (
+                          <div
+                            key={achievement.achievementId}
+                            title={achievement.titleRu}
+                            className="flex h-5 w-5 items-center justify-center overflow-hidden rounded border bg-muted/30 text-[10px]"
+                          >
+                            {achievement.badgeImageUrl ? (
+                              <img src={achievement.badgeImageUrl} alt={achievement.titleRu} className="h-5 w-5 object-cover" />
+                             ) : (
+                               <span>
+                                 {getAchievementIconSymbol(achievement.iconType)}
+                               </span>
+                             )}
+                          </div>
+                        ))}
+                        {compactAchievements.length === 0 ? (
+                          <span className="text-[10px] text-muted-foreground">Без достижений</span>
+                        ) : null}
                       </div>
                     </div>
                   </div>
@@ -732,7 +829,8 @@ function MembersListCard({ clubId, clubTitle, members, memberCount, membersLoadi
                     )}
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -755,6 +853,7 @@ interface ClubLibraryTabProps {
 }
 
 function ClubLibraryTab({ clubId, activeBookId, isOwner, isMember, setLocation }: ClubLibraryTabProps) {
+  const { user } = useAuth();
   const { data: books = [], isLoading } = useClubBooks(clubId);
   const [search, setSearch] = useState("");
   const [genreFilter, setGenreFilter] = useState<string>("all");
@@ -762,7 +861,15 @@ function ClubLibraryTab({ clubId, activeBookId, isOwner, isMember, setLocation }
   const [groupByGenre, setGroupByGenre] = useState<"none" | "primary_genre">("none");
   const setActiveBook = useSetActiveBook(clubId);
   const deleteBookMutation = useDeleteClubBook(clubId);
+  const [recommendBook, setRecommendBook] = useState<ClubBook | null>(null);
+  const [recommendTargets, setRecommendTargets] = useState<FollowUser[]>([]);
+  const [recommendSelectedUserIds, setRecommendSelectedUserIds] = useState<Set<string>>(new Set());
+  const [recommendComment, setRecommendComment] = useState("");
+  const [recommendLoading, setRecommendLoading] = useState(false);
+  const [recommendSending, setRecommendSending] = useState(false);
   const { toast } = useToast();
+
+  const allTargetsSelected = recommendTargets.length > 0 && recommendSelectedUserIds.size === recommendTargets.length;
 
   const genreOptions = Array.from(
     new Map(
@@ -833,6 +940,145 @@ function ClubLibraryTab({ clubId, activeBookId, isOwner, isMember, setLocation }
     deleteBookMutation.mutate(book.id, {
       onError: () => toast({ title: "Ошибка", description: "Не удалось удалить книгу", variant: "destructive" }),
     });
+  };
+
+  const loadRecommendationTargets = async () => {
+    if (!user?.id) return;
+
+    setRecommendLoading(true);
+    try {
+      const [followers, following] = await Promise.all([
+        loadAllFollowUsers(socialApi.getFollowers, user.id),
+        loadAllFollowUsers(socialApi.getFollowing, user.id),
+      ]);
+
+      const uniqueMap = new Map<string, FollowUser>();
+      [...followers, ...following].forEach((item) => {
+        uniqueMap.set(item.id, item);
+      });
+
+      const uniqueTargets = Array.from(uniqueMap.values()).sort((a, b) => {
+        const left = a.displayName || a.username;
+        const right = b.displayName || b.username;
+        return left.localeCompare(right, "ru");
+      });
+
+      setRecommendTargets(uniqueTargets);
+      setRecommendSelectedUserIds(new Set(uniqueTargets.map((u) => u.id)));
+    } catch {
+      toast({ title: "Не удалось загрузить получателей", variant: "destructive" });
+    } finally {
+      setRecommendLoading(false);
+    }
+  };
+
+  const handleOpenRecommendDialog = (book: ClubBook) => {
+    setRecommendBook(book);
+    setRecommendComment("");
+    setRecommendTargets([]);
+    setRecommendSelectedUserIds(new Set());
+    void loadRecommendationTargets();
+  };
+
+  const handleToggleSelectAllTargets = (checked: boolean) => {
+    if (checked) {
+      setRecommendSelectedUserIds(new Set(recommendTargets.map((u) => u.id)));
+      return;
+    }
+    setRecommendSelectedUserIds(new Set());
+  };
+
+  const toggleRecommendTarget = (targetId: string, checked: boolean) => {
+    setRecommendSelectedUserIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(targetId);
+      else next.delete(targetId);
+      return next;
+    });
+  };
+
+  const handleSendBookRecommendation = async () => {
+    if (!recommendBook) return;
+    if (recommendSelectedUserIds.size === 0) {
+      toast({ title: "Выберите хотя бы одного получателя", variant: "destructive" });
+      return;
+    }
+
+    const payload = encodeBookRecommendationPayload({
+      type: "book",
+      entityId: recommendBook.id,
+      title: recommendBook.title,
+      subtitle: `Автор: ${recommendBook.author}`,
+      imageUrl: recommendBook.coverUrl ?? null,
+      comment: recommendComment.trim() || null,
+    });
+
+    setRecommendSending(true);
+    try {
+      const recipientIds = Array.from(recommendSelectedUserIds);
+      await Promise.all(recipientIds.map(async (recipientId) => {
+        const conv = await authFetch("/api/dm/conversations", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ recipientId }),
+        });
+        if (!conv.ok) throw new Error("failed to create conversation");
+        const convData = await conv.json() as DmConversationCreateResponse;
+
+        const sent = await authFetch(`/api/dm/conversations/${convData.conversation.id}/messages`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ body: payload }),
+        });
+        if (!sent.ok) throw new Error("failed to send message");
+      }));
+
+      toast({ title: "Рекомендация отправлена" });
+      setRecommendBook(null);
+    } catch {
+      toast({ title: "Не удалось отправить рекомендацию", variant: "destructive" });
+    } finally {
+      setRecommendSending(false);
+    }
+  };
+
+  const renderRecommendTargetsList = () => {
+    if (recommendLoading) {
+      return (
+        <div className="flex items-center justify-center p-6 text-sm text-muted-foreground gap-2">
+          <Loader2 className="h-4 w-4 animate-spin" /> Загрузка списка пользователей...
+        </div>
+      );
+    }
+
+    if (recommendTargets.length === 0) {
+      return (
+        <div className="p-4 text-sm text-muted-foreground text-center">
+          Нет доступных пользователей для рекомендации.
+        </div>
+      );
+    }
+
+    return (
+      <div className="divide-y">
+        {recommendTargets.map((target) => {
+          const checked = recommendSelectedUserIds.has(target.id);
+          const displayName = target.displayName || target.username;
+          return (
+            <label key={target.id} className="flex cursor-pointer items-center gap-3 p-3 hover:bg-muted/40">
+              <Checkbox
+                checked={checked}
+                onCheckedChange={(value) => toggleRecommendTarget(target.id, value === true)}
+              />
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium">{displayName}</p>
+                <p className="truncate text-xs text-muted-foreground">@{target.username}</p>
+              </div>
+            </label>
+          );
+        })}
+      </div>
+    );
   };
 
   if (isLoading) {
@@ -931,6 +1177,12 @@ function ClubLibraryTab({ clubId, activeBookId, isOwner, isMember, setLocation }
                     Читать
                   </Button>
                 )}
+                {isMember && (
+                  <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => handleOpenRecommendDialog(book)}>
+                    <Share2 className="w-3 h-3 mr-1" />
+                    Порекомендовать
+                  </Button>
+                )}
                 {isOwner && !isActive && (
                   <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => handleSetActive(book.id)} disabled={setActiveBook.isPending}>
                     <Star className="w-3 h-3 mr-1" />
@@ -950,6 +1202,60 @@ function ClubLibraryTab({ clubId, activeBookId, isOwner, isMember, setLocation }
       })}
       </div>
       ))}
+
+      <Dialog open={!!recommendBook} onOpenChange={() => setRecommendBook(null)}>
+        <DialogContent className="max-w-[calc(100vw-2rem)] sm:max-w-[560px]">
+          <DialogHeader>
+            <DialogTitle>Порекомендовать книгу</DialogTitle>
+            <DialogDescription>
+              Выберите подписчиков и/или пользователей, на которых вы подписаны. Отправятся только метаданные книги и ваш комментарий.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="rounded-md border bg-muted/30 p-3 text-sm">
+              <p className="font-medium">{recommendBook?.title}</p>
+              <p className="text-muted-foreground">{recommendBook?.author}</p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="club-recommend-comment">Комментарий</Label>
+              <Textarea
+                id="club-recommend-comment"
+                placeholder="Почему рекомендуете эту книгу?"
+                maxLength={500}
+                value={recommendComment}
+                onChange={(e) => setRecommendComment(e.target.value)}
+              />
+            </div>
+
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="club-recommend-select-all"
+                  checked={allTargetsSelected}
+                  onCheckedChange={(checked) => handleToggleSelectAllTargets(checked === true)}
+                />
+                <Label htmlFor="club-recommend-select-all">Выбрать всех</Label>
+              </div>
+              <span className="text-xs text-muted-foreground">Выбрано: {recommendSelectedUserIds.size}</span>
+            </div>
+
+            <div className="max-h-64 overflow-y-auto rounded-md border">
+              {renderRecommendTargetsList()}
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRecommendBook(null)}>
+              Отмена
+            </Button>
+            <Button onClick={() => void handleSendBookRecommendation()} disabled={recommendSending || recommendLoading}>
+              {recommendSending ? "Отправляем..." : "Отправить рекомендацию"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -968,7 +1274,8 @@ interface ClubContentTabsProps {
 
 function ClubContentTabs({ clubId, isMember, isOwner, currentUserId, settings, scheduleItems, activeBookId, setLocation }: ClubContentTabsProps) {
   const isMobile = useIsMobile();
-  const [activeTab, setActiveTab] = useState("about");
+  const initialTabFromQuery = new URLSearchParams(globalThis.location.search).get('tab');
+  const [activeTab, setActiveTab] = useState(initialTabFromQuery === 'discussion' ? 'discussion' : 'about');
   const tabOptions = [
     { value: "about", label: "О клубе" },
     { value: "reading-plan", label: "План чтения" },
@@ -1201,6 +1508,11 @@ export default function ClubDetails() {
     setLocation,
     removeMemberMutation,
     deleteBookMutation
+  });
+
+  // Присутствие на странице клуба — real-time обновление через WebSocket
+  useClubPresence(isAuthenticated && !authLoading ? clubId : null, (ids) => {
+    queryClient.setQueryData(["/api/presence/club", clubId], { onlineUserIds: ids });
   });
 
   // Live-чтецы (хук вызывается безусловно, bookId может быть пустым)

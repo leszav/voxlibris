@@ -5,6 +5,7 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { EmailVerificationModal } from "@/components/ui/email-verification-modal";
+import { UsernameFixBanner } from "@/components/ui/username-fix-banner";
 import { AuthProvider, useAuth } from "@/hooks/use-auth";
 import Home from "@/pages/home";
 import { queryClient } from "./lib/queryClient";
@@ -19,6 +20,7 @@ const CreateClub = lazy(() => import("@/pages/clubs/create-club"));
 const ClubDetails = lazy(() => import("@/pages/club-details"));
 const Login = lazy(() => import("@/pages/auth/login"));
 const Register = lazy(() => import("@/pages/auth/register"));
+const OnboardingGenres = lazy(() => import("@/pages/auth/onboarding-genres"));
 const ForgotPassword = lazy(() => import("@/pages/auth/forgot-password"));
 const ResetPassword = lazy(() => import("@/pages/auth/reset-password"));
 const ConfirmEmail = lazy(() => import("@/pages/auth/confirm-email"));
@@ -32,13 +34,18 @@ const AdminReports = lazy(() => import("@/pages/admin/reports"));
 const AdminAnalytics = lazy(() => import("@/pages/admin/analytics"));
 const AdminKPI = lazy(() => import("@/pages/admin/kpi"));
 const AdminAudit = lazy(() => import("@/pages/admin/audit"));
+const AdminGamification = lazy(() => import("@/pages/admin/gamification"));
 const AdminRecordings = lazy(() => import("@/pages/admin/recordings"));
 const AdminSettings = lazy(() => import("@/pages/admin/settings"));
 const Readers = lazy(() => import("@/pages/readers"));
 const Library = lazy(() => import("@/pages/library"));
 const Pricing = lazy(() => import("@/pages/pricing"));
 const BecomeReader = lazy(() => import("@/pages/become-reader"));
+const DashboardPage = lazy(() => import("@/pages/DashboardPage"));
 const ProfilePage = lazy(() => import("@/pages/ProfilePage"));
+const PublicProfilePage = lazy(() => import("@/pages/PublicProfilePage"));
+const DiscoverPage = lazy(() => import("@/pages/DiscoverPage"));
+const FeedPage = lazy(() => import("@/pages/FeedPage"));
 const NotFound = lazy(() => import("@/pages/not-found"));
 const ReaderWorkspacePage = lazy(async () => ({
   default: (await import("@/components/reader/ReaderWorkspace")).ReaderWorkspace,
@@ -74,6 +81,9 @@ const ProtectedMyClubs         = () => <ProtectedRoute component={MyClubs} />;
 const ProtectedCreateClub      = () => <ProtectedRoute component={CreateClub} />;
 const ProtectedReaderWorkspace = () => <ProtectedRoute component={ReaderWorkspacePage} />;
 const ProtectedClubReader      = () => <ProtectedRoute component={ClubReaderPage} />;
+const ProtectedDashboard       = () => <ProtectedRoute component={DashboardPage} />;
+const ProtectedFeed            = () => <ProtectedRoute component={FeedPage} />;
+const ProtectedOnboardingGenres = () => <ProtectedRoute component={OnboardingGenres} />;
 
 function Router() {
   return (
@@ -85,6 +95,12 @@ function Router() {
       {/* Guest Routes */}
       <Route path="/guest/library" component={GuestLibrary} />
       <Route path="/guest/reader/:bookId" component={GuestReader} />
+
+      {/* Activity Feed */}
+      <Route path="/feed" component={ProtectedFeed} />
+
+      {/* Personal Dashboard */}
+      <Route path="/dashboard" component={ProtectedDashboard} />
 
       {/* Club Routes */}
       <Route path="/clubs" component={ProtectedMyClubs} />
@@ -100,6 +116,7 @@ function Router() {
       {/* Authentication Routes */}
       <Route path="/auth/login" component={Login} />
       <Route path="/auth/register" component={Register} />
+      <Route path="/onboarding/genres" component={ProtectedOnboardingGenres} />
       <Route path="/auth/forgot-password" component={ForgotPassword} />
       <Route path="/auth/reset-password/:token" component={ResetPassword} />
       <Route path="/confirm-email/:token" component={ConfirmEmail} />
@@ -118,6 +135,7 @@ function Router() {
       <Route path="/admin/analytics" component={AdminAnalytics} />
       <Route path="/admin/kpi" component={AdminKPI} />
       <Route path="/admin/audit" component={AdminAudit} />
+      <Route path="/admin/gamification" component={AdminGamification} />
       <Route path="/admin/recordings" component={AdminRecordings} />
       <Route path="/admin/settings" component={AdminSettings} />
 
@@ -130,6 +148,10 @@ function Router() {
       {/* Profile Page */}
       <Route path="/profile" component={ProfilePage} />
       <Route path="/profile/:id" component={ProfilePage} />
+      <Route path="/users/:id" component={PublicProfilePage} />
+
+      {/* Discover People */}
+      <Route path="/discover" component={DiscoverPage} />
 
       <Route component={NotFound} />
     </Switch>
@@ -166,6 +188,7 @@ function App() {
               isOpen={showEmailVerificationModal}
               onClose={() => setShowEmailVerificationModal(false)}
             />
+            <UsernameFixBanner />
           </TooltipProvider>
         </ErrorBoundary>
       </AuthProvider>

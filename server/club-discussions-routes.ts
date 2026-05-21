@@ -2,6 +2,10 @@ import { Router, Request, Response } from 'express';
 import { jwtAuth, requireActiveUser } from './jwt-middleware.js';
 import { storage } from './repositories/index.js';
 import { logger } from './lib/logger.js';
+import { db } from './db.js';
+import { and, eq } from 'drizzle-orm';
+import { clubDiscussions, clubs, notifications } from '../shared/schema.js';
+import { notificationService } from './services/notification-service.js';
 
 const router = Router();
 
@@ -90,6 +94,22 @@ router.post('/clubs/:clubId/discussions/:discussionId/reply', jwtAuth, requireAc
       return res.status(403).json({ message: 'You must be a club member to reply to discussions' });
     }
 
+    const parentRows = await db
+      .select({
+        id: clubDiscussions.id,
+        parentAuthorId: clubDiscussions.userId,
+        clubName: clubs.title,
+      })
+      .from(clubDiscussions)
+      .innerJoin(clubs, eq(clubs.id, clubDiscussions.clubId))
+      .where(and(eq(clubDiscussions.id, discussionId), eq(clubDiscussions.clubId, clubId)))
+      .limit(1);
+
+    const parent = parentRows[0];
+    if (!parent) {
+      return res.status(404).json({ message: 'Discussion not found' });
+    }
+
     const reply = await storage.createClubDiscussion({
       clubId,
       userId: req.user.userId,
@@ -97,6 +117,28 @@ router.post('/clubs/:clubId/discussions/:discussionId/reply', jwtAuth, requireAc
       parentId: discussionId,
       quotedContent: quotedContent?.trim(),
     });
+
+    if (parent.parentAuthorId !== req.user.userId) {
+      try {
+        const targetSettings = await notificationService.getUserNotificationSettings(parent.parentAuthorId);
+        if (targetSettings.notifyReply) {
+          await db.insert(notifications).values({
+            userId: parent.parentAuthorId,
+            type: 'reply',
+            kind: 'club_discussion_reply',
+            sourceUserId: req.user.userId,
+            actorUserId: req.user.userId,
+            entityType: 'club_discussion_comment',
+            entityId: discussionId,
+            actionUrl: `/clubs/${encodeURIComponent(clubId)}?tab=discussion&discussion=${encodeURIComponent(discussionId)}`,
+            payload: { clubId, clubName: parent.clubName },
+            message: parent.clubName ? `«${parent.clubName}»` : 'в обсуждениях клуба',
+          });
+        }
+      } catch (notificationError) {
+        logger.warn({ error: notificationError, clubId, discussionId }, 'Failed to create discussion reply notification');
+      }
+    }
 
     res.status(201).json(reply);
   } catch (error) {
