@@ -149,7 +149,7 @@ function BooksSection({
                   <p className="font-medium pr-8">{book.title}</p>
                   <p className="text-sm text-muted-foreground">{book.author}</p>
                   <div className="mt-3 flex gap-2">
-                    <Button size="sm" variant="outline" onClick={() => setLocation(`/books/${book.bookId}/read`)}>
+                    <Button size="sm" variant="outline" onClick={() => setLocation(`/books/${book.bookId}`)}>
                       Открыть
                     </Button>
                     <Button size="sm" onClick={() => setLocation('/dashboard?tab=messages')}>

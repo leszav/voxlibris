@@ -554,7 +554,7 @@ export function MainLayout({ children }: { readonly children: React.ReactNode })
                               <button
                                 key={book.id}
                                 type="button"
-                                onClick={() => handleSearchSelect(`/books/${book.id}/read`)}
+                                onClick={() => handleSearchSelect(`/books/${book.id}`)}
                                 className="w-full rounded-lg px-2 py-2 text-left hover:bg-secondary"
                               >
                                 <div className="text-sm font-medium truncate">{book.title}</div>
