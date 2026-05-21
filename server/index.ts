@@ -27,7 +27,7 @@ import clubReaderRoutes from "./club-reader-routes.js";
 import clubRoutes from "./club-routes.js";
 import readingStatusRoutes from "./reading-status-routes.js";
 import { validateEnvironment } from "./config/validate.js";
-import { jwtAuth, optionalJwtAuth } from "./jwt-middleware.js";
+import { jwtAuth, optionalJwtAuth, requireActiveUser } from "./jwt-middleware.js";
 import { registerRoutes } from "./routes.js";
 import readerRoutes from "./routes/reader.js";
 import feedbackRoutes from "./routes/feedback.js";
@@ -926,8 +926,8 @@ try {
 	// Setup Feedback routes (no JWT required - public endpoint)
 	app.use("/api/v1/feedback", feedbackRoutes);
 
-	// Setup Social Graph routes (JWT protected)
-	app.use("/api/social", jwtAuth, socialRoutes);
+	// Setup Social Graph routes (JWT protected + email confirmed required)
+	app.use("/api/social", jwtAuth, requireActiveUser, socialRoutes);
 
 	// Setup Activity Feed routes (optionalJwtAuth — /activity/:userId публичен, остальные проверяют req.user сами)
 	app.use("/api/feed", optionalJwtAuth, feedRoutes);
@@ -938,17 +938,17 @@ try {
 	// Presence — онлайн-статус пользователей в клубах
 	app.use("/api/presence", presenceRoutes);
 
-	// Direct Messages
-	app.use("/api/dm", jwtAuth, dmRoutes);
+	// Direct Messages (email confirmed required)
+	app.use("/api/dm", jwtAuth, requireActiveUser, dmRoutes);
 
-	// Recommendations (Sprint 2.6, Stage A)
-	app.use("/api/recommendations", jwtAuth, recommendationsRoutes);
+	// Recommendations (Sprint 2.6, Stage A) (email confirmed required)
+	app.use("/api/recommendations", jwtAuth, requireActiveUser, recommendationsRoutes);
 
 	// Gamification admin constructor
 	app.use("/api/admin/gamification", jwtAuth, gamificationAdminRoutes);
 
-	// Gamification user read API
-	app.use("/api/gamification", jwtAuth, gamificationRoutes);
+	// Gamification user read API (email confirmed required)
+	app.use("/api/gamification", jwtAuth, requireActiveUser, gamificationRoutes);
 
 	// Start scheduler for notifications (only in production or if enabled)
 	if (process.env.NODE_ENV === 'production' || process.env.ENABLE_SCHEDULER === 'true') {

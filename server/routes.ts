@@ -716,6 +716,66 @@ export async function registerRoutes(
     }
   });
 
+  // Get book details with preview (for book details page)
+  app.get("/api/books/:id/details", async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      const book = await storage.getBook(id);
+
+      if (!book) {
+        return res.status(404).json({ message: "Книга не найдена" });
+      }
+
+      // Get uploader info
+      const uploader = book.uploadedBy ? await storage.getUser(book.uploadedBy) : null;
+      const uploaderProfile = uploader ? await storage.getUserProfile(uploader.id) : null;
+
+      // Get first 2 chapters as preview (or first 3000 characters)
+      const content = await storage.getBookContent(id);
+      let previewText = '';
+      let chapterTitle = '';
+
+      if (content && content.length > 0) {
+        // Take first 2 chapters or first 3000 characters
+        const previewChapters = content.slice(0, 2);
+        previewText = previewChapters.map(ch => ch.content).join('\n\n');
+        
+        if (previewText.length > 3000) {
+          previewText = previewText.slice(0, 3000);
+        }
+
+        if (previewChapters[0]) {
+          chapterTitle = previewChapters[0].title || 'Глава 1';
+        }
+      }
+
+      res.json({
+        id: book.id,
+        title: book.title,
+        author: book.author,
+        description: book.description,
+        coverUrl: book.coverUrl,
+        publisher: book.publisher,
+        publishedYear: book.publishDate, // используем publishDate как год
+        language: book.language,
+        isbn: book.isbn,
+        createdAt: book.createdAt,
+        uploadedBy: {
+          id: uploader?.id || book.uploadedBy || 'unknown',
+          username: uploader?.username || 'unknown',
+          displayName: uploaderProfile?.displayName || uploader?.username || 'unknown',
+        },
+        preview: previewText ? {
+          text: previewText,
+          chapterTitle,
+        } : undefined,
+      });
+    } catch (error) {
+      console.error("Get book details error:", error);
+      res.status(500).json({ message: "Внутренняя ошибка сервера" });
+    }
+  });
+
   // Get book content (all chapters or specific chapter)
   app.get("/api/books/:id/content", async (req: Request, res: Response) => {
     try {

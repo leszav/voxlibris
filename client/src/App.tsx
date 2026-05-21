@@ -46,6 +46,7 @@ const ProfilePage = lazy(() => import("@/pages/ProfilePage"));
 const PublicProfilePage = lazy(() => import("@/pages/PublicProfilePage"));
 const DiscoverPage = lazy(() => import("@/pages/DiscoverPage"));
 const FeedPage = lazy(() => import("@/pages/FeedPage"));
+const BookDetailsPage = lazy(() => import("@/pages/BookDetailsPage"));
 const NotFound = lazy(() => import("@/pages/not-found"));
 const ReaderWorkspacePage = lazy(async () => ({
   default: (await import("@/components/reader/ReaderWorkspace")).ReaderWorkspace,
@@ -109,7 +110,8 @@ function Router() {
       {/* Legacy route for compatibility */}
       <Route path="/club/:id" component={ClubDetails} />
 
-      {/* Reader Routes */}
+      {/* Book Routes */}
+      <Route path="/books/:id" component={BookDetailsPage} />
       <Route path="/books/:bookId/read" component={ProtectedReaderWorkspace} />
       <Route path="/clubs/:clubId/books/:bookId/read" component={ProtectedClubReader} />
 
