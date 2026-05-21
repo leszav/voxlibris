@@ -159,6 +159,42 @@ function getPersonalBookFormatLabel(book: PersonalBook): string {
   return "Книга";
 }
 
+function getLocalStorageValue<T>(key: string, fallback: T): T {
+  if (globalThis.window === undefined) return fallback;
+  try {
+    const value = globalThis.window.localStorage.getItem(key);
+    if (value === null) return fallback;
+    return JSON.parse(value) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function setLocalStorageValue<T>(key: string, value: T): void {
+  if (globalThis.window === undefined) return;
+  try {
+    globalThis.window.localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // localStorage can be unavailable in private mode or denied by browser settings.
+  }
+}
+
+function useLocalStorageState<T>(key: string, fallback: T): readonly [T, (value: T) => void] {
+  const [value, setValue] = useState<T>(() => getLocalStorageValue(key, fallback));
+
+  const setPersistedValue = (nextValue: T) => {
+    setValue(nextValue);
+    setLocalStorageValue(key, nextValue);
+  };
+
+  return [value, setPersistedValue] as const;
+}
+
+function serializeHistoryCompletedAt(value: Date | string | null | undefined): string {
+  if (!value) return "";
+  return value instanceof Date ? value.toISOString() : value;
+}
+
 function PersonalLibraryBookCard({
   book,
   fallbackCover,
@@ -329,14 +365,15 @@ export default function Library() {
   const [shelfDeleteInput, setShelfDeleteInput] = useState<string>("");
   const [shelfDeletionUnlocked, setShelfDeletionUnlocked] = useState(false);
   const [shelfSearch, setShelfSearch] = useState("");
-  const [shelfSort, setShelfSort] = useState<ShelfSort>("completed_desc");
-  const [shelfFormatFilter, setShelfFormatFilter] = useState<ShelfFormatFilter>("all");
-  const [shelfVisibleCount, setShelfVisibleCount] = useState(SHELF_PAGE_SIZE);
+
+  const [shelfSort, setShelfSort] = useLocalStorageState<ShelfSort>("vl.shelfSort", "completed_desc");
+  const [shelfFormatFilter, setShelfFormatFilter] = useLocalStorageState<ShelfFormatFilter>("vl.shelfFormatFilter", "all");
+  const [shelfVisibleCount, setShelfVisibleCount] = useState<number>(SHELF_PAGE_SIZE);
   const [plannedYear, setPlannedYear] = useState<number>(currentYear + 1);
-  const [librarySearch, setLibrarySearch] = useState("");
-  const [librarySort, setLibrarySort] = useState<LibrarySort>("created_desc");
-  const [libraryGenreFilter, setLibraryGenreFilter] = useState<string>("all");
-  const [libraryGroupMode, setLibraryGroupMode] = useState<GenreGroupMode>("none");
+  const [librarySearch, setLibrarySearch] = useState<string>("");
+  const [librarySort, setLibrarySort] = useLocalStorageState<LibrarySort>("vl.librarySort", "created_desc");
+  const [libraryGenreFilter, setLibraryGenreFilter] = useLocalStorageState<string>("vl.libraryGenreFilter", "all");
+  const [libraryGroupMode, setLibraryGroupMode] = useLocalStorageState<GenreGroupMode>("vl.libraryGroupMode", "none");
   const [recommendBook, setRecommendBook] = useState<PersonalBook | null>(null);
   const [recommendTargets, setRecommendTargets] = useState<FollowUser[]>([]);
   const [recommendSelectedUserIds, setRecommendSelectedUserIds] = useState<Set<string>>(new Set());
@@ -1254,7 +1291,7 @@ export default function Library() {
                         bookTitle={book.bookTitle}
                         bookAuthor={book.bookAuthor}
                         bookCoverUrl={book.bookCoverUrl ?? undefined}
-                        completedAt={(book.completedAt as unknown as string) || ""}
+                        completedAt={serializeHistoryCompletedAt(book.completedAt)}
                         readingTimeMinutes={book.readingTimeMinutes ?? undefined}
                       />
                     ))}

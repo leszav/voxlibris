@@ -2376,6 +2376,40 @@ export interface ActivityEventWithActor extends ActivityEvent {
   };
 }
 
+// ─── Рекомендации (Sprint 2.6, этап после 0046) ────────────────────────────
+
+export const recommendationEntityTypes = ['book', 'club', 'reader', 'live'] as const;
+export type RecommendationEntityType = (typeof recommendationEntityTypes)[number];
+
+export const recommendationSourceTypes = ['activity', 'community', 'mixed'] as const;
+export type RecommendationSourceType = (typeof recommendationSourceTypes)[number];
+
+export const recommendationBookSourcePreferences = ['all', 'activity', 'community'] as const;
+export type RecommendationBookSourcePreference = (typeof recommendationBookSourcePreferences)[number];
+
+export const recommendationDismissals = pgTable('recommendation_dismissals', {
+  id: varchar('id').primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  entityType: varchar('entity_type', { length: 20 }).notNull().$type<RecommendationEntityType>(),
+  entityId: varchar('entity_id').notNull(),
+  source: varchar('source', { length: 20 }).$type<RecommendationSourceType | null>(),
+  reason: varchar('reason', { length: 120 }),
+  createdAt: timestamp('created_at').notNull().default(sql`now()`),
+});
+
+export const recommendationPreferences = pgTable('recommendation_preferences', {
+  userId: varchar('user_id').primaryKey().references(() => users.id, { onDelete: 'cascade' }),
+  excludedTypesJson: text('excluded_types_json').notNull().default('[]'),
+  booksSourcePreference: varchar('books_source_preference', { length: 20 })
+    .notNull()
+    .default('all')
+    .$type<RecommendationBookSourcePreference>(),
+  updatedAt: timestamp('updated_at').notNull().default(sql`now()`),
+});
+
+export type RecommendationDismissal = typeof recommendationDismissals.$inferSelect;
+export type RecommendationPreference = typeof recommendationPreferences.$inferSelect;
+
 // ─── Личные сообщения (Sprint 2.3) ───────────────────────────────────────────
 
 export const conversations = pgTable('conversations', {
@@ -2464,6 +2498,7 @@ export const achievementBuildingBlocks = pgTable('achievement_building_blocks', 
   labelRu: varchar('label_ru', { length: 120 }).notNull(),
   valueType: varchar('value_type', { length: 20 }).notNull().$type<'number' | 'string' | 'boolean'>(),
   supportedOperators: jsonb('supported_operators').notNull().default(sql`'[]'::jsonb`),
+  sourceKey: varchar('source_key', { length: 200 }),
   isActive: boolean('is_active').notNull().default(true),
   createdBy: varchar('created_by').references(() => users.id, { onDelete: 'set null' }),
   updatedBy: varchar('updated_by').references(() => users.id, { onDelete: 'set null' }),

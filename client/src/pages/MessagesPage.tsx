@@ -278,6 +278,25 @@ function ConversationList({
         const initials = name.slice(0, 2).toUpperCase();
         const isActive = conv.id === selected;
 
+          // UX-фикс: обработка превью рекомендаций
+          let lastMessagePreview = conv.lastMessagePreview;
+          if (lastMessagePreview) {
+            if (lastMessagePreview.startsWith(RECOMMEND_PREFIX)) {
+              try {
+                const meta = parseRecommendation(lastMessagePreview);
+                if (meta) {
+                  lastMessagePreview = getRecommendationTitle(meta.type);
+                } else {
+                  lastMessagePreview = "Рекомендация";
+                }
+              } catch {
+                lastMessagePreview = "Рекомендация";
+              }
+            } else if (lastMessagePreview.startsWith(BOOK_SHARE_PREFIX)) {
+              lastMessagePreview = "Рекомендация книги";
+            }
+          }
+
         return (
           <li key={conv.id}>
             <button
@@ -306,9 +325,9 @@ function ConversationList({
                     </span>
                   )}
                 </div>
-                {conv.lastMessagePreview && (
+                {lastMessagePreview && (
                   <p className="text-xs text-muted-foreground truncate mt-0.5">
-                    {conv.lastMessagePreview}
+                    {lastMessagePreview}
                   </p>
                 )}
               </div>

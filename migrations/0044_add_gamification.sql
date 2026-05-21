@@ -90,3 +90,44 @@ CREATE TABLE IF NOT EXISTS "achievement_reward_assets" (
 );
 CREATE INDEX IF NOT EXISTS "idx_reward_assets_type_active_sort" ON "achievement_reward_assets"("asset_type", "is_active", "sort_order", "created_at" DESC);
 CREATE INDEX IF NOT EXISTS "idx_reward_assets_group" ON "achievement_reward_assets"("group_key", "asset_type");
+
+-- Этап 2: Динамическая система условий (май 2026)
+-- Добавляем маппинг кода параметра на путь в БД для универсального резолвера
+ALTER TABLE "achievement_building_blocks"
+  ADD COLUMN IF NOT EXISTS "source_key" VARCHAR(200);
+
+-- Заполняем source_key для известных встроенных параметров
+UPDATE "achievement_building_blocks" 
+SET "source_key" = 'derived.tenure_days' 
+WHERE "code" = 'tenure_days' AND "source_key" IS NULL;
+
+UPDATE "achievement_building_blocks" 
+SET "source_key" = 'user_activity_counters.completed_books_count' 
+WHERE "code" = 'completed_books' AND "source_key" IS NULL;
+
+UPDATE "achievement_building_blocks" 
+SET "source_key" = 'user_activity_counters.sent_dm_count' 
+WHERE "code" = 'sent_dm_count' AND "source_key" IS NULL;
+
+UPDATE "achievement_building_blocks" 
+SET "source_key" = 'user_profiles.profile_completed' 
+WHERE "code" = 'profile_completed' AND "source_key" IS NULL;
+
+UPDATE "achievement_building_blocks" 
+SET "source_key" = 'users.role' 
+WHERE "code" = 'role' AND "source_key" IS NULL;
+
+UPDATE "achievement_building_blocks" 
+SET "source_key" = 'user_streaks.current_streak_days' 
+WHERE "code" = 'current_streak_days' AND "source_key" IS NULL;
+
+UPDATE "achievement_building_blocks" 
+SET "source_key" = 'user_activity_counters.following_count_snapshot' 
+WHERE "code" = 'following_count' AND "source_key" IS NULL;
+
+UPDATE "achievement_building_blocks" 
+SET "source_key" = 'user_activity_counters.followers_count_snapshot' 
+WHERE "code" = 'followers_count' AND "source_key" IS NULL;
+
+-- Для новых кодов админ должен заполнить source_key вручную
+-- Если source_key остался NULL, резолвер вернёт null при вычислении

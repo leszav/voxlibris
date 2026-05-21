@@ -36,6 +36,7 @@ interface AchievementConditionsPayload {
 interface UserGamificationSnapshot {
   userId: string;
   registeredAt: Date;
+  userRole: string;
   completedBooksCount: number;
   sentDmCount: number;
   notesCreatedCount: number;
@@ -748,26 +749,95 @@ export class GamificationService {
   }
 
   private resolveBlockValue(blockCode: string, snapshot: UserGamificationSnapshot): ConditionScalar {
-    switch (blockCode) {
+    // Сначала попытаемся распознать blockCode как source_key (для обратной совместимости с hardcoded switch)
+    // Если blockCode содержит точку, скорее всего это уже source_key
+    if (blockCode.includes('.')) {
+      return this.resolveFieldValue(blockCode, snapshot);
+    }
+
+    // Иначе используем legacy mapping для старых blockCode'ов
+    // Это обеспечивает обратную совместимость до полной миграции на source_key
+    const legacyMapping: Record<string, string> = {
+      'tenure_days': 'derived.tenure_days',
+      'completed_books': 'user_activity_counters.completed_books_count',
+      'current_streak_days': 'user_streaks.current_streak_days',
+      'sent_dm_count': 'user_activity_counters.sent_dm_count',
+      'following_count': 'user_activity_counters.following_count_snapshot',
+      'followers_count': 'user_activity_counters.followers_count_snapshot',
+      'club_sessions_joined': 'user_activity_counters.club_sessions_joined_count',
+      'notes_created_count': 'derived.notes_created_count',
+      'profile_completed': 'derived.profile_completed',
+      'favorite_genre': 'derived.favorite_genres',
+    };
+
+    const sourceKey = legacyMapping[blockCode];
+    if (!sourceKey) {
+      // Неизвестный blockCode и не может быть распознан как source_key
+      return null;
+    }
+
+    return this.resolveFieldValue(sourceKey, snapshot);
+  }
+
+  /**
+   * Универсальный резолвер, который распознаёт source_key (например, "users.role", "derived.tenure_days")
+   * и возвращает соответствующее значение из snapshot или вычисленное значение.
+   */
+  private resolveFieldValue(sourceKey: string, snapshot: UserGamificationSnapshot): ConditionScalar {
+    const [namespace, field] = sourceKey.split('.');
+    if (!namespace || !field) {
+      return null;
+    }
+
+    const resolvers: Record<string, () => ConditionScalar> = {
+      'users': () => this.resolveUsersField(field, snapshot),
+      'user_activity_counters': () => this.resolveActivityCountersField(field, snapshot),
+      'user_profiles': () => this.resolveUserProfilesField(field, snapshot),
+      'user_streaks': () => this.resolveUserStreaksField(field, snapshot),
+      'derived': () => this.resolveDerivedField(field, snapshot),
+    };
+
+    return resolvers[namespace]?.() ?? null;
+  }
+
+  private resolveUsersField(field: string, snapshot: UserGamificationSnapshot): ConditionScalar {
+    if (field === 'role') return snapshot.userRole;
+    return null;
+  }
+
+  private resolveActivityCountersField(field: string, snapshot: UserGamificationSnapshot): ConditionScalar {
+    const mapping: Record<string, number> = {
+      'completed_books_count': snapshot.completedBooksCount,
+      'sent_dm_count': snapshot.sentDmCount,
+      'following_count_snapshot': snapshot.followingCount,
+      'followers_count_snapshot': snapshot.followersCount,
+      'club_sessions_joined_count': snapshot.clubSessionsJoinedCount,
+    };
+    return mapping[field] ?? null;
+  }
+
+  private resolveUserProfilesField(field: string, snapshot: UserGamificationSnapshot): ConditionScalar {
+    if (field === 'profile_completed') return snapshot.profileCompleted;
+    return null;
+  }
+
+  private resolveUserStreaksField(field: string, snapshot: UserGamificationSnapshot): ConditionScalar {
+    const mapping: Record<string, number> = {
+      'current_streak_days': snapshot.currentStreakDays,
+      'best_streak_days': snapshot.bestStreakDays,
+    };
+    return mapping[field] ?? null;
+  }
+
+  private resolveDerivedField(field: string, snapshot: UserGamificationSnapshot): ConditionScalar {
+    switch (field) {
       case 'tenure_days':
         return daysSince(snapshot.registeredAt);
-      case 'completed_books':
-        return snapshot.completedBooksCount;
-      case 'current_streak_days':
-        return snapshot.currentStreakDays;
-      case 'sent_dm_count':
-        return snapshot.sentDmCount;
-      case 'following_count':
-        return snapshot.followingCount;
-      case 'followers_count':
-        return snapshot.followersCount;
-      case 'club_sessions_joined':
-        return snapshot.clubSessionsJoinedCount;
       case 'notes_created_count':
         return snapshot.notesCreatedCount;
       case 'profile_completed':
         return snapshot.profileCompleted;
-      case 'favorite_genre':
+      case 'favorite_genres':
         return snapshot.favoriteGenres;
       default:
         return null;
@@ -777,7 +847,7 @@ export class GamificationService {
   private async getUserSnapshot(userId: string): Promise<UserGamificationSnapshot> {
     const [userRow, profileRow, countersRow, streakRow] = await Promise.all([
       this.db
-        .select({ createdAt: users.createdAt })
+        .select({ createdAt: users.createdAt, role: users.role })
         .from(users)
         .where(eq(users.id, userId))
         .limit(1),
@@ -818,6 +888,7 @@ export class GamificationService {
     return {
       userId,
       registeredAt: user.createdAt,
+      userRole: user.role ?? 'user',
       completedBooksCount: counters?.completedBooksCount ?? liveCounters?.completedBooksCount ?? 0,
       sentDmCount: counters?.sentDmCount ?? liveCounters?.sentDmCount ?? 0,
       followingCount: counters?.followingCountSnapshot ?? profile?.followingCount ?? 0,
@@ -921,6 +992,49 @@ export class GamificationService {
       .limit(1);
 
     return rows.length > 0;
+  }
+
+  /**
+   * Этап 6: Dry-run диагностика для отладки условий.
+   * Возвращает детальный результат вычисления каждого условия.
+   */
+  async dryRunAchievement(userId: string, conditionsPayload: unknown): Promise<{
+    snapshot: UserGamificationSnapshot;
+    conditions: Array<{
+      blockCode: string;
+      operator: string;
+      expectedValue: unknown;
+      actualValue: unknown;
+      result: boolean;
+    }>;
+    overallResult: boolean;
+    logic: string;
+  }> {
+    const snapshot = await this.getUserSnapshot(userId);
+    const parsed = parseConditionsPayload(conditionsPayload);
+
+    const conditions = parsed.items.map((condition) => {
+      const actualValue = this.resolveBlockValue(condition.blockCode, snapshot);
+      const expectedValue = normalizeExpectedValue(condition.valueType, condition.value);
+      const result = compareCondition(actualValue, condition.operator, expectedValue);
+
+      return {
+        blockCode: condition.blockCode,
+        operator: condition.operator,
+        expectedValue,
+        actualValue,
+        result,
+      };
+    });
+
+    const overallResult = parsed.logic === 'OR' ? conditions.some(c => c.result) : conditions.every(c => c.result);
+
+    return {
+      snapshot,
+      conditions,
+      overallResult,
+      logic: parsed.logic,
+    };
   }
 }
 

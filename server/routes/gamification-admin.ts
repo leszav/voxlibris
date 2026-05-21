@@ -121,7 +121,7 @@ router.post('/reward-assets', async (req: Request, res: Response) => {
   if (!adminId) return res.status(401).json({ error: 'Unauthorized' });
 
   try {
-    const payload = await normalizeRewardAssetPayload({ ...(req.body ?? {}) });
+    const payload = await normalizeRewardAssetPayload(req.body ?? {});
     const asset = await repositories.gamification.createRewardAsset(adminId, payload);
     return res.status(201).json({ success: true, asset });
   } catch (err) {
@@ -139,7 +139,7 @@ router.patch('/reward-assets/:id', async (req: Request, res: Response) => {
   if (!adminId) return res.status(401).json({ error: 'Unauthorized' });
 
   try {
-    const payload = await normalizeRewardAssetPayload({ ...(req.body ?? {}) });
+    const payload = await normalizeRewardAssetPayload(req.body ?? {});
     const asset = await repositories.gamification.updateRewardAsset(adminId, req.params.id, payload);
     if (!asset) {
       return res.status(404).json({ error: 'Reward asset not found' });
@@ -249,7 +249,7 @@ router.post('/achievements', async (req: Request, res: Response) => {
   if (!adminId) return res.status(401).json({ error: 'Unauthorized' });
 
   try {
-    const payload = await normalizeAchievementPayload({ ...(req.body ?? {}) });
+    const payload = await normalizeAchievementPayload(req.body ?? {});
     const achievement = await repositories.gamification.createAchievement(adminId, payload);
     return res.status(201).json({ success: true, achievement });
   } catch (err) {
@@ -267,7 +267,7 @@ router.patch('/achievements/:id', async (req: Request, res: Response) => {
   if (!adminId) return res.status(401).json({ error: 'Unauthorized' });
 
   try {
-    const payload = await normalizeAchievementPayload({ ...(req.body ?? {}) });
+    const payload = await normalizeAchievementPayload(req.body ?? {});
     const achievement = await repositories.gamification.updateAchievement(adminId, req.params.id, payload);
     if (!achievement) {
       return res.status(404).json({ error: 'Achievement not found' });
@@ -344,6 +344,61 @@ router.post('/reconcile/run', async (req: Request, res: Response) => {
   } catch (err) {
     logger.error({ err, batchSize, maxUsers }, '[gamification-admin] reconcile run error');
     return res.status(500).json({ error: 'Failed to run gamification reconcile' });
+  }
+});
+
+// Этап 2: Field-registry endpoints для конструктора условий
+router.get('/field-registry', async (req: Request, res: Response) => {
+  try {
+    const registry = await repositories.gamification.getFieldRegistry();
+    return res.json({ success: true, registry });
+  } catch (err) {
+    logger.error({ err }, '[gamification-admin] field-registry error');
+    return res.status(500).json({ error: 'Failed to load field registry' });
+  }
+});
+
+router.get('/field-values', async (req: Request, res: Response) => {
+  const fieldKey = typeof req.query.field === 'string' ? req.query.field : '';
+  if (!fieldKey) {
+    return res.status(400).json({ error: 'field query parameter is required' });
+  }
+
+  const limit = Math.min(Number(req.query.limit) || 200, 500);
+
+  try {
+    const values = await repositories.gamification.getFieldDistinctValues(fieldKey, limit);
+    return res.json({ success: true, field: fieldKey, values });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes('not in the field registry')) {
+      return res.status(400).json({ error: message });
+    }
+    logger.error({ err, fieldKey }, '[gamification-admin] field-values error');
+    return res.status(500).json({ error: 'Failed to load field values' });
+  }
+});
+
+// Этап 6: Dry-run диагностика для отладки условий
+router.post('/dry-run', async (req: Request, res: Response) => {
+  const userId = typeof req.body?.userId === 'string' ? req.body.userId : '';
+  const conditionsPayload = req.body?.conditionsPayload;
+
+  if (!userId) {
+    return res.status(400).json({ error: 'userId is required' });
+  }
+
+  if (!conditionsPayload) {
+    return res.status(400).json({ error: 'conditionsPayload is required' });
+  }
+
+  try {
+    const result = await gamificationService.dryRunAchievement(userId, conditionsPayload);
+    return res.json({ success: true, ...result });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    logger.error({ err, userId }, '[gamification-admin] dry-run error');
+    return res.status(500).json({ error: message || 'Failed to run dry-run' });
   }
 });
 

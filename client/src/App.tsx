@@ -20,6 +20,7 @@ const CreateClub = lazy(() => import("@/pages/clubs/create-club"));
 const ClubDetails = lazy(() => import("@/pages/club-details"));
 const Login = lazy(() => import("@/pages/auth/login"));
 const Register = lazy(() => import("@/pages/auth/register"));
+const OnboardingGenres = lazy(() => import("@/pages/auth/onboarding-genres"));
 const ForgotPassword = lazy(() => import("@/pages/auth/forgot-password"));
 const ResetPassword = lazy(() => import("@/pages/auth/reset-password"));
 const ConfirmEmail = lazy(() => import("@/pages/auth/confirm-email"));
@@ -82,6 +83,7 @@ const ProtectedReaderWorkspace = () => <ProtectedRoute component={ReaderWorkspac
 const ProtectedClubReader      = () => <ProtectedRoute component={ClubReaderPage} />;
 const ProtectedDashboard       = () => <ProtectedRoute component={DashboardPage} />;
 const ProtectedFeed            = () => <ProtectedRoute component={FeedPage} />;
+const ProtectedOnboardingGenres = () => <ProtectedRoute component={OnboardingGenres} />;
 
 function Router() {
   return (
@@ -114,6 +116,7 @@ function Router() {
       {/* Authentication Routes */}
       <Route path="/auth/login" component={Login} />
       <Route path="/auth/register" component={Register} />
+      <Route path="/onboarding/genres" component={ProtectedOnboardingGenres} />
       <Route path="/auth/forgot-password" component={ForgotPassword} />
       <Route path="/auth/reset-password/:token" component={ResetPassword} />
       <Route path="/confirm-email/:token" component={ConfirmEmail} />

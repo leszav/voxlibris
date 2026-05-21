@@ -7,6 +7,7 @@ import { FeedUnseenBadge } from '@/components/feed/FeedUnseenBadge';
 import { MessagesPanel } from '@/pages/MessagesPage';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { RecommendationSection } from '@/components/recommendations/RecommendationSection';
 import { useFeed, useMarkFeedSeen } from '@/hooks/use-feed';
 import { useNotificationSettings, useUpdateNotificationSettings } from '@/hooks/use-notifications';
 import { Switch } from '@/components/ui/switch';
@@ -171,11 +172,11 @@ export default function DashboardPage() {
                   Рекомендации
                 </CardTitle>
                 <CardDescription>
-                  Primary entrypoint для персональных рекомендаций. Реализация запланирована на Sprint 2.5.
+                  Персональные рекомендации клубов, чтецов, книг и live-сессий.
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <p className="text-sm text-muted-foreground">Здесь будут рекомендации клубов, чтецов, книг и live-сессий.</p>
+                <RecommendationSection />
               </CardContent>
             </Card>
           </TabsContent>

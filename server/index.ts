@@ -49,6 +49,7 @@ import feedRoutes from "./routes/feed.js";
 import usersRoutes from "./routes/users.js";
 import presenceRoutes from "./routes/presence.js";
 import dmRoutes from "./routes/direct-messages.js";
+import recommendationsRoutes from "./routes/recommendations.js";
 import gamificationAdminRoutes from "./routes/gamification-admin.js";
 import gamificationRoutes from "./routes/gamification.js";
 import { logger } from "./lib/logger.js";
@@ -939,6 +940,9 @@ try {
 
 	// Direct Messages
 	app.use("/api/dm", jwtAuth, dmRoutes);
+
+	// Recommendations (Sprint 2.6, Stage A)
+	app.use("/api/recommendations", jwtAuth, recommendationsRoutes);
 
 	// Gamification admin constructor
 	app.use("/api/admin/gamification", jwtAuth, gamificationAdminRoutes);

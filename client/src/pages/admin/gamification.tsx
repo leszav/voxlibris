@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Blocks,
+  ChevronsUpDown,
   Pencil,
   Plus,
   RefreshCw,
@@ -11,6 +12,7 @@ import {
 import { AdminLayout } from "@/components/layout/AdminLayout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import {
   Card,
   CardContent,
@@ -27,6 +29,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Select,
   SelectContent,
@@ -51,6 +54,10 @@ import { apiRequest } from "@/lib/queryClient";
 type AchievementStatus = "draft" | "active" | "archived";
 type IconType = "badge" | "star" | "title";
 type ValueType = "number" | "string" | "boolean";
+type ConditionPrimitiveValue = boolean | number | string;
+type ConditionsFormFields = "conditionsLogic" | "conditions";
+type ParsedConditionsForm = Pick<AchievementFormState, ConditionsFormFields>;
+type RewardInputValue = number | string | null;
 type ConditionsLogic = "AND" | "OR";
 type AssetTypeFilter = "all" | IconType;
 type AssetSortBy = "nameRu" | "createdAt" | "sortOrder" | "groupKey";
@@ -77,7 +84,20 @@ interface BuildingBlockItem {
   labelRu: string;
   valueType: ValueType;
   supportedOperators: string[];
+  sourceKey?: string | null;
   isActive: boolean;
+}
+
+interface FieldRegistryItem {
+  key: string;
+  type: ValueType;
+  label: string;
+  group: string;
+}
+
+interface FieldRegistryResponse {
+  success: boolean;
+  registry: Record<string, FieldRegistryItem[]>;
 }
 
 interface RewardAssetItem {
@@ -131,6 +151,7 @@ interface AchievementConditionFormState {
 interface BuildingBlockFormState {
   code: string;
   labelRu: string;
+  sourceKey: string;
   valueType: ValueType;
   supportedOperators: string[];
   isActive: boolean;
@@ -249,11 +270,11 @@ const EMPTY_ACHIEVEMENT_FORM: AchievementFormState = {
 const EMPTY_BLOCK_FORM: BuildingBlockFormState = {
   code: "",
   labelRu: "",
+  sourceKey: "",
   valueType: "number",
   supportedOperators: [">=", "<=", "="],
   isActive: true,
 };
-
 const EMPTY_REWARD_ASSET_FORM: RewardAssetFormState = {
   assetType: "badge",
   nameRu: "",
@@ -294,6 +315,18 @@ async function fetchRewardAssets(includeInactive: boolean): Promise<RewardAssetI
   return response.assets;
 }
 
+// Этап 7: Функции для ручного пересчёта
+async function runReconcile(): Promise<{ success: boolean; summary: unknown }> {
+  const response = await apiRequest<{ success: boolean; summary: unknown }>(
+    "/api/admin/gamification/reconcile/run",
+    {
+      method: "POST",
+      body: JSON.stringify({ batchSize: 100 }),
+    },
+  );
+  return response;
+}
+
 let conditionIdCounter = 0;
 
 function createConditionId(): string {
@@ -311,7 +344,7 @@ function createEmptyCondition(): AchievementConditionFormState {
   };
 }
 
-function parseConditionValue(valueType: ValueType, rawValue: string): boolean | number | string {
+function parseConditionValue(valueType: ValueType, rawValue: string): ConditionPrimitiveValue {
   if (valueType === "boolean") {
     return rawValue === "true";
   }
@@ -337,7 +370,7 @@ function normalizeConditionValue(valueType: ValueType, value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
-function parseConditionsPayload(payload: unknown): Pick<AchievementFormState, "conditionsLogic" | "conditions"> {
+function parseConditionsPayload(payload: unknown): ParsedConditionsForm {
   const fallback = {
     conditionsLogic: "AND" as ConditionsLogic,
     conditions: [] as AchievementConditionFormState[],
@@ -427,7 +460,7 @@ function formatConditionPreview(condition: AchievementConditionFormState, block?
   return `${label} ${condition.operator} ${value || "—"}`;
 }
 
-function parseRewardValueInput(rewardValue: string): number | string | null {
+function parseRewardValueInput(rewardValue: string): RewardInputValue {
   const trimmed = rewardValue.trim();
   if (!trimmed) {
     return null;
@@ -648,10 +681,16 @@ function blockToForm(item: BuildingBlockItem): BuildingBlockFormState {
   return {
     code: item.code,
     labelRu: item.labelRu,
+    sourceKey: item.sourceKey ?? "",
     valueType: item.valueType,
     supportedOperators: item.supportedOperators,
     isActive: item.isActive,
   };
+}
+
+function sourceKeyToCode(sourceKey: string): string {
+  const parts = sourceKey.split(".");
+  return parts.at(-1) ?? sourceKey;
 }
 
 function AchievementStatusBadge({ status }: Readonly<{ status: AchievementStatus }>) {
@@ -939,7 +978,7 @@ function BlocksTabContent({ includeInactiveBlocks, onIncludeInactiveChange, bloc
         <div>
           <CardTitle className="flex items-center gap-2">
             <Blocks className="h-5 w-5" />
-            Кирпичики конструктора
+            Параметры условий
           </CardTitle>
           <CardDescription>
             Базовые параметры, из которых администратор собирает условия достижений.
@@ -1129,7 +1168,7 @@ function renderBlocksContent(params: {
   if (params.isError) {
     return (
       <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-        Не удалось загрузить кирпичики.
+        Не удалось загрузить параметры условий.
       </div>
     );
   }
@@ -1155,6 +1194,7 @@ export default function AdminGamificationPage() { // NOSONAR: orchestration comp
   const [editingRewardAsset, setEditingRewardAsset] = useState<RewardAssetItem | null>(null);
   const [achievementForm, setAchievementForm] = useState<AchievementFormState>(EMPTY_ACHIEVEMENT_FORM);
   const [blockForm, setBlockForm] = useState<BuildingBlockFormState>(EMPTY_BLOCK_FORM);
+  const [blockFieldPopoverOpen, setBlockFieldPopoverOpen] = useState(false);
   const [rewardAssetForm, setRewardAssetForm] = useState<RewardAssetFormState>(EMPTY_REWARD_ASSET_FORM);
   const [rewardAssetDialogOpen, setRewardAssetDialogOpen] = useState(false);
   const [rewardAssetFile, setRewardAssetFile] = useState<File | null>(null);
@@ -1172,6 +1212,10 @@ export default function AdminGamificationPage() { // NOSONAR: orchestration comp
   const [groupAssetsByKey, setGroupAssetsByKey] = useState(true);
   const [selectedAssetIds, setSelectedAssetIds] = useState<string[]>([]);
 
+  // Этап 4: Field-registry для динамического конструктора условий
+  const [selectedFieldValues, setSelectedFieldValues] = useState<Record<string, ConditionPrimitiveValue[]>>({});
+  const [isLoadingFieldValues, setIsLoadingFieldValues] = useState<Record<string, boolean>>({});
+
   const achievementsQuery = useQuery({
     queryKey: ["admin-gamification-achievements", achievementStatusFilter],
     queryFn: () => fetchAchievements(achievementStatusFilter),
@@ -1182,10 +1226,28 @@ export default function AdminGamificationPage() { // NOSONAR: orchestration comp
     queryFn: () => fetchBuildingBlocks(includeInactiveBlocks),
   });
 
+  const fieldRegistryQuery = useQuery({
+    queryKey: ["admin-gamification-field-registry"],
+    queryFn: async () => {
+      return await apiRequest<FieldRegistryResponse>("/api/admin/gamification/field-registry");
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+
   const rewardAssetsQuery = useQuery({
     queryKey: ["admin-gamification-reward-assets", includeInactiveAssets],
     queryFn: () => fetchRewardAssets(includeInactiveAssets),
   });
+
+  const fieldRegistryGroups = fieldRegistryQuery.data?.registry ?? {};
+  const fieldRegistryOptions = useMemo(
+    () => Object.values(fieldRegistryGroups).flat(),
+    [fieldRegistryGroups],
+  );
+  const selectedBlockField = useMemo(
+    () => fieldRegistryOptions.find((field) => field.key === blockForm.sourceKey) ?? null,
+    [fieldRegistryOptions, blockForm.sourceKey],
+  );
 
   const blockByCode = useMemo(() => {
     return new Map((blocksQuery.data ?? []).map((item) => [item.code, item]));
@@ -1393,6 +1455,7 @@ export default function AdminGamificationPage() { // NOSONAR: orchestration comp
       const payload = {
         code: blockForm.code.trim(),
         labelRu: blockForm.labelRu.trim(),
+        sourceKey: blockForm.sourceKey.trim() || null,
         valueType: blockForm.valueType,
         supportedOperators: blockForm.supportedOperators,
         isActive: blockForm.isActive,
@@ -1411,13 +1474,13 @@ export default function AdminGamificationPage() { // NOSONAR: orchestration comp
       });
     },
     onSuccess: async () => {
-      toast({ title: editingBlock ? "Кирпичик обновлен" : "Кирпичик создан" });
+      toast({ title: editingBlock ? "Параметр условия обновлен" : "Параметр условия создан" });
       await invalidateBlocks();
       resetBlockDialog();
     },
     onError: (error) => {
       toast({
-        title: "Не удалось сохранить кирпичик",
+        title: "Не удалось сохранить параметр условия",
         description: error instanceof Error ? error.message : "Неизвестная ошибка",
         variant: "destructive",
       });
@@ -1429,12 +1492,12 @@ export default function AdminGamificationPage() { // NOSONAR: orchestration comp
       await apiRequest(`/api/admin/gamification/building-blocks/${id}`, { method: "DELETE" });
     },
     onSuccess: async () => {
-      toast({ title: "Кирпичик удален" });
+      toast({ title: "Параметр условия удален" });
       await invalidateBlocks();
     },
     onError: (error) => {
       toast({
-        title: "Не удалось удалить кирпичик",
+        title: "Не удалось удалить параметр условия",
         description: error instanceof Error ? error.message : "Неизвестная ошибка",
         variant: "destructive",
       });
@@ -1568,17 +1631,76 @@ export default function AdminGamificationPage() { // NOSONAR: orchestration comp
     },
   });
 
-  const handleRefresh = () => {
-    achievementsQuery.refetch();
-    blocksQuery.refetch();
-    rewardAssetsQuery.refetch();
-  };
+  // Этап 7: Mutation для reconcile (ручной пересчёт)
+  const reconcileMutation = useMutation({
+    mutationFn: runReconcile,
+    onSuccess: async (result) => {
+      toast({
+        title: "Пересчёт завершен",
+        description: `Результаты: ${JSON.stringify(result.summary)}`,
+      });
+      // Инвалидируем query для обновления данных
+      queryClient.invalidateQueries({ queryKey: ["admin-gamification-achievements"] });
+    },
+    onError: (error) => {
+      toast({
+        title: "Не удалось запустить пересчёт",
+        description: error instanceof Error ? error.message : "Неизвестная ошибка",
+        variant: "destructive",
+      });
+    },
+  });
 
   const addCondition = () => {
     setAchievementForm((prev) => ({
       ...prev,
       conditions: [...prev.conditions, createEmptyCondition()],
     }));
+  };
+
+  const applyFieldSelection = (fieldKey: string) => {
+    const selectedField = fieldRegistryOptions.find((field) => field.key === fieldKey);
+    if (!selectedField) {
+      return;
+    }
+
+    setBlockForm((prev) => {
+      const allowedOperators = new Set(OPERATOR_OPTIONS_BY_VALUE_TYPE[selectedField.type]);
+      const preservedOperators = prev.supportedOperators.filter((operator) => allowedOperators.has(operator));
+
+      return {
+        ...prev,
+        sourceKey: selectedField.key,
+        code: sourceKeyToCode(selectedField.key),
+        valueType: selectedField.type,
+        supportedOperators: preservedOperators.length > 0 ? preservedOperators : [...OPERATOR_OPTIONS_BY_VALUE_TYPE[selectedField.type]],
+      };
+    });
+
+    if (selectedField.type === "string") {
+      loadFieldValues(selectedField.key);
+    }
+  };
+
+  const loadFieldValues = async (fieldKey: string) => {
+    if (selectedFieldValues[fieldKey]) {
+      return; // Already cached
+    }
+
+    setIsLoadingFieldValues((prev) => ({ ...prev, [fieldKey]: true }));
+    try {
+      const data = await apiRequest<{ success: boolean; field: string; values: ConditionPrimitiveValue[] }>(
+        `/api/admin/gamification/field-values?field=${encodeURIComponent(fieldKey)}&limit=200`,
+      );
+      setSelectedFieldValues((prev) => ({
+        ...prev,
+        [fieldKey]: data.values ?? [],
+      }));
+    } catch {
+      // Silent fail - field values are optional for UI
+    } finally {
+      setIsLoadingFieldValues((prev) => ({ ...prev, [fieldKey]: false }));
+    }
   };
 
   const updateCondition = (conditionId: string, updates: Partial<AchievementConditionFormState>) => {
@@ -1597,6 +1719,11 @@ export default function AdminGamificationPage() { // NOSONAR: orchestration comp
             nextCondition.valueType = block.valueType;
             nextCondition.operator = block.supportedOperators[0] ?? nextCondition.operator;
             nextCondition.value = block.valueType === "boolean" ? "false" : "";
+
+            // Этап 4: Загружаем DISTINCT values для string field'ов если есть sourceKey
+            if (block.sourceKey && block.valueType === "string") {
+              loadFieldValues(block.sourceKey);
+            }
           }
         }
 
@@ -1677,39 +1804,61 @@ export default function AdminGamificationPage() { // NOSONAR: orchestration comp
           <div>
             <h1 className="text-3xl font-bold text-gray-900">Геймификация</h1>
             <p className="mt-2 text-gray-600">
-              Отдельный раздел для управления достижениями, наградами и кирпичиками конструктора.
+              Отдельный раздел для управления достижениями, наградами и параметрами условий.
             </p>
           </div>
 
-          <div className="flex flex-wrap gap-3">
-            <Button variant="outline" onClick={handleRefresh}>
-              <RefreshCw className="mr-2 h-4 w-4" />
-              Обновить
-            </Button>
-            <Button variant="outline" onClick={openCreateRewardAssetDialog}>
-              <Plus className="mr-2 h-4 w-4" />
-              Новый ассет
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <Button
+              variant="outline"
+              className="w-full justify-start gap-2 sm:justify-center"
+              onClick={openCreateRewardAssetDialog}
+              title="Новый ассет"
+            >
+              <Plus className="h-4 w-4 shrink-0" />
+              <span className="hidden sm:inline">Новый ассет</span>
+              <span className="sm:hidden">Ассет</span>
             </Button>
             <Button
               variant="outline"
+              className="w-full justify-start gap-2 sm:justify-center"
               onClick={() => {
                 setEditingBlock(null);
                 setBlockForm(EMPTY_BLOCK_FORM);
                 setBlockDialogOpen(true);
               }}
+              title="Новый параметр условия"
             >
-              <Blocks className="mr-2 h-4 w-4" />
-              Новый кирпичик
+              <Blocks className="h-4 w-4 shrink-0" />
+              <span className="hidden sm:inline">Новый параметр</span>
+              <span className="sm:hidden">Параметр</span>
             </Button>
             <Button
+              className="w-full justify-start gap-2 sm:justify-center"
               onClick={() => {
                 setEditingAchievement(null);
                 setAchievementForm(EMPTY_ACHIEVEMENT_FORM);
                 setAchievementDialogOpen(true);
               }}
+              title="Новое достижение"
             >
-              <Plus className="mr-2 h-4 w-4" />
-              Новое достижение
+              <Trophy className="h-4 w-4 shrink-0" />
+              <span className="hidden sm:inline">Новое достижение</span>
+              <span className="sm:hidden">Достижение</span>
+            </Button>
+
+            <Button
+              variant="outline"
+              className="w-full justify-start gap-2 sm:justify-center"
+              onClick={() => reconcileMutation.mutate()}
+              disabled={reconcileMutation.isPending}
+              title="Пересчитать достижения"
+            >
+              <RefreshCw className={`h-4 w-4 shrink-0 ${reconcileMutation.isPending ? "animate-spin" : ""}`} />
+              <span className="hidden sm:inline">
+                {reconcileMutation.isPending ? "Пересчитываю..." : "Пересчитать достижения"}
+              </span>
+              <span className="sm:hidden">Пересчёт</span>
             </Button>
           </div>
         </div>
@@ -1719,7 +1868,7 @@ export default function AdminGamificationPage() { // NOSONAR: orchestration comp
         <Tabs defaultValue="achievements" className="space-y-6">
           <TabsList>
             <TabsTrigger value="achievements">Достижения</TabsTrigger>
-            <TabsTrigger value="blocks">Кирпичики</TabsTrigger>
+            <TabsTrigger value="blocks">Параметры условий</TabsTrigger>
             <TabsTrigger value="gallery">Галерея</TabsTrigger>
           </TabsList>
 
@@ -2016,7 +2165,7 @@ export default function AdminGamificationPage() { // NOSONAR: orchestration comp
                                 onValueChange={(value) => updateCondition(condition.id, { blockCode: value })}
                               >
                                 <SelectTrigger>
-                                  <SelectValue placeholder="Выберите кирпичик" />
+                                  <SelectValue placeholder="Выберите параметр условия" />
                                 </SelectTrigger>
                                 <SelectContent>
                                   {activeBlocks.map((item) => (
@@ -2060,21 +2209,47 @@ export default function AdminGamificationPage() { // NOSONAR: orchestration comp
                                     <SelectItem value="false">Нет</SelectItem>
                                   </SelectContent>
                                 </Select>
-                              ) : (
-                                <>
-                                  <Input
-                                    type={condition.valueType === "number" ? "number" : "text"}
-                                    value={condition.value}
-                                    onChange={(event) => updateCondition(condition.id, { value: event.target.value })}
-                                    placeholder={getConditionValuePlaceholder(condition)}
-                                  />
-                                  {condition.blockCode === "favorite_genre" ? (
-                                    <p className="text-xs text-muted-foreground">
-                                      Поддерживается список через запятую, шаблон `*` и префиксы: например `Детские*`.
-                                    </p>
-                                  ) : null}
-                                </>
-                              )}
+                              ) : (() => {
+                                const block = blockByCode.get(condition.blockCode);
+                                const fieldKey = block?.sourceKey;
+                                const fieldValues = fieldKey ? selectedFieldValues[fieldKey] : undefined;
+                                const isLoading = !!(fieldKey && isLoadingFieldValues[fieldKey]);
+
+                                return (
+                                  <>
+                                    {fieldValues && fieldValues.length > 0 ? (
+                                      <Select
+                                        value={condition.value}
+                                        onValueChange={(value) => updateCondition(condition.id, { value })}
+                                      >
+                                        <SelectTrigger>
+                                          <SelectValue placeholder="Выберите значение" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                          {fieldValues.map((val) => (
+                                            <SelectItem key={String(val)} value={String(val)}>
+                                              {String(val)}
+                                            </SelectItem>
+                                          ))}
+                                        </SelectContent>
+                                      </Select>
+                                    ) : (
+                                      <Input
+                                        type={condition.valueType === "number" ? "number" : "text"}
+                                        value={condition.value}
+                                        onChange={(event) => updateCondition(condition.id, { value: event.target.value })}
+                                        placeholder={getConditionValuePlaceholder(condition)}
+                                        disabled={isLoading}
+                                      />
+                                    )}
+                                    {condition.blockCode === "favorite_genre" ? (
+                                      <p className="text-xs text-muted-foreground">
+                                        Поддерживается список через запятую, шаблон `*` и префиксы: например `Детские*`.
+                                      </p>
+                                    ) : null}
+                                  </>
+                                );
+                              })()}
                             </div>
                           </div>
                         </div>
@@ -2134,7 +2309,7 @@ export default function AdminGamificationPage() { // NOSONAR: orchestration comp
       <Dialog open={blockDialogOpen} onOpenChange={(open) => (open ? setBlockDialogOpen(true) : resetBlockDialog())}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{editingBlock ? "Редактирование кирпичика" : "Новый кирпичик"}</DialogTitle>
+            <DialogTitle>{editingBlock ? "Редактирование параметра условия" : "Новый параметр условия"}</DialogTitle>
           </DialogHeader>
 
           <div className="space-y-4">
@@ -2147,16 +2322,68 @@ export default function AdminGamificationPage() { // NOSONAR: orchestration comp
               />
             </div>
             <div className="space-y-2">
+              <Label>Источник поля из БД</Label>
+              <Popover open={blockFieldPopoverOpen} onOpenChange={setBlockFieldPopoverOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={blockFieldPopoverOpen}
+                    className="w-full justify-between"
+                    disabled={fieldRegistryQuery.isLoading}
+                  >
+                    <span className="truncate text-left">
+                      {selectedBlockField ? `${selectedBlockField.group} · ${selectedBlockField.label}` : "Выберите поле из реестра"}
+                    </span>
+                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                  <Command>
+                    <CommandInput placeholder="Поиск поля..." />
+                    <CommandList>
+                      <CommandEmpty>
+                        {fieldRegistryQuery.isError ? "Не удалось загрузить реестр полей" : "Поля не найдены"}
+                      </CommandEmpty>
+                      {Object.entries(fieldRegistryGroups).map(([group, fields]) => (
+                        <CommandGroup key={group} heading={group}>
+                          {fields.map((field) => (
+                            <CommandItem
+                              key={field.key}
+                              value={`${field.label} ${field.key}`}
+                              onSelect={() => {
+                                applyFieldSelection(field.key);
+                                setBlockFieldPopoverOpen(false);
+                              }}
+                            >
+                              <div className="flex flex-col">
+                                <span>{field.label}</span>
+                                <span className="text-xs text-muted-foreground">{field.key}</span>
+                              </div>
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      ))}
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
+              <p className="text-xs text-muted-foreground">
+                Поле, код и тип значения подставляются автоматически из реестра БД.
+              </p>
+            </div>
+            <div className="space-y-2">
               <Label htmlFor="block-code">Код</Label>
               <Input
                 id="block-code"
                 value={blockForm.code}
-                disabled={Boolean(editingBlock)}
                 onChange={(event) => setBlockForm((prev) => ({ ...prev, code: event.target.value }))}
               />
+              <p className="text-xs text-muted-foreground">Можно скорректировать вручную, если нужен пользовательский код.</p>
             </div>
             <div className="space-y-2">
-              <Label>Тип значения</Label>
+              <Label htmlFor="block-value-type">Тип значения</Label>
               <Select
                 value={blockForm.valueType}
                 onValueChange={(value: ValueType) => {
@@ -2171,7 +2398,7 @@ export default function AdminGamificationPage() { // NOSONAR: orchestration comp
                   });
                 }}
               >
-                <SelectTrigger>
+                <SelectTrigger id="block-value-type">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -2180,6 +2407,7 @@ export default function AdminGamificationPage() { // NOSONAR: orchestration comp
                   <SelectItem value="boolean">Да/нет</SelectItem>
                 </SelectContent>
               </Select>
+              <p className="text-xs text-muted-foreground">При выборе поля из БД тип подставляется автоматически.</p>
             </div>
             <div className="space-y-2">
               <Label>Операторы</Label>
@@ -2220,7 +2448,7 @@ export default function AdminGamificationPage() { // NOSONAR: orchestration comp
                 checked={blockForm.isActive}
                 onChange={(event) => setBlockForm((prev) => ({ ...prev, isActive: event.target.checked }))}
               />
-              <Label htmlFor="block-active" className="cursor-pointer">Кирпичик активен</Label>
+              <Label htmlFor="block-active" className="cursor-pointer">Параметр активен</Label>
             </div>
           </div>
 

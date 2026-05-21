@@ -1,0 +1,165 @@
+/**
+ * Этап 8: Integration Tests для Gamification API
+ * 
+ * Примечание: Эти тесты требуют запущенного сервера и БД
+ * Запуск: npm run test:integration
+ * 
+ * Тестовые сценарии:
+ * 1. Field Registry Loading
+ * 2. Field Values Fetching  
+ * 3. Building Block CRUD
+ * 4. Achievement Conditions
+ * 5. Dry-Run Evaluation
+ * 6. Validation Error Handling
+ */
+
+// === Сценарий 1: Загрузка Field Registry ===
+// GET /api/admin/gamification/field-registry
+// Expected Response:
+// {
+//   "Users": [{key: "users.role", type: "string", label: "Роль пользователя", group: "Users"}],
+//   "Activity": [{key: "user_activity_counters.completed_books_count", type: "number", ...}],
+//   "Profile": [{key: "user_profiles.bio", type: "string", ...}],
+//   "Streaks": [{key: "user_streaks.current_streak_days", type: "number", ...}],
+//   "Derived": [{key: "derived.tenure_days", type: "number", ...}]
+// }
+// Status: 200 OK
+
+// === Сценарий 2: Получение значений поля ===
+// GET /api/admin/gamification/field-values?field=users.role&limit=200
+// Expected Response:
+// ["admin", "moderator", "user"]
+// Status: 200 OK
+
+// Ошибка при неверном поле:
+// GET /api/admin/gamification/field-values?field=invalid.field
+// Expected Response:
+// { error: "Unknown field: invalid.field" }
+// Status: 400 Bad Request
+
+// === Сценарий 3: Создание Building Block с sourceKey ===
+// POST /api/admin/gamification/building-blocks
+// Body:
+// {
+//   "code": "admin_role",
+//   "labelRu": "Администратор",
+//   "valueType": "string",
+//   "supportedOperators": ["=", "!="],
+//   "sourceKey": "users.role"
+// }
+// Expected Response:
+// { id: "...", code: "admin_role", sourceKey: "users.role", ... }
+// Status: 201 Created
+
+// === Сценарий 4: Создание Achievement с условиями ===
+// POST /api/admin/gamification/achievements
+// Body:
+// {
+//   "titleRu": "Администратор",
+//   "descriptionRu": "Получено за роль администратора",
+//   "iconUrl": "...",
+//   "conditionsPayload": [
+//     {
+//       "blockCode": "admin_role",
+//       "operator": "=",
+//       "valueType": "string",
+//       "value": "admin"
+//     }
+//   ],
+//   "conditionsLogic": "AND",
+//   "rewardAssets": ["asset-id-1"]
+// }
+// Expected Response: { id: "...", titleRu: "Администратор", ... }
+// Status: 201 Created
+
+// Ошибка при неверном blockCode:
+// Body с blockCode="unknown_code"
+// Expected Response:
+// { error: "Unknown blockCode: unknown_code" }
+// Status: 400 Bad Request
+
+// === Сценарий 5: Dry-Run Оценка достижений ===
+// POST /api/admin/gamification/dry-run
+// Body:
+// {
+//   "userId": "test-user-id",
+//   "conditionsPayload": [
+//     {
+//       "blockCode": "role",
+//       "operator": "=",
+//       "valueType": "string",
+//       "value": "admin"
+//     }
+//   ]
+// }
+// Expected Response:
+// {
+//   "snapshot": {
+//     "userId": "test-user-id",
+//     "userRole": "admin",
+//     "completedBooksCount": 5,
+//     ...
+//   },
+//   "results": [
+//     {
+//       "blockCode": "role",
+//       "operator": "=",
+//       "expected": "admin",
+//       "actual": "admin",
+//       "passed": true
+//     }
+//   ],
+//   "overallPassed": true
+// }
+// Status: 200 OK
+
+// === Сценарий 6: Обработка ошибок валидации ===
+
+// 1. Missing sourceKey для нового blockCode
+//   POST /api/admin/gamification/building-blocks
+//   Body: { code: "new_field", labelRu: "...", sourceKey: null }
+//   Error: "sourceKey required for new building blocks"
+//   Status: 400 Bad Request
+
+// 2. Invalid operator
+//   POST /api/admin/gamification/achievements
+//   Body: { conditionsPayload: [{ blockCode: "role", operator: "???" }] }
+//   Error: "Unsupported operator: ???"
+//   Status: 400 Bad Request
+
+// 3. Type mismatch
+//   POST /api/admin/gamification/achievements
+//   Body: { conditionsPayload: [{ blockCode: "completed_books", operator: "=", valueType: "string", value: "five" }] }
+//   Error: "Type mismatch: expected number, got string"
+//   Status: 400 Bad Request
+
+// === Сценарий 7: Миграция и Reconciliation ===
+// POST /api/admin/gamification/reconcile/run
+// Expected Response:
+// {
+//   "summary": {
+//     "processed": 42,
+//     "awarded": 8,
+//     "errors": 0
+//   },
+//   "duration_ms": 1234
+// }
+// Status: 200 OK
+
+// === Примечания для тестирования ===
+// 
+// Порядок тестов:
+// 1. Загрузить Field Registry (убедиться что все поля есть)
+// 2. Создать Building Block с sourceKey
+// 3. Создать Achievement с условиями (использую новый Block)
+// 4. Запустить Dry-Run (проверить evaluation logic)
+// 5. Запустить Reconciliation (проверить batch processing)
+//
+// Критерии успеха:
+// - Field Registry содержит все 5 групп
+// - Building Block сохраняется с sourceKey
+// - Achievement сохраняется и условия валидируются
+// - Dry-Run возвращает правильный результат
+// - Reconciliation обрабатывает всех пользователей
+// - Все ошибки валидации возвращают 400 Bad Request
+// - Нет SQL injection уязвимостей (проверить field names)
