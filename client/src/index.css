@@ -150,10 +150,20 @@
     @apply border-border;
   }
   body {
-    @apply font-sans antialiased bg-background text-foreground selection:bg-accent/20 selection:text-foreground;
+    @apply font-sans antialiased bg-background text-foreground;
     min-height: 100dvh;
     overscroll-behavior-y: none;
     -webkit-tap-highlight-color: transparent;
+  }
+
+  ::selection {
+    background: hsl(var(--accent) / 0.35);
+    color: hsl(var(--foreground));
+  }
+
+  ::-moz-selection {
+    background: hsl(var(--accent) / 0.35);
+    color: hsl(var(--foreground));
   }
   #root {
     min-height: 100dvh;
