@@ -14,6 +14,75 @@ type XmlElement = {
 
 const firstItem = <T>(value: unknown): T | undefined => (Array.isArray(value) ? (value[0] as T | undefined) : undefined);
 const asArray = <T>(value: unknown): T[] => (Array.isArray(value) ? (value as T[]) : []);
+const getXmlAttribute = (element: XmlElement | undefined, attributeName: string): string | undefined => {
+  const attributes = element?.$;
+  if (!attributes) return undefined;
+
+  if (attributes[attributeName]) return attributes[attributeName];
+
+  const namespacedAttribute = Object.entries(attributes).find(([key]) => key === attributeName || key.endsWith(`:${attributeName}`));
+  return namespacedAttribute?.[1];
+};
+const getXmlTextNodeValue = (value: unknown): string | undefined => {
+  if (typeof value !== 'object' || value === null || !('_' in value)) return undefined;
+
+  const text = value._;
+  return typeof text === 'string' ? text : undefined;
+};
+
+const STRUCTURAL_FB2_SECTION_TITLES = [
+  'пролог',
+  'эпилог',
+] as const;
+
+const STRUCTURAL_FB2_SECTION_PREFIXES = [
+  'часть',
+  'глава',
+  'книга',
+  'том',
+  'раздел',
+  'акт',
+] as const;
+
+const STRUCTURAL_FB2_SECTION_ORDINALS = [
+  'первая',
+  'вторая',
+  'третья',
+  'четвертая',
+  'четвёртая',
+  'пятая',
+  'шестая',
+  'седьмая',
+  'восьмая',
+  'девятая',
+  'десятая',
+  'одиннадцатая',
+  'двенадцатая',
+  'последняя',
+] as const;
+
+const isArabicOrRomanSectionMarker = (value: string): boolean => (
+  /^\d+[.)]?$/.test(value) || /^[ivxlcdm]+[.)]?$/i.test(value)
+);
+
+async function withParseTimeout<T>(promise: Promise<T>, label: string, timeoutMs = BOOK_PARSE_TIMEOUT_MS): Promise<T> {
+  let timeoutId: NodeJS.Timeout | undefined;
+
+  try {
+    return await Promise.race<T>([
+      promise,
+      new Promise<T>((_, reject) => {
+        timeoutId = setTimeout(() => {
+          reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
+}
 
 function parsePositiveIntEnv(value: string | undefined, fallback: number): number {
   const parsed = Number.parseInt(value || '', 10);
@@ -77,22 +146,7 @@ export abstract class BaseBookParser {
   }
 
   protected async withTimeout<T>(promise: Promise<T>, label: string, timeoutMs = BOOK_PARSE_TIMEOUT_MS): Promise<T> {
-    let timeoutId: NodeJS.Timeout | undefined;
-
-    try {
-      return await Promise.race<T>([
-        promise,
-        new Promise<T>((_, reject) => {
-          timeoutId = setTimeout(() => {
-            reject(new Error(`${label} timed out after ${timeoutMs}ms`));
-          }, timeoutMs);
-        }),
-      ]);
-    } finally {
-      if (timeoutId) {
-        clearTimeout(timeoutId);
-      }
-    }
+    return withParseTimeout(promise, label, timeoutMs);
   }
 
   protected cleanText(text: string): string {
@@ -339,47 +393,47 @@ export class EPUBParser extends BaseBookParser {
     if (typeof metaValue === 'string') return metaValue;
 
     if (Array.isArray(metaValue)) {
-      if (metaValue.length === 0) return undefined;
-      const firstItem = metaValue[0];
-      if (typeof firstItem === 'string') return firstItem;
-      if (typeof firstItem === 'object' && firstItem !== null && '_' in firstItem) {
-        const text = (firstItem as { _: unknown })._;
-        if (typeof text === 'string') return text;
-      }
-      return undefined;
+      const firstMetaValue = metaValue[0];
+      return typeof firstMetaValue === 'string'
+        ? firstMetaValue
+        : getXmlTextNodeValue(firstMetaValue);
     }
 
-    if (typeof metaValue === 'object' && metaValue !== null && '_' in metaValue) {
-      const text = (metaValue as { _: unknown })._;
-      if (typeof text === 'string') return text;
-    }
-
-    return undefined;
+    return getXmlTextNodeValue(metaValue);
   }
 
   private extractMetaValues(metaValue: unknown): string[] {
     if (!metaValue) return [];
 
-    const values: string[] = [];
     const source = Array.isArray(metaValue) ? metaValue : [metaValue];
-
-    for (const item of source) {
-      if (typeof item === 'string') {
-        const normalized = item.trim();
-        if (normalized) values.push(normalized);
-        continue;
-      }
-
-      if (typeof item === 'object' && item !== null && '_' in item) {
-        const text = (item as { _: unknown })._;
-        if (typeof text === 'string') {
-          const normalized = text.trim();
-          if (normalized) values.push(normalized);
-        }
-      }
-    }
+    const values = source
+      .map((item) => typeof item === 'string' ? item : getXmlTextNodeValue(item))
+      .map(value => value?.trim())
+      .filter((value): value is string => Boolean(value));
 
     return Array.from(new Set(values));
+  }
+
+  private async readManifestItemBuffer(
+    zip: JSZip,
+    opfDir: string,
+    href: string,
+    mediaType: string | undefined,
+  ): Promise<{ data: Buffer; type: string } | null> {
+    const imagePath = this.resolveZipPath(opfDir, href.split('#')[0]);
+    const imageFile = zip.file(imagePath);
+    if (!imageFile) return null;
+
+    this.assertZipEntrySize(imageFile, MAX_EPUB_COVER_BYTES, `EPUB cover image: ${imagePath}`);
+    const imageData = await this.withTimeout(
+      imageFile.async('nodebuffer'),
+      `Read EPUB cover image: ${imagePath}`,
+    );
+
+    return {
+      data: imageData,
+      type: mediaType || mime.lookup(href) || 'image/jpeg',
+    };
   }
 
   private async findCoverImage(
@@ -399,19 +453,8 @@ export class EPUBParser extends BaseBookParser {
 
       if ((id === 'cover' || id === 'cover-image' || mediaType?.startsWith('image/')) && href) {
         try {
-          const imagePath = this.resolveZipPath(opfDir, href.split('#')[0]);
-          const imageFile = zip.file(imagePath);
-          if (imageFile) {
-            this.assertZipEntrySize(imageFile, MAX_EPUB_COVER_BYTES, `EPUB cover image: ${imagePath}`);
-            const imageData = await this.withTimeout(
-              imageFile.async('nodebuffer'),
-              `Read EPUB cover image: ${imagePath}`,
-            );
-            return {
-              data: imageData,
-              type: mediaType || mime.lookup(href) || 'image/jpeg',
-            };
-          }
+          const cover = await this.readManifestItemBuffer(zip, opfDir, href, mediaType);
+          if (cover) return cover;
         } catch (error) {
           logger.warn({ error }, 'Error reading cover image');
         }
@@ -433,14 +476,11 @@ export class EPUBParser extends BaseBookParser {
     const spine = asArray<XmlElement>(spineRoot?.itemref);
     const manifest = asArray<XmlElement>(manifestRoot?.item);
 
-    // Создать карту manifest items
-    const manifestMap = new Map<string, XmlElement>();
-    manifest.forEach((item) => {
-      const id = item.$?.id;
-      if (id) {
-        manifestMap.set(id, item);
-      }
-    });
+    const manifestMap = new Map(
+      manifest
+        .map((item) => [item.$?.id, item] as const)
+        .filter((entry): entry is [string, XmlElement] => Boolean(entry[0])),
+    );
 
     const tocMap = await this.extractTocMap(opfData, zip, opfDir);
     const chapters: BookChapter[] = [];
@@ -461,41 +501,53 @@ export class EPUBParser extends BaseBookParser {
       if (!href) continue;
 
       try {
-        const filePath = this.resolveZipPath(opfDir, href.split('#')[0]);
-        const chapterFile = zip.file(filePath);
-
-        if (!chapterFile) {
-          console.warn(`Chapter file not found: ${filePath}`);
-          continue;
-        }
-
-        this.assertZipEntrySize(chapterFile, MAX_EPUB_TEXT_ENTRY_BYTES, `EPUB chapter file: ${filePath}`);
-        const chapterContent = await this.withTimeout(
-          chapterFile.async('string'),
-          `Read EPUB chapter file: ${filePath}`,
-        );
-        const { html, text, title } = this.extractReadableHtmlFromEpub(chapterContent);
-        const textContent = text || this.extractTextFromHtml(chapterContent);
-        const tocTitle = tocMap.get(filePath);
-        const nextChapterNumber = chapters.length + 1;
-        const chapterTitle = this.chooseChapterTitle(title, tocTitle, nextChapterNumber, bookTitle);
-
-        if (this.isNonContentChapter(chapterTitle, textContent, html, bookTitle)) {
-          continue;
-        }
-
-        chapters.push({
-          chapterNumber: nextChapterNumber,
-          title: chapterTitle,
-          content: html || textContent,
-          wordCount: this.countWords(textContent),
-        });
+        const chapter = await this.readEpubChapter(zip, opfDir, href, tocMap, chapters.length + 1, bookTitle);
+        if (!chapter) continue;
+        chapters.push(chapter);
       } catch (error) {
         console.warn(`Error processing chapter ${i + 1}:`, error);
       }
     }
 
     return chapters;
+  }
+
+  private async readEpubChapter(
+    zip: JSZip,
+    opfDir: string,
+    href: string,
+    tocMap: Map<string, string>,
+    chapterNumber: number,
+    bookTitle?: string,
+  ): Promise<BookChapter | null> {
+    const filePath = this.resolveZipPath(opfDir, href.split('#')[0]);
+    const chapterFile = zip.file(filePath);
+
+    if (!chapterFile) {
+      console.warn(`Chapter file not found: ${filePath}`);
+      return null;
+    }
+
+    this.assertZipEntrySize(chapterFile, MAX_EPUB_TEXT_ENTRY_BYTES, `EPUB chapter file: ${filePath}`);
+    const chapterContent = await this.withTimeout(
+      chapterFile.async('string'),
+      `Read EPUB chapter file: ${filePath}`,
+    );
+    const { html, text, title } = this.extractReadableHtmlFromEpub(chapterContent);
+    const textContent = text || this.extractTextFromHtml(chapterContent);
+    const tocTitle = tocMap.get(filePath);
+    const chapterTitle = this.chooseChapterTitle(title, tocTitle, chapterNumber, bookTitle);
+
+    if (this.isNonContentChapter(chapterTitle, textContent, html, bookTitle)) {
+      return null;
+    }
+
+    return {
+      chapterNumber,
+      title: chapterTitle,
+      content: html || textContent,
+      wordCount: this.countWords(textContent),
+    };
   }
 
   private normalizeZipPath(zipPath: string): string {
@@ -544,8 +596,8 @@ export class EPUBParser extends BaseBookParser {
       // Сохраняем важные атрибуты epub:type, преобразуя их в data-epub-type для HTML
       doc.querySelectorAll(String.raw`[epub\:type]`).forEach(el => {
         const epubType = el.getAttribute("epub:type");
-        if (epubType) {
-          el.setAttribute("data-epub-type", epubType);
+        if (epubType && el instanceof dom.window.HTMLElement) {
+          el.dataset.epubType = epubType;
         }
       });
 
@@ -1134,23 +1186,12 @@ export class FB2Parser extends BaseBookParser {
     const coverpage = (titleInfo?.coverpage as XmlElement[] | undefined)?.[0];
     const coverImage = (coverpage?.image as XmlElement[] | undefined)?.[0];
 
-    // xml2js может сохранять namespace в ключе атрибута, например "l:href"
-    let coverImageId = coverImage?.$?.['l:href'] || coverImage?.$?.['href'];
-
-    // Удаляем префикс '#', если он есть (в FB2 ссылки обычно начинаются с #)
-    if (coverImageId?.startsWith('#')) {
-      coverImageId = coverImageId.substring(1);
-    }
+    const coverImageId = getXmlAttribute(coverImage, 'href')?.replace(/^#/, '');
 
     if (coverImageId) {
       const binary = binaries.find((b) => b.$?.id === coverImageId);
-      if (binary) {
-        const contentType = binary.$?.['content-type'];
-        return {
-          data: typeof binary._ === 'string' ? binary._ : '',
-          type: contentType || 'image/jpeg',
-        };
-      }
+      const exactCover = this.buildFb2BinaryImage(binary);
+      if (exactCover) return exactCover;
     }
 
     // 2. Fallback: Ищем бинарник с ID, содержащим "cover"
@@ -1159,26 +1200,30 @@ export class FB2Parser extends BaseBookParser {
       return id && (id.includes('cover') || id === 'cover.jpg' || id === 'cover.png');
     });
 
-    if (coverBinary) {
-      const contentType = coverBinary.$?.['content-type'];
-      return {
-        data: typeof coverBinary._ === 'string' ? coverBinary._ : '',
-        type: contentType || 'image/jpeg',
-      };
-    }
+    const namedCover = this.buildFb2BinaryImage(coverBinary);
+    if (namedCover) return namedCover;
 
     // 3. Fallback: Ищем первое изображение (старая логика)
     for (const binary of binaries) {
-      const contentType = binary.$?.['content-type'];
-      if (contentType?.startsWith('image/')) {
-        return {
-          data: typeof binary._ === 'string' ? binary._ : '',
-          type: contentType,
-        };
-      }
+      const firstImage = this.buildFb2BinaryImage(binary, true);
+      if (firstImage) return firstImage;
     }
 
     return null;
+  }
+
+  private buildFb2BinaryImage(binary: XmlElement | undefined, requireImageContentType = false): { data: string; type: string } | null {
+    if (!binary) return null;
+
+    const contentType = binary.$?.['content-type'];
+    if (requireImageContentType && !contentType?.startsWith('image/')) {
+      return null;
+    }
+
+    return {
+      data: typeof binary._ === 'string' ? binary._ : '',
+      type: contentType || 'image/jpeg',
+    };
   }
 
   private extractChapters(fictionBook: XmlElement): BookChapter[] {
@@ -1321,7 +1366,21 @@ export class FB2Parser extends BaseBookParser {
       return true;
     }
 
-    return /^(?:\d+|\d+[.)]|[ivxlcdm]+|[ivxlcdm]+[.)]|(?:часть|глава|книга|том|раздел|акт)\s+(?:\d+|[ivxlcdm]+|первая|вторая|третья|четвертая|четвёртая|пятая|шестая|седьмая|восьмая|девятая|десятая|одиннадцатая|двенадцатая|последняя)|(?:пролог|эпилог))$/i.test(normalized);
+    if (STRUCTURAL_FB2_SECTION_TITLES.includes(normalized as typeof STRUCTURAL_FB2_SECTION_TITLES[number])) {
+      return true;
+    }
+
+    if (isArabicOrRomanSectionMarker(normalized)) {
+      return true;
+    }
+
+    const [prefix, marker] = normalized.split(' ', 2);
+    if (!prefix || !marker || !STRUCTURAL_FB2_SECTION_PREFIXES.includes(prefix as typeof STRUCTURAL_FB2_SECTION_PREFIXES[number])) {
+      return false;
+    }
+
+    return isArabicOrRomanSectionMarker(marker)
+      || STRUCTURAL_FB2_SECTION_ORDINALS.includes(marker as typeof STRUCTURAL_FB2_SECTION_ORDINALS[number]);
   }
 
   private buildFallbackSectionTitle(ancestorTitles: string[], chapterNumber: number, preferIntroLabel = false): string {
@@ -1530,11 +1589,9 @@ export class FB2Parser extends BaseBookParser {
    * Обработка изображений
    */
   private processFB2Image(element: XmlElement): string {
-    const href = element.$?.['l:href'] || element.$?.href;
+    const href = getXmlAttribute(element, 'href');
     if (!href) return '';
-    
-    // В FB2 изображения ссылаются на binary элементы через #id
-    // Для отображения нужна дополнительная логика на клиенте
+
     const alt = element.$?.alt || 'Image';
     return `<img src="${this.escapeHtml(href)}" alt="${this.escapeHtml(alt)}" class="fb2-image">`;
   }
@@ -1750,6 +1807,7 @@ export class FB2Parser extends BaseBookParser {
     }
 
     const doc = dom.window.document;
+    const binaryMap = this.buildFb2BinaryMapFromDom(doc);
     const chapters: BookChapter[] = [];
     let chapterNumber = 1;
 
@@ -1761,7 +1819,7 @@ export class FB2Parser extends BaseBookParser {
       const sectionEls = Array.from(body.children).filter(el => el.localName === 'section');
       for (const section of sectionEls) {
         if (chapters.length >= MAX_BOOK_CHAPTERS) break;
-        chapterNumber = this.appendDomSectionChapters(section, chapters, chapterNumber, []);
+        chapterNumber = this.appendDomSectionChapters(section, chapters, chapterNumber, [], binaryMap);
       }
     }
 
@@ -1773,12 +1831,13 @@ export class FB2Parser extends BaseBookParser {
     chapters: BookChapter[],
     chapterNumber: number,
     ancestorTitles: string[],
+    binaryMap: Map<string, string>,
   ): number {
     if (chapters.length >= MAX_BOOK_CHAPTERS) return chapterNumber;
 
     const sectionTitle = this.getDomSectionTitle(sectionEl);
     const childSectionEls = Array.from(sectionEl.children).filter(el => el.localName === 'section');
-    const directContent = this.getDomSectionOwnContent(sectionEl);
+    const directContent = this.getDomSectionOwnContent(sectionEl, binaryMap);
     const directWordCount = this.countWords(directContent);
 
     const nextAncestorTitles = sectionTitle?.trim()
@@ -1794,13 +1853,13 @@ export class FB2Parser extends BaseBookParser {
 
       for (const childSection of childSectionEls) {
         if (chapters.length >= MAX_BOOK_CHAPTERS) break;
-        chapterNumber = this.appendDomSectionChapters(childSection, chapters, chapterNumber, nextAncestorTitles);
+        chapterNumber = this.appendDomSectionChapters(childSection, chapters, chapterNumber, nextAncestorTitles, binaryMap);
       }
 
       return chapterNumber;
     }
 
-    const content = this.getDomSectionContent(sectionEl);
+    const content = this.getDomSectionContent(sectionEl, binaryMap);
     if (content.trim()) {
       const title = sectionTitle || this.buildFallbackSectionTitle(ancestorTitles, chapterNumber, true);
       chapters.push({ chapterNumber, title, content, wordCount: this.countWords(content) });
@@ -1852,7 +1911,7 @@ export class FB2Parser extends BaseBookParser {
     return titleEl.textContent?.trim() || undefined;
   }
 
-  private getDomSectionOwnContent(sectionEl: Element): string {
+  private getDomSectionOwnContent(sectionEl: Element, binaryMap: Map<string, string>): string {
     let content = '';
 
     const sectionTitle = this.getDomSectionTitle(sectionEl);
@@ -1864,13 +1923,13 @@ export class FB2Parser extends BaseBookParser {
       if (child.nodeType !== 1) continue;
       const el = child as Element;
       if (el.localName === 'title' || el.localName === 'section') continue;
-      content += this.renderFB2DomElement(el);
+      content += this.renderFB2DomElement(el, binaryMap);
     }
 
     return content;
   }
 
-  private getDomSectionContent(sectionEl: Element): string {
+  private getDomSectionContent(sectionEl: Element, binaryMap: Map<string, string>): string {
     let content = '';
 
     const sectionTitle = this.getDomSectionTitle(sectionEl);
@@ -1883,37 +1942,37 @@ export class FB2Parser extends BaseBookParser {
       const el = child as Element;
       if (el.localName === 'title') continue;
       if (el.localName === 'section') {
-        content += this.getDomSectionContent(el);
+        content += this.getDomSectionContent(el, binaryMap);
         continue;
       }
-      content += this.renderFB2DomElement(el);
+      content += this.renderFB2DomElement(el, binaryMap);
     }
 
     return content;
   }
 
-  private renderFB2DomElement(el: Element): string {
+  private renderFB2DomElement(el: Element, binaryMap: Map<string, string>): string {
     switch (el.localName) {
       case 'p':
-        return `<p>${this.renderFB2DomInline(el)}</p>\n`;
+        return `<p>${this.renderFB2DomInline(el, binaryMap)}</p>\n`;
       case 'subtitle':
-        return `<h4>${this.renderFB2DomInline(el)}</h4>\n`;
+        return `<h4>${this.renderFB2DomInline(el, binaryMap)}</h4>\n`;
       case 'empty-line':
         return '<br>\n';
       case 'epigraph':
-        return this.renderFB2DomEpigraph(el);
+        return this.renderFB2DomEpigraph(el, binaryMap);
       case 'cite':
-        return this.renderFB2DomCite(el);
+        return this.renderFB2DomCite(el, binaryMap);
       case 'poem':
-        return this.renderFB2DomPoem(el);
+        return this.renderFB2DomPoem(el, binaryMap);
       case 'table':
-        return this.renderFB2DomTable(el);
+        return this.renderFB2DomTable(el, binaryMap);
       case 'image':
-        return this.renderFB2DomImage(el);
+        return this.renderFB2DomImage(el, binaryMap);
       case 'text-author':
-        return `<p class="text-author"><em>${this.renderFB2DomInline(el)}</em></p>\n`;
+        return `<p class="text-author"><em>${this.renderFB2DomInline(el, binaryMap)}</em></p>\n`;
       case 'annotation':
-        return this.renderFB2DomAnnotation(el);
+        return this.renderFB2DomAnnotation(el, binaryMap);
       default: {
         const text = el.textContent?.trim() || '';
         return text ? `<p>${this.escapeHtml(text)}</p>\n` : '';
@@ -1921,7 +1980,7 @@ export class FB2Parser extends BaseBookParser {
     }
   }
 
-  private renderFB2DomInline(el: Element): string {
+  private renderFB2DomInline(el: Element, binaryMap: Map<string, string>): string {
     let result = '';
     for (const child of Array.from(el.childNodes)) {
       if (child.nodeType === 3) {
@@ -1929,73 +1988,92 @@ export class FB2Parser extends BaseBookParser {
       } else if (child.nodeType === 1) {
         const c = child as Element;
         switch (c.localName) {
-          case 'strong':       result += `<strong>${this.renderFB2DomInline(c)}</strong>`; break;
-          case 'emphasis':     result += `<em>${this.renderFB2DomInline(c)}</em>`; break;
-          case 'strikethrough': result += `<del>${this.renderFB2DomInline(c)}</del>`; break;
-          case 'sub':          result += `<sub>${this.renderFB2DomInline(c)}</sub>`; break;
-          case 'sup':          result += `<sup>${this.renderFB2DomInline(c)}</sup>`; break;
-          case 'code':         result += `<code>${this.renderFB2DomInline(c)}</code>`; break;
-          case 'a':            result += this.renderFB2DomLink(c); break;
-          case 'image':        result += this.renderFB2DomImage(c); break;
-          default:             result += this.renderFB2DomInline(c);
+          case 'strong':       result += `<strong>${this.renderFB2DomInline(c, binaryMap)}</strong>`; break;
+          case 'emphasis':     result += `<em>${this.renderFB2DomInline(c, binaryMap)}</em>`; break;
+          case 'strikethrough': result += `<del>${this.renderFB2DomInline(c, binaryMap)}</del>`; break;
+          case 'sub':          result += `<sub>${this.renderFB2DomInline(c, binaryMap)}</sub>`; break;
+          case 'sup':          result += `<sup>${this.renderFB2DomInline(c, binaryMap)}</sup>`; break;
+          case 'code':         result += `<code>${this.renderFB2DomInline(c, binaryMap)}</code>`; break;
+          case 'a':            result += this.renderFB2DomLink(c, binaryMap); break;
+          case 'image':        result += this.renderFB2DomImage(c, binaryMap); break;
+          default:             result += this.renderFB2DomInline(c, binaryMap);
         }
       }
     }
     return result;
   }
 
-  private renderFB2DomLink(el: Element): string {
+  private renderFB2DomLink(el: Element, binaryMap: Map<string, string>): string {
     const href = el.getAttributeNS('http://www.w3.org/1999/xlink', 'href')
       || el.getAttribute('href')
       || '#';
     const isExternal = href.startsWith('http://') || href.startsWith('https://');
     const target = isExternal ? ' target="_blank" rel="noopener noreferrer"' : '';
-    return `<a href="${this.escapeHtml(href)}"${target}>${this.renderFB2DomInline(el)}</a>`;
+    return `<a href="${this.escapeHtml(href)}"${target}>${this.renderFB2DomInline(el, binaryMap)}</a>`;
   }
 
-  private renderFB2DomImage(el: Element): string {
+  private renderFB2DomImage(el: Element, binaryMap: Map<string, string>): string {
     const href = el.getAttributeNS('http://www.w3.org/1999/xlink', 'href')
       || el.getAttribute('href')
       || '';
     if (!href) return '';
     const alt = el.getAttribute('alt') || 'Image';
-    return `<img src="${this.escapeHtml(href)}" alt="${this.escapeHtml(alt)}" class="fb2-image">`;
+    const resolvedSrc = binaryMap.get(href.replace(/^#/, '')) || href;
+    return `<img src="${this.escapeHtml(resolvedSrc)}" alt="${this.escapeHtml(alt)}" class="fb2-image">`;
   }
 
-  private renderFB2DomEpigraph(el: Element): string {
+  private buildFb2BinaryMapFromDom(doc: Document): Map<string, string> {
+    const binaryMap = new Map<string, string>();
+
+    for (const binaryEl of Array.from(doc.getElementsByTagName('binary'))) {
+      const id = binaryEl.getAttribute('id')?.trim();
+      const contentType = binaryEl.getAttribute('content-type')?.trim() || 'image/jpeg';
+      const data = binaryEl.textContent?.replace(/\s+/g, '') || '';
+
+      if (!id || !data || !contentType.startsWith('image/')) {
+        continue;
+      }
+
+      binaryMap.set(id, `data:${contentType};base64,${data}`);
+    }
+
+    return binaryMap;
+  }
+
+  private renderFB2DomEpigraph(el: Element, binaryMap: Map<string, string>): string {
     let content = '<blockquote class="epigraph">\n';
     for (const child of Array.from(el.childNodes)) {
       if (child.nodeType !== 1) continue;
       const c = child as Element;
       if (c.localName === 'p') {
-        content += `<p>${this.renderFB2DomInline(c)}</p>\n`;
+        content += `<p>${this.renderFB2DomInline(c, binaryMap)}</p>\n`;
       } else if (c.localName === 'text-author') {
-        content += `<p class="text-author"><em>${this.renderFB2DomInline(c)}</em></p>\n`;
+        content += `<p class="text-author"><em>${this.renderFB2DomInline(c, binaryMap)}</em></p>\n`;
       } else if (c.localName === 'poem') {
-        content += this.renderFB2DomPoem(c);
+        content += this.renderFB2DomPoem(c, binaryMap);
       }
     }
     content += '</blockquote>\n';
     return content;
   }
 
-  private renderFB2DomCite(el: Element): string {
+  private renderFB2DomCite(el: Element, binaryMap: Map<string, string>): string {
     let content = '<blockquote class="cite">\n';
     for (const child of Array.from(el.childNodes)) {
       if (child.nodeType !== 1) continue;
       const c = child as Element;
       switch (c.localName) {
-        case 'p':          content += `<p>${this.renderFB2DomInline(c)}</p>\n`; break;
-        case 'subtitle':   content += `<h5>${this.renderFB2DomInline(c)}</h5>\n`; break;
-        case 'text-author': content += `<p class="text-author"><em>${this.renderFB2DomInline(c)}</em></p>\n`; break;
-        case 'poem':       content += this.renderFB2DomPoem(c); break;
+        case 'p':          content += `<p>${this.renderFB2DomInline(c, binaryMap)}</p>\n`; break;
+        case 'subtitle':   content += `<h5>${this.renderFB2DomInline(c, binaryMap)}</h5>\n`; break;
+        case 'text-author': content += `<p class="text-author"><em>${this.renderFB2DomInline(c, binaryMap)}</em></p>\n`; break;
+        case 'poem':       content += this.renderFB2DomPoem(c, binaryMap); break;
       }
     }
     content += '</blockquote>\n';
     return content;
   }
 
-  private renderFB2DomPoem(el: Element): string {
+  private renderFB2DomPoem(el: Element, binaryMap: Map<string, string>): string {
     let content = '<div class="poem">\n';
     for (const child of Array.from(el.childNodes)) {
       if (child.nodeType !== 1) continue;
@@ -2006,15 +2084,15 @@ export class FB2Parser extends BaseBookParser {
           if (t) content += `<h5 class="poem-title">${this.escapeHtml(t)}</h5>\n`;
           break;
         }
-        case 'stanza':      content += this.renderFB2DomStanza(c); break;
-        case 'text-author': content += `<p class="text-author"><em>${this.renderFB2DomInline(c)}</em></p>\n`; break;
+        case 'stanza':      content += this.renderFB2DomStanza(c, binaryMap); break;
+        case 'text-author': content += `<p class="text-author"><em>${this.renderFB2DomInline(c, binaryMap)}</em></p>\n`; break;
       }
     }
     content += '</div>\n';
     return content;
   }
 
-  private renderFB2DomStanza(el: Element): string {
+  private renderFB2DomStanza(el: Element, binaryMap: Map<string, string>): string {
     let content = '<div class="stanza">\n';
     for (const child of Array.from(el.childNodes)) {
       if (child.nodeType !== 1) continue;
@@ -2025,9 +2103,9 @@ export class FB2Parser extends BaseBookParser {
           if (t) content += `<h6 class="stanza-title">${this.escapeHtml(t)}</h6>\n`;
           break;
         }
-        case 'subtitle': content += `<p class="stanza-subtitle"><em>${this.renderFB2DomInline(c)}</em></p>\n`; break;
+        case 'subtitle': content += `<p class="stanza-subtitle"><em>${this.renderFB2DomInline(c, binaryMap)}</em></p>\n`; break;
         case 'v': {
-          const v = this.renderFB2DomInline(c);
+          const v = this.renderFB2DomInline(c, binaryMap);
           if (v.trim()) content += `<p class="verse">${v}</p>\n`;
           break;
         }
@@ -2037,7 +2115,7 @@ export class FB2Parser extends BaseBookParser {
     return content;
   }
 
-  private renderFB2DomTable(el: Element): string {
+  private renderFB2DomTable(el: Element, binaryMap: Map<string, string>): string {
     let content = '<table class="fb2-table">\n';
     for (const row of Array.from(el.children).filter(c => c.localName === 'tr')) {
       content += '<tr>\n';
@@ -2048,7 +2126,7 @@ export class FB2Parser extends BaseBookParser {
           const v = cell.getAttribute(a);
           if (v) attrs += ` ${a}="${this.escapeHtml(v)}"`;
         }
-        content += `<${tag}${attrs}>${this.renderFB2DomInline(cell)}</${tag}>\n`;
+        content += `<${tag}${attrs}>${this.renderFB2DomInline(cell, binaryMap)}</${tag}>\n`;
       }
       content += '</tr>\n';
     }
@@ -2056,11 +2134,11 @@ export class FB2Parser extends BaseBookParser {
     return content;
   }
 
-  private renderFB2DomAnnotation(el: Element): string {
+  private renderFB2DomAnnotation(el: Element, binaryMap: Map<string, string>): string {
     let content = '<div class="annotation">\n';
     for (const child of Array.from(el.childNodes)) {
       if (child.nodeType !== 1) continue;
-      content += this.renderFB2DomElement(child as Element);
+      content += this.renderFB2DomElement(child as Element, binaryMap);
     }
     content += '</div>\n';
     return content;
@@ -2088,25 +2166,6 @@ export class BookParserFactory {
         return new FB2Parser();
       default:
         throw new Error(`Unsupported file type: ${fileType}`);
-    }
-  }
-
-  private static async withTimeout<T>(promise: Promise<T>, label: string, timeoutMs = BOOK_PARSE_TIMEOUT_MS): Promise<T> {
-    let timeoutId: NodeJS.Timeout | undefined;
-
-    try {
-      return await Promise.race<T>([
-        promise,
-        new Promise<T>((_, reject) => {
-          timeoutId = setTimeout(() => {
-            reject(new Error(`${label} timed out after ${timeoutMs}ms`));
-          }, timeoutMs);
-        }),
-      ]);
-    } finally {
-      if (timeoutId) {
-        clearTimeout(timeoutId);
-      }
     }
   }
 
@@ -2187,6 +2246,10 @@ export class BookParserFactory {
       logger.warn({ error }, '[BookParserFactory] Failed to validate EPUB signature');
       return false;
     }
+  }
+
+  private static withTimeout<T>(promise: Promise<T>, label: string, timeoutMs = BOOK_PARSE_TIMEOUT_MS): Promise<T> {
+    return withParseTimeout(promise, label, timeoutMs);
   }
 
   static async detectFileTypeFromBuffer(fileBuffer: Buffer, filename?: string): Promise<'epub' | 'fb2' | null> {

@@ -756,8 +756,8 @@ function MembersListCard({ clubId, clubTitle, members, memberCount, membersLoadi
                 const compactAchievements = (member.achievements ?? []).slice(0, 3);
 
                 return (
-                <div key={member.id} className="flex flex-col gap-3 rounded-xl border border-border/60 p-3 2xl:flex-row 2xl:items-center 2xl:justify-between 2xl:border-0 2xl:p-0">
-                  <div className="flex min-w-0 items-center gap-3">
+                <div key={member.id} className="grid gap-3 rounded-xl border border-border/60 p-3 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-center xl:border-0 xl:p-0">
+                  <div className="flex min-w-0 items-start gap-3">
                     <div className="relative shrink-0">
                       <UserContextMenu user={{ id: member.id, username: member.username, displayName: member.displayName }} actions={["profile"]}>
                         <div className="cursor-pointer">
@@ -782,12 +782,12 @@ function MembersListCard({ clubId, clubTitle, members, memberCount, membersLoadi
                         <span>•</span>
                         <span>Рейтинг: {memberRating.toFixed(1)}</span>
                       </div>
-                      <div className="mt-1 hidden items-center gap-1 md:flex">
+                      <div className="mt-2 flex flex-wrap items-center gap-1">
                         {compactAchievements.map((achievement) => (
                           <div
                             key={achievement.achievementId}
                             title={achievement.titleRu}
-                            className="flex h-5 w-5 items-center justify-center overflow-hidden rounded border bg-muted/30 text-[10px]"
+                            className="flex h-5 w-5 shrink-0 items-center justify-center overflow-hidden rounded border bg-muted/30 text-[10px]"
                           >
                             {achievement.badgeImageUrl ? (
                               <img src={achievement.badgeImageUrl} alt={achievement.titleRu} className="h-5 w-5 object-cover" />
@@ -804,7 +804,7 @@ function MembersListCard({ clubId, clubTitle, members, memberCount, membersLoadi
                       </div>
                     </div>
                   </div>
-                  <div className="flex flex-wrap items-center gap-2 self-start">
+                  <div className="flex min-w-0 flex-wrap items-center gap-2 xl:justify-end">
                     <Badge variant={getMemberRoleBadgeVariant(member.role)} className="shrink-0">
                       {member.role === "owner" && "Владелец"}
                       {member.role === "moderator" && "Модератор"}

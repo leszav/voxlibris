@@ -1,5 +1,11 @@
+/// <reference types="node" />
+
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
 interface MockMetadata {
   title?: string;
   author?: string;
@@ -24,7 +30,7 @@ const extractLanguage = (metadata: MockMetadata | null | undefined) => {
 };
 
 const extractGenres = (metadata: MockMetadata | null | undefined) => {
-  if (!metadata || !metadata.genre) return [];
+  if (!metadata?.genre) return [];
   return metadata.genre.split(',').map((g: string) => g.trim());
 };
 
@@ -126,5 +132,96 @@ describe('Book Parser Tests', () => {
     assert.throws(() => {
       extractAuthor(undefined);
     }, Error, 'Should throw error for undefined metadata');
+  });
+
+  test('should extract FB2 cover from namespaced href attribute', async () => {
+    const fb2 = `<?xml version="1.0" encoding="utf-8"?>
+<FictionBook xmlns:l="http://www.w3.org/1999/xlink">
+  <description>
+    <title-info>
+      <book-title>Test FB2</book-title>
+      <author>
+        <first-name>Ivan</first-name>
+        <last-name>Petrov</last-name>
+      </author>
+      <coverpage>
+        <image l:href="#cover.jpg"/>
+      </coverpage>
+    </title-info>
+  </description>
+  <binary id="cover.jpg" content-type="image/jpeg">aGVsbG8=</binary>
+  <body>
+    <section>
+      <title><p>Chapter 1</p></title>
+      <p>Text</p>
+    </section>
+  </body>
+</FictionBook>`;
+
+    const script = `
+      import { FB2Parser } from './server/book-parser.ts';
+      const parser = new FB2Parser();
+      const parsed = await parser.parseBook(Buffer.from(${JSON.stringify(fb2)}, 'utf8'), 'test.fb2');
+      console.log(JSON.stringify({
+        hasCover: Boolean(parsed.metadata.coverImageData),
+        coverType: parsed.metadata.coverImageType,
+        coverText: parsed.metadata.coverImageData?.toString('utf8'),
+      }));
+    `;
+
+    const { stdout } = await execFileAsync('node', ['--import', 'tsx', '-e', script], {
+      cwd: process.cwd(),
+    });
+
+    const parsed = JSON.parse(stdout) as {
+      hasCover: boolean;
+      coverType?: string;
+      coverText?: string;
+    };
+
+    assert.ok(parsed.hasCover);
+    assert.strictEqual(parsed.coverType, 'image/jpeg');
+    assert.strictEqual(parsed.coverText, 'hello');
+  });
+
+  test('should inline FB2 body image from binary content', async () => {
+    const fb2 = `<?xml version="1.0" encoding="utf-8"?>
+<FictionBook xmlns:l="http://www.w3.org/1999/xlink">
+  <description>
+    <title-info>
+      <book-title>Test FB2</book-title>
+      <author>
+        <first-name>Ivan</first-name>
+        <last-name>Petrov</last-name>
+      </author>
+    </title-info>
+  </description>
+  <binary id="i_001.png" content-type="image/png">aGVsbG8=</binary>
+  <body>
+    <section>
+      <empty-line/>
+      <image l:href="#i_001.png"/>
+    </section>
+  </body>
+</FictionBook>`;
+
+    const script = `
+      import { FB2Parser } from './server/book-parser.ts';
+      const parser = new FB2Parser();
+      const parsed = await parser.parseBook(Buffer.from(${JSON.stringify(fb2)}, 'utf8'), 'test.fb2');
+      console.log(JSON.stringify({
+        chapterContent: parsed.chapters[0]?.content,
+      }));
+    `;
+
+    const { stdout } = await execFileAsync('node', ['--import', 'tsx', '-e', script], {
+      cwd: process.cwd(),
+    });
+
+    const parsed = JSON.parse(stdout) as {
+      chapterContent?: string;
+    };
+
+    assert.match(parsed.chapterContent || '', /<img[^>]+src="data:image\/png;base64,aGVsbG8="/);
   });
 });
