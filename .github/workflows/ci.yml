@@ -2,9 +2,12 @@ name: CI
 
 on:
   push:
-    branches: [main, master]
+    branches: [main, master, node24_test]
   pull_request:
     branches: [main, master]
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
 jobs:
   quality-gate:
