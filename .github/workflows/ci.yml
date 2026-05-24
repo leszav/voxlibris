@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, master, node24_test]
+    branches: [master, node24_test]
   pull_request:
     branches: [main, master]
 
