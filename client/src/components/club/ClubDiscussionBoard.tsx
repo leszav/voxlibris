@@ -8,7 +8,7 @@ import { HtmlContentRenderer } from "@/components/ui/html-content-renderer";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
-import { MessageCircle, Reply, Trash2, AlertTriangle, Send, Loader2 } from "lucide-react";
+import { MessageCircle, Reply, Trash2, AlertTriangle, Send, Loader2, ShieldAlert } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { ru } from "date-fns/locale";
 
@@ -54,6 +54,14 @@ function MessageContent({ content }: Readonly<{ content: string }>) {
   
   // Иначе рендерим как обычный текст
   return <p className="text-sm whitespace-pre-wrap">{content}</p>;
+}
+
+function WarningMessageContent({ content }: Readonly<{ content: string }>) {
+  if (content.includes('<') && content.includes('>')) {
+    return <HtmlContentRenderer content={content} className="text-base font-semibold leading-7 text-red-700 [&_*]:text-inherit" />;
+  }
+
+  return <p className="text-base font-semibold leading-7 text-red-700 whitespace-pre-wrap">{content}</p>;
 }
 
 
@@ -258,10 +266,23 @@ export function ClubDiscussionBoard({ clubId, isOwner }: Readonly<ClubDiscussion
           </div>
         ) : (
           sortedDiscussions.map((message) => (
-            <Card key={message.id} className={`p-4 ${message.isWarning ? 'border-red-500 bg-red-50' : ''}`}>
+            <Card
+              key={message.id}
+              className={`p-4 ${message.isWarning ? 'border-red-400 bg-red-100 shadow-sm ring-2 ring-red-300/80' : ''}`}
+            >
               <div className="flex items-start justify-between mb-2">
                 <div>
-                  <span className="font-semibold text-sm">{message.user.username}</span>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className={`font-semibold ${message.isWarning ? 'text-red-900' : 'text-sm'}`}>
+                      {message.user.username}
+                    </span>
+                    {message.isWarning && (
+                      <span className="inline-flex items-center gap-1 rounded-full border border-red-400 bg-red-50 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-red-800 shadow-sm">
+                        <ShieldAlert className="h-3.5 w-3.5" />
+                        Предупреждение владельца клуба
+                      </span>
+                    )}
+                  </div>
                   <span className="text-xs text-muted-foreground ml-2">
                     {formatDistanceToNow(new Date(message.createdAt), { addSuffix: true, locale: ru })}
                   </span>
@@ -288,7 +309,13 @@ export function ClubDiscussionBoard({ clubId, isOwner }: Readonly<ClubDiscussion
                 )}
               </div>
               
-              <MessageContent content={message.content} />
+              {message.isWarning ? (
+                <div className="rounded-md border border-red-200 border-l-4 border-l-red-600 bg-red-50 px-4 py-3">
+                  <WarningMessageContent content={message.content} />
+                </div>
+              ) : (
+                <MessageContent content={message.content} />
+              )}
 
               {message.quotedContent && (
                 <div className="mt-2 pl-3 border-l-2 border-muted text-xs text-muted-foreground italic">
@@ -312,10 +339,23 @@ export function ClubDiscussionBoard({ clubId, isOwner }: Readonly<ClubDiscussion
               {message.replies && message.replies.length > 0 && (
                 <div className="mt-4 ml-6 space-y-3 border-l-2 border-muted pl-4">
                   {message.replies.map((reply) => (
-                    <div key={reply.id} className={`${reply.isWarning ? 'bg-red-50 p-2 rounded border border-red-200' : ''}`}>
+                    <div
+                      key={reply.id}
+                      className={`${reply.isWarning ? 'rounded-md border border-red-400 bg-red-100 p-3 ring-2 ring-red-200/80' : ''}`}
+                    >
                       <div className="flex items-start justify-between mb-1">
                         <div>
-                          <span className="font-semibold text-xs">{reply.user.username}</span>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className={`font-semibold ${reply.isWarning ? 'text-sm text-red-900' : 'text-xs'}`}>
+                              {reply.user.username}
+                            </span>
+                            {reply.isWarning && (
+                              <span className="inline-flex items-center gap-1 rounded-full border border-red-400 bg-red-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-red-800 shadow-sm">
+                                <ShieldAlert className="h-3 w-3" />
+                                Предупреждение
+                              </span>
+                            )}
+                          </div>
                           <span className="text-xs text-muted-foreground ml-2">
                             {formatDistanceToNow(new Date(reply.createdAt), { addSuffix: true, locale: ru })}
                           </span>
@@ -336,7 +376,13 @@ export function ClubDiscussionBoard({ clubId, isOwner }: Readonly<ClubDiscussion
                           {" "}{String.fromCodePoint(62)}{" "}{reply.quotedContent}...
                         </div>
                       )}
-                      <MessageContent content={reply.content} />
+                      {reply.isWarning ? (
+                        <div className="rounded-md border border-red-200 border-l-4 border-l-red-600 bg-red-50 px-3 py-2">
+                          <WarningMessageContent content={reply.content} />
+                        </div>
+                      ) : (
+                        <MessageContent content={reply.content} />
+                      )}
                     </div>
                   ))}
                 </div>
