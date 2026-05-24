@@ -170,6 +170,7 @@ function validateStoragePath(path: string): { valid: boolean; normalizedPath?: s
   const allowedPatterns = [
     /^covers\/[a-zA-Z0-9-]+\.(jpg|jpeg|png|webp)$/,
     /^covers\/(club|personal)\/[a-fA-F0-9-]+\/[a-fA-F0-9-]+-cover\.(jpg|jpeg|png|webp)$/,
+    /^covers\/(club|personal)\/[a-fA-F0-9-]+\/manual\/[a-fA-F0-9-]+-[a-fA-F0-9-]+\.(jpg|jpeg|png|webp)$/,
     /^books\/[a-fA-F0-9-]+\/content\.(epub|fb2|html)$/,
     /^avatars\/[a-zA-Z0-9-]+\.(jpg|jpeg|png|webp)$/,
     /^avatars\/[a-fA-F0-9-]+\/[a-zA-Z0-9_-]+-[a-fA-F0-9-]+\.(jpg|jpeg|png|webp)$/,

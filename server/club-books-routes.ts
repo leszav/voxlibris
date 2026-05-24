@@ -565,7 +565,7 @@ router.delete('/clubs/:clubId/books/:bookId', jwtAuth, requireActiveUser, async 
 });
 
 // Update Club Book
-router.patch('/clubs/:clubId/books/:bookId', jwtAuth, requireActiveUser, async (req, res) => {
+router.patch('/clubs/:clubId/books/:bookId', jwtAuth, requireActiveUser, upload.single('cover'), async (req, res) => {
     try {
         if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
         const { clubId, bookId } = req.params;
@@ -582,11 +582,13 @@ router.patch('/clubs/:clubId/books/:bookId', jwtAuth, requireActiveUser, async (
         const canEdit = membership.role === 'owner' || membership.role === 'moderator' || book.uploadedByUserId === req.user?.id;
         if (!canEdit) return res.status(403).json({ error: 'You do not have permission to edit this book' });
 
-        const normalizedCoverUrl = await storeOptimizedImageIfNeeded(coverUrl, {
-            type: 'cover',
-            keyPrefix: `covers/club/${clubId}/manual`,
-            filenamePrefix: bookId,
-        });
+        const normalizedCoverUrl = req.file
+            ? await uploadOptimizedCover(req.file.buffer, clubId, `${bookId}-${crypto.randomUUID()}`)
+            : await storeOptimizedImageIfNeeded(coverUrl, {
+                type: 'cover',
+                keyPrefix: `covers/club/${clubId}/manual`,
+                filenamePrefix: bookId,
+            });
 
         const updatePayload = {
             title,
@@ -606,7 +608,10 @@ router.patch('/clubs/:clubId/books/:bookId', jwtAuth, requireActiveUser, async (
         const updatedBook = await storage.updateClubBook(bookId, updatePayload);
         if (!updatedBook) return res.status(404).json({ error: 'Book not found' });
 
-        const genreInput = [req.body.genre, ...(Array.isArray(req.body.genres) ? req.body.genres : [])]
+        const bodyGenres = typeof req.body.genres === 'string'
+            ? JSON.parse(req.body.genres) as unknown
+            : req.body.genres;
+        const genreInput = [req.body.genre, ...(Array.isArray(bodyGenres) ? bodyGenres : [])]
             .filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
 
         const persistedGenres = await genreService.persistBookGenres('club', bookId, genreInput, 'manual');
