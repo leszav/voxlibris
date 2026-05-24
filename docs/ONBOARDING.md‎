@@ -1,0 +1,228 @@
+# Onboarding Guide для разработчиков VoxLibris
+
+Добро пожаловать в команду VoxLibris! Этот документ поможет вам быстро освоиться в проекте и начать продуктивную работу.
+
+## 🚀 Быстрый старт
+
+### 1. Настройка окружения
+
+```bash
+# Клонируем репозиторий
+git clone <repository-url>
+cd voxlibris
+
+# Устанавливаем зависимости
+pnpm install
+
+# Копируем файл окружения
+cp .env.example .env
+
+# Запускаем базу данных
+docker-compose up -d postgres redis minio
+
+# Применяем миграции
+pnpm run db:migrate
+
+# Заполняем базу данных тестовыми данными
+pnpm run db:seed
+
+# Запускаем проект в режиме разработки
+pnpm dev
+```
+
+### 2. Проверка работоспособности
+
+- Frontend: http://localhost:5173
+- Backend API: http://localhost:5000
+- MinIO Console: http://localhost:9001 (admin/admin123)
+
+## 📁 Структура проекта
+
+```
+voxlibris/
+├── client/                 # React frontend
+│   ├── src/
+│   │   ├── components/     # Переиспользуемые компоненты
+│   │   ├── pages/         # Страницы приложения
+│   │   └── lib/           # Утилиты и API клиенты
+├── server/                # Node.js backend
+│   ├── routes/           # API эндпоинты
+│   ├── services/         # Бизнес-логика
+│   ├── repositories/     # Работа с БД
+│   └── middleware/       # Express middleware
+├── shared/               # Общие типы и утилиты
+├── docs/                 # Документация
+├── migrations/           # Миграции базы данных
+└── email-templates/      # Шаблоны писем
+```
+
+## 🔧 Технологический стек
+
+### Frontend
+- **React 18** с TypeScript
+- **Vite** для сборки
+- **Tailwind CSS** для стилей
+- **React Router** для навигации
+- **Zustand** для управления состоянием
+
+### Backend
+- **Node.js** с TypeScript
+- **Express.js** для API
+- **Drizzle ORM** для работы с PostgreSQL
+- **Socket.io** для real-time коммуникации
+- **JWT** для аутентификации
+
+### База данных и инфраструктура
+- **PostgreSQL** основная БД
+- **Redis** для кэширования и сессий
+- **MinIO** для файлового хранилища
+- **Docker** для контейнеризации
+
+## 📋 Основные команды
+
+```bash
+# Разработка
+pnpm dev              # Запуск в режиме разработки
+pnpm build            # Сборка проекта
+pnpm test             # Запуск тестов
+
+# База данных
+pnpm db:migrate       # Применить миграции
+pnpm db:generate      # Сгенерировать миграции
+pnpm db:seed          # Заполнить тестовыми данными
+
+# Линтинг и форматирование
+pnpm lint             # Проверить код
+pnpm lint:fix         # Исправить проблемы
+pnpm format           # Отформатировать код
+```
+
+## 🏗️ Архитектура
+
+### Клиентская часть
+- **components/** - Переиспользуемые UI компоненты
+- **pages/** - Страницы приложения
+- **hooks/** - Custom React хуки
+- **lib/** - Утилиты и API клиенты
+
+### Серверная часть
+- **routes/** - API эндпоинты, сгруппированные по функциональности
+- **services/** - Бизнес-логика
+- **repositories/** - Слой доступа к данным
+- **middleware/** - Express middleware
+- **websocket/** - Обработка WebSocket соединений
+
+### Основные фичи
+- **Аутентификация** через JWT
+- **Книжные клубы** с ролями и правами доступа
+- **Сессии чтения** с real-time взаимодействием
+- **Система уведомлений**
+- **Загрузка и обработка книг**
+- **Поиск и фильтрация**
+
+## 🧪 Тестирование
+
+```bash
+# Запуск всех тестов
+pnpm test
+
+# Запуск тестов с покрытием
+pnpm test:coverage
+
+# Запуск特定 тестов
+pnpm test server
+pnpm test client
+```
+
+## 📚 Документация
+
+- [Основная документация](docs/README.md)
+- [Архитектура системы](docs/02-architecture/)
+- [API документация](docs/05-server/)
+- [Руководство по клиентской части](docs/07-client/)
+- [Инструкции по развертыванию](docs/11-deployment/)
+
+## 🐛 Частые проблемы
+
+### 1. Проблемы с БД
+```bash
+# Проверить статус PostgreSQL
+docker-compose ps postgres
+
+# Посмотреть логи
+docker-compose logs postgres
+
+# Пересоздать БД
+docker-compose down postgres
+docker volume rm voxlibris_postgres_data
+docker-compose up -d postgres
+```
+
+### 2. Проблемы с зависимостями
+```bash
+# Очистить кэш
+pnpm store prune
+
+# Переустановить зависимости
+rm -rf node_modules pnpm-lock.yaml
+pnpm install
+```
+
+### 3. Проблемы с портами
+```bash
+# Убить процессы на портах
+./script/force-kill-ports.sh
+
+# Или вручную
+lsof -ti:5173 | xargs kill -9  # Frontend
+lsof -ti:5000 | xargs kill -9  # Backend
+```
+
+## 🤝 Как внести вклад
+
+1. **Создайте ветку**: `git checkout -b feature/your-feature-name`
+2. **Внесите изменения**: Следуйте конвенциям кода
+3. **Проверьте**: `pnpm lint && pnpm test`
+4. **Коммит**: `git commit -m "feat: add new feature"`
+5. **Push**: `git push origin feature/your-feature-name`
+6. **PR**: Создайте Pull Request
+
+## 📝 Конвенции
+
+### Коммиты
+- `feat:` новая функциональность
+- `fix:` исправление бага
+- `docs:` изменения в документации
+- `style:** форматирование кода
+- `refactor:` рефакторинг
+- `test:` тесты
+- `chore:` сопутствующие изменения
+
+### Код
+- Используйте TypeScript для типизации
+- Следуйте ESLint правилам
+- Пишите осмысленные имена переменных и функций
+- Добавляйте комментарии для сложной логики
+
+## 🔗 Полезные ссылки
+
+- [GitHub Repository](https://github.com/leszavr/voxlibris)
+- [Документация API](http://localhost:5000/api-docs)
+- [Основная документация](docs/README.md)
+- [Развертывание](docs/11-deployment/README.md)
+- [База данных](docs/06-database/README.md)
+- [Тестирование](docs/10-testing/README.md)
+- [Руководство администратора](docs/12-admin-manual/README.md)
+- [Issues и задачи](https://github.com/leszavr/voxlibris/issues)
+- [VoxLibris Platform](https://voxlibris.ru)
+
+## 👥 Контакты
+
+Если у вас возникли вопросы, обращайтесь к:
+- Тимлиду проекта
+- Команде разработки в Slack/Discord
+- Через GitHub Issues
+
+---
+
+Добро пожаловать в команду! 🎉
