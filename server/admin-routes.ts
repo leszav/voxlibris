@@ -3172,9 +3172,17 @@ router.get('/system/health', jwtAuth, requireAdmin, async (req, res) => {
     // Проверка file storage (MinIO/S3)
     let fileStorageStatus = false;
     try {
-      const { fileStorage } = await import('./file-storage');
-      // Проверяем, что fileStorage инициализирован
-      fileStorageStatus = !!fileStorage;
+      const hasS3Config = !!(
+        process.env.S3_ENDPOINT &&
+        process.env.S3_ACCESS_KEY &&
+        process.env.S3_SECRET_KEY &&
+        process.env.S3_BUCKET
+      );
+
+      if (hasS3Config) {
+        await fileStorage.initializeBucket();
+        fileStorageStatus = true;
+      }
     } catch (error) {
       console.error('[Health] File storage check failed:', error);
       fileStorageStatus = false;
@@ -3183,8 +3191,12 @@ router.get('/system/health', jwtAuth, requireAdmin, async (req, res) => {
     // Проверка auth service
     let authServiceStatus = false;
     try {
-      const { authService } = await import('./auth-service');
-      authServiceStatus = !!authService;
+      const hasJwtConfig = !!(process.env.JWT_SECRET && process.env.JWT_REFRESH_SECRET);
+
+      if (hasJwtConfig) {
+        authService.verifyAccessToken('__healthcheck__');
+        authServiceStatus = true;
+      }
     } catch (error) {
       console.error('[Health] Auth service check failed:', error);
       authServiceStatus = false;
