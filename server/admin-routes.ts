@@ -1,6 +1,7 @@
 import express from 'express';
 import { createReadStream } from 'node:fs';
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -3130,92 +3131,196 @@ router.post('/settings/smtp/test', jwtAuth, requireFullAdmin, async (req, res) =
 
 // ==== SYSTEM HEALTH ====
 
+type HealthStatus = 'healthy' | 'warning' | 'error';
+
+interface DatabaseHealthMetrics {
+  status: HealthStatus;
+  connections: number;
+  max_connections: number;
+  uptime: string;
+}
+
+interface ServerHealthMetrics {
+  status: 'healthy';
+  cpu_usage: number;
+  memory_usage: number;
+  disk_usage: number;
+  uptime: string;
+}
+
+function toDateOrNull(value: Date | string | undefined): Date | null {
+  if (value instanceof Date) {
+    return value;
+  }
+
+  if (!value) {
+    return null;
+  }
+
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function getServerHealthMetrics(): ServerHealthMetrics {
+  const totalMemoryBytes = os.totalmem();
+  const freeMemoryBytes = os.freemem();
+  const usedMemoryBytes = totalMemoryBytes - freeMemoryBytes;
+  const memoryPercentage = totalMemoryBytes > 0
+    ? Math.round((usedMemoryBytes / totalMemoryBytes) * 100)
+    : 0;
+
+  const cpuCount = Math.max(os.cpus().length, 1);
+  const loadAverage1m = os.loadavg()[0] ?? 0;
+  const cpuUsage = Math.max(0, Math.min(100, Math.round((loadAverage1m / cpuCount) * 100)));
+
+  return {
+    status: 'healthy',
+    cpu_usage: cpuUsage,
+    memory_usage: memoryPercentage,
+    disk_usage: 0,
+    uptime: formatUptime(process.uptime()),
+  };
+}
+
+async function getDiskUsagePercentage(): Promise<number> {
+  const diskStats = await fs.statfs(process.cwd());
+  const totalDiskBlocks = Number(diskStats.blocks);
+  const availableDiskBlocks = Number(diskStats.bavail);
+  const usedDiskBlocks = Math.max(0, totalDiskBlocks - availableDiskBlocks);
+
+  if (totalDiskBlocks <= 0) {
+    return 0;
+  }
+
+  return Math.round((usedDiskBlocks / totalDiskBlocks) * 100);
+}
+
+async function getDatabaseHealthMetrics(): Promise<DatabaseHealthMetrics> {
+  const { sql } = await import('drizzle-orm');
+  const connectionStatsResult = await db.execute(sql`
+    SELECT
+      COUNT(*)::int AS current_connections,
+      current_setting('max_connections')::int AS max_connections,
+      pg_postmaster_start_time() AS started_at
+    FROM pg_stat_activity
+  `);
+
+  const connectionStatsRow = (connectionStatsResult as Array<{
+    current_connections?: number | string;
+    max_connections?: number | string;
+    started_at?: Date | string;
+  }>)[0];
+
+  const connections = Number(connectionStatsRow?.current_connections ?? 0);
+  const maxConnections = Number(connectionStatsRow?.max_connections ?? 0);
+  const startedAt = toDateOrNull(connectionStatsRow?.started_at);
+
+  let status: HealthStatus = 'healthy';
+  if (maxConnections > 0) {
+    const connectionRatio = connections / maxConnections;
+    if (connectionRatio >= 0.9) {
+      status = 'error';
+    } else if (connectionRatio >= 0.75) {
+      status = 'warning';
+    }
+  }
+
+  let uptime = '0м';
+  if (startedAt) {
+    const uptimeSeconds = Math.max(0, Math.floor((Date.now() - startedAt.getTime()) / 1000));
+    uptime = formatUptime(uptimeSeconds);
+  }
+
+  return {
+    status,
+    connections,
+    max_connections: maxConnections,
+    uptime,
+  };
+}
+
+async function getEmailServiceHealthStatus(): Promise<boolean> {
+  const smtpSettings = await storage.getSetting('smtp.enabled');
+  let emailServiceStatus = smtpSettings?.value === 'true';
+
+  if (emailServiceStatus) {
+    const host = await storage.getSetting('smtp.host');
+    const user = await storage.getSetting('smtp.user');
+    emailServiceStatus = !!(host && user);
+  }
+
+  return emailServiceStatus;
+}
+
+async function getFileStorageHealthStatus(): Promise<boolean> {
+  const hasS3Config = !!(
+    process.env.S3_ENDPOINT &&
+    process.env.S3_ACCESS_KEY &&
+    process.env.S3_SECRET_KEY &&
+    process.env.S3_BUCKET
+  );
+
+  if (!hasS3Config) {
+    return false;
+  }
+
+  await fileStorage.initializeBucket();
+  return true;
+}
+
+function getAuthServiceHealthStatus(): boolean {
+  const hasJwtConfig = !!(process.env.JWT_SECRET && process.env.JWT_REFRESH_SECRET);
+
+  if (!hasJwtConfig) {
+    return false;
+  }
+
+  authService.verifyAccessToken('__healthcheck__');
+  return true;
+}
+
 // Получить состояние системы
 router.get('/system/health', jwtAuth, requireAdmin, async (req, res) => {
   try {
-    const memoryUsage = process.memoryUsage();
-    const totalMemoryMB = memoryUsage.heapTotal / 1024 / 1024;
-    const usedMemoryMB = memoryUsage.heapUsed / 1024 / 1024;
-    const memoryPercentage = Math.round((usedMemoryMB / totalMemoryMB) * 100);
+    const serverMetrics = getServerHealthMetrics();
+    serverMetrics.disk_usage = await getDiskUsagePercentage();
 
-    // Проверка базы данных
-    let dbStatus: 'healthy' | 'warning' | 'error' = 'healthy';
-    let dbConnections = 0;
-    const dbMaxConnections = 100;
+    let databaseMetrics: DatabaseHealthMetrics = {
+      status: 'error',
+      connections: 0,
+      max_connections: 0,
+      uptime: '0м',
+    };
     try {
-      // Выполняем простой запрос к БД для проверки соединения
-      const { sql } = await import('drizzle-orm');
-      await db.execute(sql`SELECT COUNT(*) as count FROM users`);
-      dbConnections = 1;
+      databaseMetrics = await getDatabaseHealthMetrics();
     } catch (error) {
       console.error('[Health] Database check failed:', error);
-      dbStatus = 'error';
     }
 
-    // Проверка email сервиса
     let emailServiceStatus = false;
     try {
-      const smtpSettings = await storage.getSetting('smtp.enabled');
-      emailServiceStatus = smtpSettings?.value === 'true';
-      
-      // Дополнительная проверка: есть ли все необходимые настройки
-      if (emailServiceStatus) {
-        const host = await storage.getSetting('smtp.host');
-        const user = await storage.getSetting('smtp.user');
-        emailServiceStatus = !!(host && user);
-      }
+      emailServiceStatus = await getEmailServiceHealthStatus();
     } catch (error) {
       console.error('[Health] Email service check failed:', error);
-      emailServiceStatus = false;
     }
 
-    // Проверка file storage (MinIO/S3)
     let fileStorageStatus = false;
     try {
-      const hasS3Config = !!(
-        process.env.S3_ENDPOINT &&
-        process.env.S3_ACCESS_KEY &&
-        process.env.S3_SECRET_KEY &&
-        process.env.S3_BUCKET
-      );
-
-      if (hasS3Config) {
-        await fileStorage.initializeBucket();
-        fileStorageStatus = true;
-      }
+      fileStorageStatus = await getFileStorageHealthStatus();
     } catch (error) {
       console.error('[Health] File storage check failed:', error);
-      fileStorageStatus = false;
     }
 
-    // Проверка auth service
     let authServiceStatus = false;
     try {
-      const hasJwtConfig = !!(process.env.JWT_SECRET && process.env.JWT_REFRESH_SECRET);
-
-      if (hasJwtConfig) {
-        authService.verifyAccessToken('__healthcheck__');
-        authServiceStatus = true;
-      }
+      authServiceStatus = getAuthServiceHealthStatus();
     } catch (error) {
       console.error('[Health] Auth service check failed:', error);
-      authServiceStatus = false;
     }
 
     const health = {
-      database: {
-        status: dbStatus,
-        connections: dbConnections,
-        max_connections: dbMaxConnections,
-        uptime: formatUptime(process.uptime()),
-      },
-      server: {
-        status: 'healthy' as const,
-        cpu_usage: Math.round(process.cpuUsage().user / 1000000), // Реальное использование CPU в %
-        memory_usage: memoryPercentage,
-        disk_usage: 0, // Disk usage требует системных вызовов, пока оставляем 0
-        uptime: formatUptime(process.uptime()),
-      },
+      database: databaseMetrics,
+      server: serverMetrics,
       services: {
         auth_service: authServiceStatus,
         file_storage: fileStorageStatus,
