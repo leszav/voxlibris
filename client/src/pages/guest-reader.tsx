@@ -136,16 +136,6 @@ export default function GuestReader() {
     };
   }, []);
 
-  useEffect(() => {
-    const body = document.body;
-    body.classList.remove("reader-light", "reader-dark");
-    body.classList.add(`reader-${readerSettings.theme}`);
-
-    return () => {
-      body.classList.remove("reader-light", "reader-dark");
-    };
-  }, [readerSettings.theme]);
-
   const updateFontSize = useCallback((delta: number) => {
     preserveReaderVisualAnchor(() => {
       setReaderSettings((prev) => ({
@@ -432,6 +422,7 @@ export default function GuestReader() {
         ref={contentRef}
         className="h-[calc(100vh-120px)] overflow-y-auto"
         onScroll={handleScroll}
+        data-reader-surface-theme={readerSettings.theme}
         style={{
           backgroundColor: "var(--reader-bg)",
           color: "var(--reader-text)",

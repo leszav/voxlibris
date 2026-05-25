@@ -1,8 +1,8 @@
 /* Reader Theme Styles */
 
 /* Light Theme */
-body.reader-light,
-body.club-reader-light {
+[data-reader-surface-theme="light"],
+[data-club-reader-surface-theme="light"] {
   --reader-bg: #ffffff;
   --reader-text: #1a1a1a;
   --reader-text-secondary: #666666;
@@ -10,8 +10,8 @@ body.club-reader-light {
 }
 
 /* Dark Theme */
-body.reader-dark,
-body.club-reader-dark {
+[data-reader-surface-theme="dark"],
+[data-club-reader-surface-theme="dark"] {
   --reader-bg: #1a1a1a;
   --reader-text: #e5e5e5;
   --reader-text-secondary: #999999;
@@ -19,8 +19,8 @@ body.club-reader-dark {
 }
 
 /* Sepia Theme */
-body.reader-sepia,
-body.club-reader-sepia {
+[data-reader-surface-theme="sepia"],
+[data-club-reader-surface-theme="sepia"] {
   --reader-bg: #f4ecd8;
   --reader-text: #5c4a3a;
   --reader-text-secondary: #8b7355;
@@ -156,11 +156,11 @@ body.club-reader-sepia {
   text-decoration: underline;
 }
 
-body.reader-dark .reader-content a {
+[data-reader-surface-theme="dark"] .reader-content a {
   color: #4da6ff;
 }
 
-body.reader-sepia .reader-content a {
+[data-reader-surface-theme="sepia"] .reader-content a {
   color: #8b5a2b;
 }
 
@@ -176,7 +176,7 @@ body.reader-sepia .reader-content a {
   background: rgba(255, 213, 79, 0.5);
 }
 
-body.reader-dark .reader-content ::selection {
+[data-reader-surface-theme="dark"] .reader-content ::selection {
   background: rgba(255, 213, 79, 0.3);
 }
 

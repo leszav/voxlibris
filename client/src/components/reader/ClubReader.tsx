@@ -960,6 +960,7 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
               <div 
                 ref={contentAreaRef}
                 className="club-reader-content p-4 sm:p-6 md:p-8"
+                data-club-reader-surface-theme={settings.theme}
                 style={{
                   fontFamily: 'var(--club-reader-font-family, inherit)',
                   fontSize: 'var(--club-reader-font-size, 18px)',

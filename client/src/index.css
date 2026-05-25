@@ -205,11 +205,9 @@
   @apply bg-muted-foreground/30 rounded-full hover:bg-muted-foreground/50 transition-colors;
 }
 
-/* Reader Theme Styles */
-body.reader-light,
-body.club-reader-light,
-[data-reader-theme="light"],
-[data-club-reader-theme="light"] {
+/* Reader Theme Styles (scoped only to reader surfaces) */
+[data-reader-surface-theme="light"],
+[data-club-reader-surface-theme="light"] {
   --background: 0 0% 100%;
   --foreground: 0 0% 3.9%;
   --card: 0 0% 100%;
@@ -227,10 +225,8 @@ body.club-reader-light,
   --border: 0 0% 89.8%;
 }
 
-body.reader-dark,
-body.club-reader-dark,
-[data-reader-theme="dark"],
-[data-club-reader-theme="dark"] {
+[data-reader-surface-theme="dark"],
+[data-club-reader-surface-theme="dark"] {
   --background: 0 0% 7%;
   --foreground: 0 0% 98%;
   --card: 0 0% 10%;
@@ -248,10 +244,8 @@ body.club-reader-dark,
   --border: 0 0% 20%;
 }
 
-body.reader-sepia,
-body.club-reader-sepia,
-[data-reader-theme="sepia"],
-[data-club-reader-theme="sepia"] {
+[data-reader-surface-theme="sepia"],
+[data-club-reader-surface-theme="sepia"] {
   --background: 35 45% 92%;
   --foreground: 35 25% 15%;
   --card: 35 45% 88%;

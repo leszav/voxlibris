@@ -814,6 +814,7 @@ function ReaderWorkspaceView({
         ref={scrollContainerRef}
         onScroll={scheduleProgressSave}
         className="flex-1 overflow-y-auto bg-background text-foreground"
+        data-reader-surface-theme={settings.theme}
       >
         <div
           ref={contentAreaRef}

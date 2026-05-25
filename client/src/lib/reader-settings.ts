@@ -154,9 +154,6 @@ export function applyReaderSettings(settings: ReaderSettings, scope: ReaderSetti
     root.style.setProperty("--club-reader-line-height", effectiveSettings.lineHeight.toString());
     root.style.setProperty("--club-reader-text-align", effectiveSettings.textAlign);
     root.style.setProperty("--club-reader-content-width", `${effectiveSettings.contentWidth}%`);
-    root.dataset.clubReaderTheme = effectiveSettings.theme;
-    document.body.classList.remove("club-reader-light", "club-reader-dark", "club-reader-sepia");
-    document.body.classList.add(`club-reader-${effectiveSettings.theme}`);
     return;
   }
 
@@ -165,30 +162,23 @@ export function applyReaderSettings(settings: ReaderSettings, scope: ReaderSetti
   root.style.setProperty("--reader-line-height", effectiveSettings.lineHeight.toString());
   root.style.setProperty("--reader-text-align", effectiveSettings.textAlign);
   root.style.setProperty("--reader-content-width", `${effectiveSettings.contentWidth}%`);
-  root.dataset.readerTheme = effectiveSettings.theme;
-  document.body.classList.remove("reader-light", "reader-dark", "reader-sepia");
-  document.body.classList.add(`reader-${effectiveSettings.theme}`);
 }
 
 export function cleanupReaderSettings(scope: ReaderSettingsScope): void {
   const root = document.documentElement;
 
   if (scope === "club") {
-    document.body.classList.remove("club-reader-light", "club-reader-dark", "club-reader-sepia");
     root.style.removeProperty("--club-reader-font-size");
     root.style.removeProperty("--club-reader-font-family");
     root.style.removeProperty("--club-reader-line-height");
     root.style.removeProperty("--club-reader-text-align");
     root.style.removeProperty("--club-reader-content-width");
-    delete root.dataset.clubReaderTheme;
     return;
   }
 
-  document.body.classList.remove("reader-light", "reader-dark", "reader-sepia");
   root.style.removeProperty("--reader-font-size");
   root.style.removeProperty("--reader-font-family");
   root.style.removeProperty("--reader-line-height");
   root.style.removeProperty("--reader-text-align");
   root.style.removeProperty("--reader-content-width");
-  delete root.dataset.readerTheme;
 }
