@@ -81,6 +81,8 @@
 
   --accent: 35 80% 55%; /* Golden Amber */
   --accent-foreground: 25 30% 20%;
+  --selection-background: 35 80% 55%;
+  --selection-foreground: 25 30% 15%;
 
   --destructive: 0 70% 50%;
   --destructive-foreground: 0 0% 100%;
@@ -123,6 +125,8 @@
 
   --accent: 35 80% 55%;
   --accent-foreground: 25 30% 20%;
+  --selection-background: 35 80% 55%;
+  --selection-foreground: 25 30% 15%;
 
   --destructive: 0 70% 50%;
   --destructive-foreground: 0 0% 100%;
@@ -157,13 +161,13 @@
   }
 
   ::selection {
-    background: hsl(var(--accent) / 0.35);
-    color: hsl(var(--foreground));
+    background: hsl(var(--selection-background) / 0.5);
+    color: hsl(var(--selection-foreground));
   }
 
   ::-moz-selection {
-    background: hsl(var(--accent) / 0.35);
-    color: hsl(var(--foreground));
+    background: hsl(var(--selection-background) / 0.5);
+    color: hsl(var(--selection-foreground));
   }
   #root {
     min-height: 100dvh;
