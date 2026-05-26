@@ -234,7 +234,10 @@ export function setupAuthRoutes(app: Express): void {
 
       res.status(201).json({
         message: "Пользователь успешно зарегистрирован",
-        user: serializeAuthUser(authResult.user),
+        user: serializeAuthUser({
+          ...authResult.user,
+          displayName: displayName,
+        }),
         sessionType: authResult.sessionType
       });
     } catch (error) {
@@ -297,9 +300,14 @@ export function setupAuthRoutes(app: Express): void {
         path: '/',
       });
 
+      const profile = await storage.getUserProfile(authResult.user.id).catch(() => undefined);
+
       res.json({
         message: "Успешный вход в систему",
-        user: serializeAuthUser(authResult.user),
+        user: serializeAuthUser({
+          ...authResult.user,
+          displayName: profile?.displayName ?? null,
+        }),
         sessionType: authResult.sessionType
       });
     } catch (error) {
@@ -490,6 +498,7 @@ export function setupAuthRoutes(app: Express): void {
       res.json({
         user: serializeAuthUser({
           ...user,
+          displayName: profile?.displayName ?? null,
           avatar: profile?.avatar ?? null,
         })
       });

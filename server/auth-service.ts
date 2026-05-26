@@ -544,14 +544,16 @@ export class AuthService {
    * Отправляет email подтверждения
    */
   private async sendConfirmationEmail(
-    user: Pick<User, "email" | "username">,
+    user: Pick<User, "id" | "email" | "username">,
     confirmationToken: string,
     baseUrl?: string
   ): Promise<void> {
     try {
+      const profile = await storage.getUserProfile(user.id).catch(() => undefined);
       await emailService.sendRegistrationConfirmation({
         email: user.email,
         username: user.username,
+        displayName: profile?.displayName ?? undefined,
         confirmationToken,
         baseUrl,
       });
@@ -824,9 +826,11 @@ async requestEmailChange(
     }
 
     const confirmationToken = randomBytes(32).toString('hex');
+    const profile = await storage.getUserProfile(user.id).catch(() => undefined);
     const emailSent = await emailService.sendRegistrationConfirmation({
       email: normalizedEmail,
       username: user.username,
+      displayName: profile?.displayName ?? undefined,
       confirmationToken,
       baseUrl,
     });

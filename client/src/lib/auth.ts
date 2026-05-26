@@ -5,6 +5,7 @@ export interface AuthUserClient extends Pick<
   'id' | 'username' | 'email' | 'role' | 'status' | 'emailConfirmed' | 'createdAt' | 'lastActivityAt'
 > {
   avatar: string | null;
+  displayName?: string | null;
 }
 import { getAccessToken, isTokenExpired, syncTokenFromCookie } from './token-store';
 import { apiRequest } from './queryClient';

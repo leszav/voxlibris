@@ -304,7 +304,9 @@ export function MainLayout({ children }: { readonly children: React.ReactNode })
       socket.disconnect();
     }
   }, [user, socket]);
-  const authUsername = typeof user?.username === "string" ? user.username : "";
+  const authUsername = typeof user?.displayName === "string" && user.displayName
+    ? user.displayName
+    : (typeof user?.username === "string" ? user.username : "");
   const authAvatar = typeof user?.avatar === "string" ? user.avatar : null;
 
   const profileHref = isAuthenticated ? "/profile" : "/auth/login";

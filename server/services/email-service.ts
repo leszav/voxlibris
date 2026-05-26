@@ -261,6 +261,7 @@ class EmailService {
   async sendRegistrationConfirmation(params: {
     email: string;
     username: string;
+    displayName?: string;
     confirmationToken: string;
     baseUrl?: string;
   }): Promise<boolean> {
@@ -271,7 +272,7 @@ class EmailService {
       const confirmUrl = `${baseUrl}/confirm-email/${params.confirmationToken}`;
 
       const html = this.replaceVariables(template, {
-        username: params.username,
+        username: params.displayName || params.username,
         confirmUrl,
       });
 
@@ -293,6 +294,7 @@ class EmailService {
   async sendPasswordReset(params: {
     email: string;
     username: string;
+    displayName?: string;
     resetToken: string;
     expiresInMinutes: number;
     baseUrl?: string;
@@ -304,7 +306,7 @@ class EmailService {
       const resetUrl = `${baseUrl}/auth/reset-password/${params.resetToken}`;
 
       const html = this.replaceVariables(template, {
-        username: params.username,
+        username: params.displayName || params.username,
         resetUrl,
         expiresIn: String(params.expiresInMinutes),
       });
@@ -432,6 +434,7 @@ class EmailService {
   async sendClubRejectionNotification(params: {
     email: string;
     username: string;
+    displayName?: string;
     clubTitle: string;
     reason: string;
     baseUrl?: string;
@@ -443,7 +446,7 @@ class EmailService {
       const catalogUrl = `${baseUrl}/catalog`;
 
       const html = this.replaceVariables(template, {
-        username: params.username,
+        username: params.displayName || params.username,
         clubTitle: params.clubTitle,
         reason: params.reason,
         catalogUrl,
@@ -467,6 +470,7 @@ class EmailService {
   async sendBookBlockedNotification(params: {
     email: string;
     username: string;
+    displayName?: string;
     bookTitle: string;
     reason: string;
     source: 'personal_books' | 'club_books';
@@ -494,7 +498,7 @@ class EmailService {
       }
 
       const html = this.replaceVariables(template, {
-        username: escapeHtml(params.username),
+        username: escapeHtml(params.displayName || params.username),
         bookTitle: escapeHtml(params.bookTitle),
         sourceLabel,
         reason: escapedReason,

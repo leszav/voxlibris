@@ -7,6 +7,7 @@ type AuthUserBaseInput = Pick<
 
 type AuthUserInput = AuthUserBaseInput & {
   avatar?: string | null;
+  displayName?: string | null;
 };
 
 export interface ClientClubOwner {
@@ -50,6 +51,7 @@ export interface ClientPublicCatalogClub {
 export type ClientAuthUser = {
   id: string;
   username: string;
+  displayName: string | null;
   email: string;
   avatar: string | null;
   role: User["role"];
@@ -71,6 +73,7 @@ export function serializeAuthUser(user: AuthUserInput): ClientAuthUser {
   return {
     id: user.id,
     username: user.username,
+    displayName: user.displayName ?? null,
     email: user.email,
     avatar: user.avatar ?? null,
     role: user.role,
