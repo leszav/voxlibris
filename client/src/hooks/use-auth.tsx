@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState, useMemo, useRef, ReactNode } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useState, useMemo, useRef, ReactNode } from 'react';
 import { authAPI, type AuthUserClient } from '@/lib/auth';
 import { syncTokenFromCookie } from '@/lib/token-store';
 
@@ -35,7 +35,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     // httpOnly cookies обеспечивают безопасность, localStorage создает XSS уязвимости
   };
 
-  const fetchCurrentUser = async () => {
+  const fetchCurrentUser = useCallback(async () => {
     // Debounce: предотвращаем одновременные вызовы
     if (isFetchingRef.current) {
       return;
@@ -66,7 +66,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
       // Очищаем состояние при ошибках авторизации
       if (errorMessage.includes('401') || errorMessage.includes('403') || 
           errorMessage.includes('Требуется авторизация') || 
-          errorMessage.includes('Недействительный токен')) {
+          errorMessage.includes('Недействительный токен') ||
+          errorMessage.includes('Необходимо подтвердить email') ||
+          errorMessage.includes('Подтвердите email')) {
         authAPI.clearTokens();
         setUser(null);
         cacheUser();
@@ -75,9 +77,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
     } finally {
       isFetchingRef.current = false;
     }
-  };
+  }, []);
 
-  const login = async (username: string, password: string, rememberMe: boolean = false) => {
+  const login = useCallback(async (username: string, password: string, rememberMe: boolean = false) => {
     try {
       const response = await authAPI.login({ username, password, rememberMe });
       setUser(response.user);
@@ -90,9 +92,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
       cacheUser();
       throw error;
     }
-  };
+  }, []);
 
-  const register = async (username: string, email: string, password: string, rememberMe: boolean = false, inviteToken?: string) => {
+  const register = useCallback(async (username: string, email: string, password: string, rememberMe: boolean = false, inviteToken?: string) => {
     try {
       const payload: { username: string; email: string; password: string; rememberMe: boolean; invite?: string } = {
         username,
@@ -105,6 +107,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
       setUser(response.user);
       cacheUser();
       hasExplicitLogoutRef.current = false;
+
+      if (response.user.status === 'pending' || !response.user.emailConfirmed) {
+        globalThis.dispatchEvent(new CustomEvent('email-verification-required'));
+      }
     } catch (error) {
       // Очищаем состояние при неудачной регистрации
       authAPI.clearTokens();
@@ -112,9 +118,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
       cacheUser();
       throw error;
     }
-  };
+  }, []);
 
-  const logout = async () => {
+  const logout = useCallback(async () => {
     // Оптимистичный logout: очищаем клиентское состояние сразу,
     // а серверный revoke запускаем в фоне.
     hasExplicitLogoutRef.current = true;
@@ -127,16 +133,16 @@ export function AuthProvider({ children }: AuthProviderProps) {
         console.error('Logout request failed:', error);
       }
     });
-  };
+  }, []);
 
-  const refetchUser = async () => {
+  const refetchUser = useCallback(async () => {
     setIsLoading(true);
     await fetchCurrentUser();
     setIsLoading(false);
-  };
+  }, [fetchCurrentUser]);
 
   // Принудительная синхронизация состояния с сервером
-  const syncAuthState = async () => {
+  const syncAuthState = useCallback(async () => {
     setIsLoading(true);
     try {
       if (hasExplicitLogoutRef.current) {
@@ -160,7 +166,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [fetchCurrentUser]);
 
   useEffect(() => {
     let isMounted = true;
@@ -276,7 +282,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     logout,
     refetchUser,
     syncAuthState,
-  }), [user, isAuthenticated, isLoading]);
+  }), [user, isAuthenticated, isLoading, login, logout, register, refetchUser, syncAuthState]);
 
   return (
     <AuthContext.Provider value={contextValue}>

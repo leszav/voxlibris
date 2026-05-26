@@ -47,6 +47,8 @@ Thumbs.db
 .factorypath
 *.launch
 .history/
+.harvimodes
+.harvi/
 
 # SDD Agent folders (may contain credentials)
 .claude/

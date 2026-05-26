@@ -90,8 +90,12 @@ async function handle403Error(res: Response, text: string): Promise<never> {
     const errorData = JSON.parse(text);
     
     if (errorData.code === 'ACCOUNT_NOT_ACTIVATED') {
+      if (errorData.userStatus === 'pending') {
+        globalThis.dispatchEvent(new CustomEvent('email-verification-required'));
+        throw new Error(errorData.message || 'Подтвердите email, чтобы активировать аккаунт.');
+      }
+
       const statusMessages: Record<string, string> = {
-        pending: 'Ваш аккаунт ожидает активации администратором.',
         suspended: 'Ваш аккаунт заблокирован.',
       };
       const statusMessage = statusMessages[errorData.userStatus] || 'Ваш аккаунт неактивен.';

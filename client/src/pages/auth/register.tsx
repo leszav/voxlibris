@@ -74,7 +74,7 @@ export default function Register() {
     setIsLoading(true);
     try {
       await register(username.trim(), email.trim().toLowerCase(), password, rememberMe, inviteToken);
-      setLocation('/onboarding/genres');
+      setLocation('/');
     } catch (error) {
       setErrorMessage(parseRegisterError(error));
       setShowErrorModal(true);

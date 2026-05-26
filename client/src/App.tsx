@@ -1,6 +1,6 @@
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Route, Switch, Redirect } from "wouter";
-import { Suspense, lazy, useEffect, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useState } from "react";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -163,15 +163,31 @@ function Router() {
 function App() {
   const [showEmailVerificationModal, setShowEmailVerificationModal] = useState(false);
 
+  const handleCloseEmailVerificationModal = useCallback(() => {
+    setShowEmailVerificationModal(false);
+  }, []);
+
   useEffect(() => {
     const handleEmailVerificationRequired = () => {
+      // Не показываем модал поверх страницы подтверждения email.
+      // Иначе пользователь видит «карусель»: модал + success/error экран.
+      const path = globalThis.location?.pathname ?? '';
+      if (path.startsWith('/confirm-email/')) {
+        return;
+      }
       setShowEmailVerificationModal(true);
     };
 
+    const handleEmailVerificationCompleted = () => {
+      setShowEmailVerificationModal(false);
+    };
+
     globalThis.addEventListener('email-verification-required', handleEmailVerificationRequired);
+    globalThis.addEventListener('email-verification-completed', handleEmailVerificationCompleted);
     
     return () => {
       globalThis.removeEventListener('email-verification-required', handleEmailVerificationRequired);
+      globalThis.removeEventListener('email-verification-completed', handleEmailVerificationCompleted);
     };
   }, []);
 
@@ -186,10 +202,7 @@ function App() {
             <Suspense fallback={<RouteFallback />}>
               <Router />
             </Suspense>
-            <EmailVerificationModal 
-              isOpen={showEmailVerificationModal}
-              onClose={() => setShowEmailVerificationModal(false)}
-            />
+            <EmailVerificationModal isOpen={showEmailVerificationModal} onClose={handleCloseEmailVerificationModal} />
             <UsernameFixBanner />
           </TooltipProvider>
         </ErrorBoundary>

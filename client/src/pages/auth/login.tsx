@@ -7,7 +7,6 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { useAuth } from '@/hooks/use-auth';
 import { useToast } from '@/hooks/use-toast';
 import { Mic, Eye, EyeOff } from 'lucide-react';
-import { getAccessToken } from '@/lib/token-store';
 
 export default function Login() {
   const [username, setUsername] = useState('');
@@ -28,26 +27,7 @@ export default function Login() {
     setIsLoading(true);
     try {
       await login(username, password, rememberMe);
-      
-      // Проверяем статус пользователя после логина
-      const userDataString = getAccessToken();
-      if (userDataString) {
-        try {
-          const userData = await fetch('/api/auth/me', {
-            headers: {
-              'Authorization': `Bearer ${userDataString}`,
-            },
-          }).then(r => r.json());
-          
-          if (userData.user?.status === 'pending') {
-            setLocation('/');
-            return;
-          }
-        } catch (e) {
-          console.error('Failed to fetch user data:', e);
-        }
-      }
-      
+
       toast({
         title: "Добро пожаловать!",
         description: rememberMe 

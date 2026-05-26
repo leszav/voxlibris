@@ -1,8 +1,9 @@
 import { AlertCircle, CheckCircle, Loader2, Mail, Mic, XCircle } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useRoute } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { useAuth } from "@/hooks/use-auth";
 
 interface ConfirmEmailResponse {
   success: boolean;
@@ -13,12 +14,19 @@ interface ConfirmEmailResponse {
 export default function ConfirmEmail() {
   const [, params] = useRoute("/confirm-email/:token");
   const token = params?.token || "";
+  const { refetchUser } = useAuth();
+
+  const hasConfirmedRef = useRef(false);
 
   const [status, setStatus] = useState<"loading" | "success" | "error" | "idle">("loading");
   const [message, setMessage] = useState("");
 
   useEffect(() => {
     const confirmEmail = async () => {
+      if (hasConfirmedRef.current) {
+        return;
+      }
+
       if (!token) {
         setStatus("error");
         setMessage("Токен подтверждения отсутствует");
@@ -37,8 +45,22 @@ export default function ConfirmEmail() {
         const data: ConfirmEmailResponse = await response.json();
 
         if (response.ok && data.success) {
+          hasConfirmedRef.current = true;
           setStatus("success");
           setMessage(data.message || "Email успешно подтверждён");
+
+          // Закрываем модал подтверждения, если он открыт.
+          // Такое может случиться, если до перехода по ссылке приложение
+          // уже показало предупреждение о необходимости подтверждения.
+          globalThis.dispatchEvent(new CustomEvent('email-verification-completed'));
+
+          // Обновляем состояние пользователя в приложении, чтобы исчезли pending-баннеры
+          // и не повторялись защитные редиректы.
+          try {
+            await refetchUser();
+          } catch {
+            // Игнорируем: редирект на логин все равно произойдет.
+          }
         } else {
           setStatus("error");
           setMessage(data.message || "Не удалось подтвердить email");
@@ -50,7 +72,7 @@ export default function ConfirmEmail() {
     };
 
     confirmEmail();
-  }, [token]);
+  }, [refetchUser, token]);
 
   if (status === "loading") {
     return (
