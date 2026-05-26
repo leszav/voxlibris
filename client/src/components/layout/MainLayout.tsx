@@ -73,7 +73,7 @@ interface UserActionsProps {
   setLocation: (path: string) => void;
   authAvatar: string | null;
   authUsername: string;
-  user: { username?: string; role?: string } | null;
+  user: { username?: string; displayName?: string | null; avatar?: string | null; role?: string } | null;
   impersonating: boolean;
   impersonatedUser: string | null;
   handleExitImpersonation: () => void;
@@ -158,7 +158,7 @@ function UserActions({
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
           <DropdownMenuItem className="font-medium">
-            {user?.username}
+            {user?.displayName || user?.username}
             {impersonating && (
               <span className="ml-2 text-orange-600 text-sm">
                 (как {impersonatedUser})

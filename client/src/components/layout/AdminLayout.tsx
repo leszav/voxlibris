@@ -112,7 +112,7 @@ function AdminSidebar({ mobile = false }: AdminSidebarProps) {
             </AvatarFallback>
           </Avatar>
           <div className="flex-1 min-w-0">
-            <p className="font-medium text-sm truncate">{user?.username}</p>
+            <p className="font-medium text-sm truncate">{user?.displayName || user?.username}</p>
             <Badge variant="outline" className="text-xs">
               {user?.role === 'admin' ? 'Администратор' : 'Модератор'}
             </Badge>

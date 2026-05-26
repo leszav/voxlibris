@@ -21,6 +21,7 @@ interface InviteMemberModalProps {
 interface User {
   id: string;
   username: string;
+  displayName?: string | null;
   email: string;
   status: string;
 }
@@ -319,7 +320,7 @@ export function InviteMemberModal({ clubId, clubTitle }: InviteMemberModalProps)
                 <div className="flex flex-wrap gap-2 p-3 bg-muted rounded-lg">
                   {selectedUsers.map((user) => (
                     <Badge key={user.id} variant="secondary" className="gap-1">
-                      {user.username}
+                      {user.displayName ?? user.username}
                       <button
                         onClick={() => toggleUserSelection(user)}
                         className="ml-1 hover:text-destructive"
@@ -357,7 +358,7 @@ export function InviteMemberModal({ clubId, clubTitle }: InviteMemberModalProps)
                           >
                             <div className="flex items-center justify-between">
                               <div>
-                                <p className="font-medium">{user.username}</p>
+                                <p className="font-medium">{user.displayName ?? user.username}</p>
                                 <p className="text-xs text-muted-foreground">{user.email}</p>
                               </div>
                               {isSelected && <CheckCircle2 className="w-5 h-5 text-primary" />}

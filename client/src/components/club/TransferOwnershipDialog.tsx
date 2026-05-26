@@ -47,12 +47,14 @@ export function TransferOwnershipDialog({
     const selectedMember = members.find(m => m.id === selectedMemberId);
     if (!selectedMember) return;
 
+    const selectedMemberLabel = selectedMember.displayName ?? selectedMember.username;
+
     const confirmed = await modalConfirm({
       title: "Передача прав владельца",
       description:
-        `Вы уверены, что хотите передать права владельца клуба "${clubTitle}" участнику ${selectedMember.username}?\n\n` +
+        `Вы уверены, что хотите передать права владельца клуба "${clubTitle}" участнику ${selectedMemberLabel}?\n\n` +
         `После этого:\n` +
-        `• ${selectedMember.username} станет владельцем клуба\n` +
+        `• ${selectedMemberLabel} станет владельцем клуба\n` +
         `• Вы станете обычным участником\n` +
         `• Вы сможете покинуть клуб\n\n` +
         `Это действие необратимо!`,
@@ -82,7 +84,7 @@ export function TransferOwnershipDialog({
 
       toast({
         title: "Права переданы",
-        description: `${selectedMember.username} теперь владелец клуба`,
+        description: `${selectedMemberLabel} теперь владелец клуба`,
       });
 
       setOpen(false);
@@ -156,12 +158,12 @@ export function TransferOwnershipDialog({
                     >
                       <Avatar className="h-10 w-10">
                         {member.avatar && <AvatarImage src={member.avatar} alt={member.username} />}
-                        <AvatarFallback>
-                          {member.username[0].toUpperCase()}
-                        </AvatarFallback>
+                      <AvatarFallback>
+                          {(member.displayName ?? member.username)[0].toUpperCase()}
+                      </AvatarFallback>
                       </Avatar>
                       <div className="flex-1 text-left">
-                        <p className="font-medium">{member.username}</p>
+                        <p className="font-medium">{member.displayName ?? member.username}</p>
                         <div className="flex items-center gap-2 mt-1">
                           <Badge variant="outline" className="text-xs">
                             {member.role === 'moderator' ? 'Модератор' : 'Участник'}

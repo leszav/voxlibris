@@ -1694,9 +1694,11 @@ async function sendBookBlockNotification(
   }
 
   const clubTitle = params.clubId ? (await storage.getClub(params.clubId))?.title : undefined;
+  const profile = await storage.getUserProfile(user.id).catch(() => undefined);
   const emailSent = await emailService.sendBookBlockedNotification({
     email: user.email,
     username: user.username,
+    displayName: profile?.displayName ?? undefined,
     bookTitle: params.bookTitle,
     reason: params.reason,
     source: params.source,
@@ -2401,9 +2403,12 @@ router.put('/clubs/:id/reject', jwtAuth, requireAdmin, async (req, res) => {
       return res.status(400).json({ message: 'Cannot reject club: owner email not found' });
     }
 
+    const ownerProfile = await storage.getUserProfile(clubOwner.id).catch(() => undefined);
+
     const emailSent = await emailService.sendClubRejectionNotification({
       email: clubOwner.email,
       username: clubOwner.username,
+      displayName: ownerProfile?.displayName ?? undefined,
       clubTitle: club.title,
       reason: rawReason,
     });

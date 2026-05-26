@@ -1,12 +1,13 @@
 import { BaseRepository } from './BaseRepository.js';
 import { eq, desc } from 'drizzle-orm';
-import { clubDiscussions, users } from '../../shared/schema.js';
+import { clubDiscussions, users, userProfiles } from '../../shared/schema.js';
 import type { ClubDiscussion, InsertClubDiscussion } from '../../shared/schema.js';
 
 export interface ClubDiscussionWithUser extends ClubDiscussion {
   user: {
     id: string;
     username: string;
+    displayName?: string | null;
     email: string;
   };
   replies?: ClubDiscussionWithUser[];
@@ -38,10 +39,12 @@ export class ClubDiscussionsRepository extends BaseRepository {
           createdAt: clubDiscussions.createdAt,
           updatedAt: clubDiscussions.updatedAt,
           username: users.username,
+          displayName: userProfiles.displayName,
           userEmail: users.email,
         })
         .from(clubDiscussions)
         .innerJoin(users, eq(clubDiscussions.userId, users.id))
+        .leftJoin(userProfiles, eq(userProfiles.userId, users.id))
         .where(eq(clubDiscussions.clubId, clubId))
         .orderBy(desc(clubDiscussions.createdAt))
         .limit(500);
@@ -90,6 +93,7 @@ export class ClubDiscussionsRepository extends BaseRepository {
         user: {
           id: msg.userId,
           username: msg.username,
+          displayName: msg.displayName,
           email: msg.userEmail,
         },
         replies: replies
@@ -107,6 +111,7 @@ export class ClubDiscussionsRepository extends BaseRepository {
             user: {
               id: reply.userId,
               username: reply.username,
+              displayName: reply.displayName,
               email: reply.userEmail,
             },
           }))

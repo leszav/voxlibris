@@ -27,6 +27,7 @@ interface ClubDiscussionMessage {
   user: {
     id: string;
     username: string;
+    displayName?: string | null;
     email: string;
   };
   replies?: ClubDiscussionMessage[];
@@ -274,7 +275,7 @@ export function ClubDiscussionBoard({ clubId, isOwner }: Readonly<ClubDiscussion
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
                     <span className={`font-semibold ${message.isWarning ? 'text-red-900' : 'text-sm'}`}>
-                      {message.user.username}
+                      {message.user.displayName ?? message.user.username}
                     </span>
                     {message.isWarning && (
                       <span className="inline-flex items-center gap-1 rounded-full border border-red-400 bg-red-50 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-red-800 shadow-sm">
@@ -347,7 +348,7 @@ export function ClubDiscussionBoard({ clubId, isOwner }: Readonly<ClubDiscussion
                         <div>
                           <div className="flex flex-wrap items-center gap-2">
                             <span className={`font-semibold ${reply.isWarning ? 'text-sm text-red-900' : 'text-xs'}`}>
-                              {reply.user.username}
+                              {reply.user.displayName ?? reply.user.username}
                             </span>
                             {reply.isWarning && (
                               <span className="inline-flex items-center gap-1 rounded-full border border-red-400 bg-red-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-red-800 shadow-sm">
@@ -392,7 +393,7 @@ export function ClubDiscussionBoard({ clubId, isOwner }: Readonly<ClubDiscussion
               {replyingTo?.id === message.id && (
                 <div className="mt-4 ml-6 space-y-2">
                   <div className="text-xs text-muted-foreground mb-2">
-                    Ответ на сообщение {message.user.username}:
+                    Ответ на сообщение {message.user.displayName ?? message.user.username}:
                   </div>
                   <RichTextEditor
                     ref={replyEditorRef}
