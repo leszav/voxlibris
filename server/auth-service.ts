@@ -5,6 +5,7 @@ import { storage } from "./repositories/index.js";
 import type { User, UserRole, UserStatus, InsertUser } from "../shared/schema.js";
 import { emailService } from "./services/email-service.js";
 import { logger } from "./lib/logger.js";
+import { generateUsernameFromDisplayName } from "./lib/username-generator.js";
 
 export type SessionType = 'normal' | 'remember_me';
 
@@ -322,7 +323,7 @@ export class AuthService {
    * Регистрация нового пользователя
    */
   async register(
-    username: string,
+    displayName: string,
     email: string,
     password: string,
     invitedBy?: string,
@@ -331,10 +332,25 @@ export class AuthService {
     baseUrl?: string
   ): Promise<AuthResult> {
     try {
-      // Проверяем, существует ли пользователь с таким username
-      const existingUserByUsername = await storage.getUserByUsername(username);
-      if (existingUserByUsername) {
-        throw new Error('Пользователь с таким именем уже существует');
+      const normalizedDisplayName = displayName.trim().replace(/\s+/gu, ' ');
+      if (normalizedDisplayName.length < 2 || normalizedDisplayName.length > 50) {
+        throw new Error('Некорректное имя');
+      }
+
+      // Генерируем технический username из displayName
+      // (никогда не показываем пользователю; используется как идентификатор)
+      let username = generateUsernameFromDisplayName(normalizedDisplayName);
+
+      // Страхуемся от коллизий в БД
+      for (let i = 0; i < 5; i++) {
+        const existingUserByUsername = await storage.getUserByUsername(username);
+        if (!existingUserByUsername) break;
+        username = generateUsernameFromDisplayName(normalizedDisplayName);
+      }
+
+      const usernameCollision = await storage.getUserByUsername(username);
+      if (usernameCollision) {
+        throw new Error('Не удалось сгенерировать уникальное имя пользователя');
       }
 
       // Проверяем, существует ли пользователь с таким email
@@ -369,7 +385,7 @@ export class AuthService {
         // Создаем базовый профиль пользователя
         try {
           await storage.createOrUpdateUserProfile(dbNewUser.id, {
-            displayName: username,
+            displayName: normalizedDisplayName,
             isReader: false,
             bio: null,
             avatar: null,
@@ -569,6 +585,7 @@ async confirmEmail(token: string): Promise<{ success: boolean; message: string }
       const existingProfile = await storage.getUserProfile(user.id);
       if (!existingProfile) {
         await storage.createOrUpdateUserProfile(user.id, {
+          // Если профиль по какой-то причине отсутствует, используем username как fallback.
           displayName: user.username,
           isReader: false,
           bio: null,

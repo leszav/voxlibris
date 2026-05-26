@@ -7,7 +7,7 @@ interface AuthContextType {
   isAuthenticated: boolean;
   isLoading: boolean;
   login: (username: string, password: string, rememberMe?: boolean) => Promise<void>;
-  register: (username: string, email: string, password: string, rememberMe?: boolean, inviteToken?: string) => Promise<void>;
+  register: (displayName: string, email: string, password: string, rememberMe?: boolean, inviteToken?: string) => Promise<void>;
   logout: () => Promise<void>;
   refetchUser: () => Promise<void>;
   syncAuthState: () => Promise<void>;
@@ -94,10 +94,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   }, []);
 
-  const register = useCallback(async (username: string, email: string, password: string, rememberMe: boolean = false, inviteToken?: string) => {
+  const register = useCallback(async (displayName: string, email: string, password: string, rememberMe: boolean = false, inviteToken?: string) => {
     try {
-      const payload: { username: string; email: string; password: string; rememberMe: boolean; invite?: string } = {
-        username,
+      const payload: { displayName: string; email: string; password: string; rememberMe: boolean; invite?: string } = {
+        displayName,
         email,
         password,
         rememberMe,

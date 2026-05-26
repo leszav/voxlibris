@@ -6,13 +6,18 @@ import { storage } from "./repositories/index.js";
 import { jwtAuth, requireActiveUser } from "./jwt-middleware.js";
 import { serializeAuthUser } from "./lib/client-serializers.js";
 import { getPublicBaseUrl } from "./lib/public-base-url.js";
-import { insertUserSchema } from "../shared/schema.js";
+// insertUserSchema больше не используется: схема регистрации локальная,
+// чтобы не тащить ограничения users.username на displayName.
 
 // Email validation regex (RFC 5322 simplified)
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // Username validation: only A-Za-z0-9_- allowed, 3-32 chars
 const USERNAME_REGEX = /^[A-Za-z0-9_-]{3,32}$/;
+
+// Display name validation: allow Cyrillic/Latin letters, digits, spaces, _ and -
+// 2-50 chars, no leading/trailing spaces, no multiple spaces
+const DISPLAY_NAME_REGEX = /^[\p{L}\p{N}][\p{L}\p{N}_ -]{0,48}[\p{L}\p{N}]$/u;
 
 // Password validation schema
 const passwordSchema = z.string()
@@ -21,17 +26,30 @@ const passwordSchema = z.string()
   .regex(/\d/, "Пароль должен содержать хотя бы одну цифру");
 
 // Registration schema with password validation
-const registerSchema = insertUserSchema.extend({
-  username: z
+// ВАЖНО: на фронте поле называется displayName. Для обратной совместимости
+// принимаем и username (старые клиенты), трактуя его как displayName.
+const registerSchema = z.object({
+  displayName: z
     .string()
     .trim()
-    .regex(USERNAME_REGEX, "Имя пользователя может содержать только буквы (A-Z, a-z), цифры, _ и -, от 3 до 32 символов"),
+    .min(2, "Укажите имя (минимум 2 символа)")
+    .max(50, "Имя слишком длинное (максимум 50 символов)")
+    .regex(DISPLAY_NAME_REGEX, "Имя может содержать буквы (в т.ч. кириллицу), цифры, пробелы, _ и -")
+    .transform((value) => value.replace(/\s+/gu, " "))
+    .optional(),
+  // Legacy field
+  username: z.string().trim().optional(),
   email: z
     .string()
     .trim()
     .toLowerCase()
     .regex(EMAIL_REGEX, "Укажите корректный email"),
-  password: passwordSchema
+  password: passwordSchema,
+  rememberMe: z.boolean().optional(),
+  invite: z.string().optional(),
+}).refine((data) => Boolean(data.displayName || data.username), {
+  message: "displayName is required",
+  path: ["displayName"],
 });
 
 // Login schema
@@ -153,10 +171,18 @@ export function setupAuthRoutes(app: Express): void {
         });
       }
 
-      const validatedData = validation.data as { username: string; email: string; password: string; invitedBy?: string; invitedToClub?: string; status?: string };
-      const { username, email, password } = validatedData;
-      const { rememberMe = false } = req.body;
-      const inviteToken = (req.body.invite || req.query.invite) as string | undefined;
+      const validatedData = validation.data as { displayName?: string; username?: string; email: string; password: string };
+      const { email, password } = validatedData;
+      const displayName = (validatedData.displayName ?? validatedData.username ?? '').trim();
+      const { rememberMe = false } = validation.data;
+      const inviteToken = (validation.data.invite || req.query.invite) as string | undefined;
+
+      if (!displayName) {
+        return res.status(400).json({
+          message: "Укажите имя",
+          code: "DISPLAY_NAME_REQUIRED",
+        });
+      }
 
       // Валидация приглашения
       const inviteValidation = await validateAndProcessInvite(inviteToken, email);
@@ -173,7 +199,7 @@ export function setupAuthRoutes(app: Express): void {
       const baseUrl = await getPublicBaseUrl();
 
       const authResult = await authService.register(
-        username,
+        displayName,
         email,
         password,
         invitedBy,

@@ -16,7 +16,7 @@ interface LoginRequest {
 }
 
 interface RegisterRequest {
-  username: string;
+  displayName: string;
   email: string;
   password: string;
   rememberMe?: boolean;
