@@ -35,8 +35,11 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Установить pnpm
-        run: npm install -g pnpm@^9
+          cache: 'pnpm'
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: '9.0.0'
       - name: Использовать npm registry
         run: |
           if [ -f .npmrc ]; then mv .npmrc .npmrc.ci.bak; fi
@@ -57,8 +60,11 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Установить pnpm
-        run: npm install -g pnpm@^9
+          cache: 'pnpm'
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: '9.0.0'
       - name: Использовать npm registry
         run: |
           if [ -f .npmrc ]; then mv .npmrc .npmrc.ci.bak; fi
@@ -78,8 +84,11 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Установить pnpm
-        run: npm install -g pnpm@^9
+          cache: 'pnpm'
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: '9.0.0'
       - name: Использовать npm registry
         run: |
           if [ -f .npmrc ]; then mv .npmrc .npmrc.ci.bak; fi
