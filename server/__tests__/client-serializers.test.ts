@@ -34,6 +34,7 @@ describe('Client serializers', () => {
     assert.deepEqual(Object.keys(serialized).sort((left, right) => left.localeCompare(right)), [
       'avatar',
       'createdAt',
+      'displayName',
       'email',
       'emailConfirmed',
       'id',
