@@ -1,494 +1,127 @@
 # Руководство по развертыванию
 
-## Введение
+**Статус:** Current  
+**Дата обновления:** 2026-05-29  
+**Источник правды:** `AGENTS.md`, `package.json`, `Dockerfile`, `docker-compose.yml`, `docker-compose.prod.yml`, `migrations/`.
 
-Это руководство описывает процесс развертывания приложения VoxLibris в production-среде. В нем рассматриваются требования, подготовка среды, настройка компонентов и запуск приложения.
+## Production baseline
 
-## Системные требования
+Текущий production-процесс проекта: Docker → CapRover. Сервер запускается командой из Docker image без автоматического применения миграций:
 
-### Минимальные требования
-
-- **CPU**: 2 ядра
-- **RAM**: 4 GB
-- **Storage**: 20 GB
-- **OS**: Linux (Ubuntu 20.04 LTS или новее)
-- **Node.js**: 20.0.0 или новее
-- **PostgreSQL**: 14 или новее
-- **Redis**: 6.0 или новее
-
-### Рекомендуемые требования
-
-- **CPU**: 4 ядра
-- **RAM**: 8 GB
-- **Storage**: 50 GB SSD
-- **OS**: Linux (Ubuntu 22.04 LTS)
-- **Node.js**: 22 или новее
-- **PostgreSQL**: 15
-- **Redis**: 7.0 или новее
-
-## Подготовка среды
-
-### Установка зависимостей
-
-1. Установите Node.js:
-
-```bash
-# Установка nvm (если еще не установлен)
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash
-source ~/.bashrc
-
-# Установка Node.js
-nvm install 22
-nvm use 22
-nvm alias default 22
-
-# Проверка установки
-node --version
-npm --version
+```text
+node dist/server/index.js
 ```
 
-2. Установите pnpm:
+Критически важно: production-миграции применяются вручную, строго по одной, через pgAdmin на сервере CapRover. Это правило зафиксировано в `../AGENTS.md` и имеет приоритет над общими рекомендациями Drizzle.
 
-```bash
-npm install -g pnpm@9
-```
-
-3. Установите PostgreSQL:
-
-```bash
-sudo apt update
-sudo apt install postgresql postgresql-contrib
-sudo systemctl enable postgresql
-sudo systemctl start postgresql
-```
-
-4. Установите Redis:
-
-```bash
-sudo apt install redis-server
-sudo systemctl enable redis-server
-sudo systemctl start redis-server
-```
-
-### Настройка базы данных
-
-1. Создайте пользователя и базу данных:
-
-```bash
-sudo -u postgres psql
-CREATE USER voxlibris WITH PASSWORD 'your_secure_password';
-CREATE DATABASE voxlibris OWNER voxlibris;
-GRANT ALL PRIVILEGES ON DATABASE voxlibris TO voxlibris;
-\q
-```
-
-2. Проверьте подключение:
-
-```bash
-psql -h localhost -U voxlibris -d voxlibris -W
-```
-
-### Настройка файлового хранилища
-
-Приложение использует S3-совместимое хранилище. Вы можете использовать:
-
-- AWS S3
-- MinIO (локальное решение)
-- DigitalOcean Spaces
-- Другой S3-совместимый сервис
-
-Для локальной установки с MinIO:
-
-1. Установите MinIO:
-
-```bash
-wget https://dl.min.io/server/minio/release/linux-amd64/archive/minio_20230904010410.0.0_amd64.deb
-sudo dpkg -i minio_20230904010410.0.0_amd64.deb
-```
-
-2. Создайте пользователя и настройте MinIO:
-
-```bash
-mkdir -p /data/voxlibris
-export MINIO_ROOT_USER=admin
-export MINIO_ROOT_PASSWORD=admin12345
-minio server /data/voxlibris &
-```
-
-3. Создайте bucket для приложения:
-
-```bash
-# Установите mc (MinIO client)
-wget https://dl.min.io/client/mc/release/linux-amd64/archive/mc_20230904002658_0_gf07a7ae_linux_amd64.tar.gz
-tar -xf mc_20230904002658_0_gf07a7ae_linux_amd64.tar.gz
-./mc --help
-
-# Настройте подключение
-./mc alias set voxlibris-local http://localhost:9000 admin admin12345
-
-# Создайте bucket
-./mc mb voxlibris-local/voxlibris-uploads
-./mc mb voxlibris-local/voxlibris-covers
-```
-
-## Настройка приложения
-
-### Клонирование репозитория
-
-```bash
-git clone https://github.com/your-org/voxlibris.git
-cd voxlibris
-```
-
-### Установка зависимостей
+## Локальная разработка
 
 ```bash
 pnpm install
-```
-
-### Настройка переменных окружения
-
-Создайте файл `.env` на основе `.env.example`:
-
-```bash
 cp .env.example .env
-```
-
-Заполните значения:
-
-```
-NODE_ENV=production
-PORT=5000
-
-# Database
-DATABASE_URL="postgresql://voxlibris:your_secure_password@localhost:5432/voxlibris"
-
-# Redis (for rate limiting)
-REDIS_URL="redis://localhost:6379"
-REDIS_PASSWORD=""
-
-# JWT
-JWT_SECRET="your_very_secure_jwt_secret_here"
-JWT_REFRESH_SECRET="your_very_secure_refresh_secret_here"
-
-# File storage (S3 compatible)
-S3_ENDPOINT=http://localhost:9000
-S3_ACCESS_KEY_ID=admin
-S3_SECRET_ACCESS_KEY=admin12345
-S3_BUCKET_NAME=voxlibris-uploads
-S3_REGION=us-east-1
-S3_FORCE_PATH_STYLE=true
-
-# SMTP
-SMTP_HOST=smtp.your-provider.com
-SMTP_PORT=587
-SMTP_USER=your-smtp-user
-SMTP_PASS=your-smtp-password
-SMTP_FROM=noreply@yourdomain.com
-
-# Public URL
-PUBLIC_BASE_URL=https://yourdomain.com
-
-# Rate limiting
-RL_ANON_BURST_WINDOW_MS=5000
-RL_ANON_BURST_MAX=5
-RL_ANON_READ_WINDOW_MS=60000
-RL_ANON_READ_MAX=120
-RL_ANON_WRITE_WINDOW_MS=900000
-RL_ANON_WRITE_MAX=30
-RL_AUTH_READ_WINDOW_MS=900000
-RL_AUTH_READ_MAX=1200
-RL_AUTH_WRITE_WINDOW_MS=900000
-RL_AUTH_WRITE_MAX=300
-RL_EXPENSIVE_WINDOW_MS=900000
-RL_EXPENSIVE_MAX=30
-```
-
-## Развертывание
-
-### Миграция базы данных
-
-Примените миграции к базе данных:
-
-```bash
-pnpm run db:push
-```
-
-Или выполните миграции по отдельности:
-
-```bash
-npx drizzle-kit migrate
-```
-
-### Сборка приложения
-
-```bash
-pnpm run build
-```
-
-### Инициализация хранилища
-
-```bash
+pnpm run dev:services
 pnpm run init-storage
+pnpm dev
 ```
 
-### Запуск приложения
-
-#### Вариант 1: Прямой запуск
+Фактические dev-команды:
 
 ```bash
-pnpm run start
+pnpm run dev:client    # Vite, порт 3000
+pnpm run dev:server    # tsx server/index.ts с загрузкой server/env.ts
+pnpm run dev:services  # docker compose up postgres minio -d
+pnpm run dev           # kill ports, services, storage init, server + client
+pnpm run dev:stop      # docker compose down
 ```
 
-#### Вариант 2: Использование PM2
+Redis используется сервером для rate limiting, если доступен/настроен через переменные окружения. Проверьте `docker-compose.yml` и `.env.example` перед запуском в конкретном окружении.
 
-Установите PM2:
+## Сборка и запуск
 
 ```bash
-npm install -g pm2
-```
-
-Создайте файл `ecosystem.config.js`:
-
-```javascript
-module.exports = {
-  apps: [{
-    name: 'voxlibris',
-    script: './dist/server/index.js',
-    instances: 'max',
-    exec_mode: 'cluster',
-    env: {
-      NODE_ENV: 'production',
-      PORT: 5000
-    }
-  }]
-};
-```
-
-Запустите приложение:
-
-```bash
-pm2 start ecosystem.config.js
-pm2 startup
-pm2 save
-```
-
-#### Вариант 3: Использование Docker
-
-Соберите образ:
-
-```bash
-docker build -t voxlibris .
-```
-
-Запустите контейнер:
-
-```bash
-docker run -d \
-  --name voxlibris \
-  -p 5000:5000 \
-  --env-file .env \
-  --restart unless-stopped \
-  voxlibris
-```
-
-## Настройка Reverse Proxy
-
-### Nginx
-
-Создайте конфигурацию для Nginx:
-
-```
-server {
-    listen 80;
-    server_name yourdomain.com;
-    return 301 https://$server_name$request_uri;
-}
-
-server {
-    listen 443 ssl http2;
-    server_name yourdomain.com;
-
-    ssl_certificate /path/to/your/certificate.crt;
-    ssl_certificate_key /path/to/your/private.key;
-
-    location / {
-        proxy_pass http://localhost:5000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_cache_bypass $http_upgrade;
-        
-        # Для файловых загрузок
-        client_max_body_size 50M;
-    }
-}
-```
-
-### SSL сертификат
-
-Установите SSL сертификат через Let's Encrypt:
-
-```bash
-sudo apt install certbot python3-certbot-nginx
-sudo certbot --nginx -d yourdomain.com
-```
-
-## Мониторинг и обслуживание
-
-### Проверка состояния
-
-Создайте скрипт проверки состояния:
-
-```bash
-#!/bin/bash
-# health-check.sh
-
-# Проверка порта
-if ! nc -z localhost 5000; then
-    echo "Application is not running on port 5000"
-    exit 1
-fi
-
-# Проверка базы данных
-if ! pg_isready -h localhost -U voxlibris; then
-    echo "Database is not ready"
-    exit 1
-fi
-
-echo "All services are running"
-exit 0
-```
-
-### Резервное копирование
-
-Создайте скрипт резервного копирования:
-
-```bash
-#!/bin/bash
-# backup.sh
-
-DATE=$(date +%Y%m%d_%H%M%S)
-BACKUP_DIR="/backups/voxlibris"
-
-mkdir -p $BACKUP_DIR
-
-# Резервная копия базы данных
-pg_dump -h localhost -U voxlibris voxlibris > $BACKUP_DIR/db_$DATE.sql
-
-# Резервная копия загруженных файлов (адаптируйте под вашу конфигурацию)
-# rsync -av /path/to/uploads/ $BACKUP_DIR/uploads_$DATE/
-
-# Удаление резервных копий старше 30 дней
-find $BACKUP_DIR -type f -mtime +30 -delete
-```
-
-### Логирование
-
-Настройте ротацию логов:
-
-```bash
-sudo nano /etc/logrotate.d/voxlibris
-```
-
-Содержимое файла:
-
-```
-/var/log/voxlibris/*.log {
-    daily
-    missingok
-    rotate 52
-    compress
-    notifempty
-    create 644 your_user your_group
-    postrotate
-        # Если используете PM2
-        # PM2_HOME=/home/your_user/.pm2 pm2 reloadLogs
-    endscript
-}
-```
-
-## Обновление приложения
-
-### Обновление кода
-
-1. Остановите приложение:
-
-```bash
-# Если используете PM2
-pm2 stop voxlibris
-
-# Если запускаете напрямую
-# Найдите PID и убейте процесс
-```
-
-2. Обновите код:
-
-```bash
-git pull origin main
-pnpm install
 pnpm run build
+pnpm start
 ```
 
-3. Примените миграции:
+Проверки перед релизом:
+
+```bash
+pnpm test
+pnpm run quality:gate
+```
+
+`quality:gate` выполняет TypeScript check, ESLint и build.
+
+## Миграции базы данных
+
+### Dev
+
+В dev допустимо использовать команды Drizzle для локальной базы, если это не противоречит текущей задаче:
 
 ```bash
 pnpm run db:migrate
+pnpm run db:push
 ```
 
-4. Запустите приложение:
+Но эти команды не описывают production-процесс и не должны автоматически выполняться при деплое.
 
-```bash
-# Если используете PM2
-pm2 start voxlibris
+### Production
 
-# Если запускаете напрямую
-pnpm run start
-```
+Production-порядок:
 
-## Устранение неполадок
+1. Проверить последний номер миграции:
+   ```bash
+   ls migrations/ | sort | tail -5
+   ```
+2. Убедиться, что новые файлы идут строго без пропусков: `0042`, `0043`, `0044` и т.д.
+3. Проверить идемпотентность SQL:
+   - `CREATE TABLE IF NOT EXISTS`;
+   - `ADD COLUMN IF NOT EXISTS`;
+   - `CREATE INDEX IF NOT EXISTS`;
+   - `CREATE TYPE` через `DO $$ ... EXCEPTION WHEN duplicate_object THEN NULL; END $$`.
+4. Применить миграцию локально.
+5. Повторно применить ту же миграцию локально и убедиться, что нет ошибок.
+6. Применить на production через pgAdmin вручную, по одному файлу, в правильном порядке.
+7. Зафиксировать результат применения в release notes/операционном журнале.
 
-### Проверка состояния сервисов
+Запрещено без отдельного согласования:
 
-```bash
-# Проверка состояния PostgreSQL
-sudo systemctl status postgresql
+- `DROP`;
+- `TRUNCATE`;
+- destructive `ALTER COLUMN TYPE`;
+- автоматический запуск миграций при старте контейнера.
 
-# Проверка состояния Redis
-sudo systemctl status redis-server
+## Переменные окружения
 
-# Проверка открытых портов
-sudo netstat -tlnp | grep :5000
-```
+Минимальные группы переменных смотрите в `.env.example`:
 
-### Проверка логов
+- `DATABASE_URL` — PostgreSQL;
+- `JWT_SECRET`, `JWT_REFRESH_SECRET` — auth;
+- `ALLOWED_ORIGINS` — CORS/Socket.IO;
+- S3/MinIO переменные для файлов;
+- SMTP-переменные для `nodemailer`;
+- Redis/rate-limit настройки;
+- публичные URL для ссылок и Icecast/Studio, если используются.
 
-```bash
-# Если используете PM2
-pm2 logs voxlibris
+## Email
 
-# Логи PostgreSQL
-sudo tail -f /var/log/postgresql/postgresql-*.log
+Текущая реализация использует `nodemailer` и HTML-шаблоны из `email-templates/`. Зависимости `resend` и `react-email` не входят в текущий baseline.
 
-# Логи Nginx
-sudo tail -f /var/log/nginx/error.log
-sudo tail -f /var/log/nginx/access.log
-```
+## Studio audio baseline
 
-### Проблемы с производительностью
+Текущий production baseline для Studio связан с Icecast/streaming route и файлами:
 
-- Проверьте использование ресурсов: `htop`
-- Проверьте подключения к базе данных: `\du` в psql
-- Проверьте размер базы данных:
+- `server/routes/studio-stream.ts`;
+- `server/lib/icecast-live-proxy.ts`;
+- `server/lib/studio-streaming-service.ts`;
+- `docs/vlstudio/VLSTUDIO_ICECAST_BASELINE_2026-04-28.md`.
 
-```sql
-SELECT pg_size_pretty(pg_database_size('voxlibris'));
-```
+WebRTC/mediasoup следует считать roadmap/reference, если в конкретном релизе не указано обратное.
 
-## Заключение
+## Production readiness / Known gaps
 
-После завершения установки ваш экземпляр VoxLibris должен быть доступен по настроенному домену. Убедитесь, что все компоненты работают должным образом, и настройте регулярные резервные копии для обеспечения надежности системы.
+- Миграции production выполняются вручную; это снижает риск неконтролируемых изменений, но требует дисциплины и операционного журнала.
+- Тестовое покрытие ограничено Node.js test runner тестами в `server/__tests__/`.
+- Полноценный observability stack не зафиксирован в зависимостях: есть structured logging (`pino`) и analytics modules, но нет подтверждённого Prometheus/Grafana/Sentry baseline.
+- CI/CD нужно сверять отдельно по `.github/workflows/`; документация не должна предполагать автоматический deploy без проверки workflow.
+- Security/compliance для enterprise требует отдельной оценки: хранение персональных данных, retention policy, audit log, backup/restore drill, SMTP/S3 provider compliance.

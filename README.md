@@ -1,105 +1,93 @@
 # VoxLibris
 
-VoxLibris — это инновационная платформа для социального чтения, позволяющая пользователям объединяться в клубы, читать книги вместе, обсуждать произведения и делиться впечатлениями. Проект включает в себя как клиентскую, так и серверную части с широким спектром функций.
+**Статус документа:** Current  
+**Дата обновления:** 2026-05-29
 
-## 🚀 Быстрый старт для разработчиков
+VoxLibris — платформа социального чтения: книжные клубы, совместное чтение, live/audio-сессии, ридеры, социальный граф, activity feed, direct messages, рекомендации, геймификация и административные инструменты.
 
-**Новые разработчики!** Начните с [руководства по онбордингу](./docs/ONBOARDING.md) - оно содержит все необходимые инструкции для быстрого старта.
+## Быстрый старт для разработчика
 
 ```bash
-git clone <repository-url>
-cd voxlibris
 pnpm install
 cp .env.example .env
-docker-compose up -d postgres redis minio
-pnpm run db:migrate
-pnpm run db:seed
+pnpm run dev:services
+pnpm run init-storage
 pnpm dev
 ```
 
-## Особенности
+Фактические команды берутся из `package.json`:
 
-- 📖 Чтение книг в режиме реального времени с другими участниками
-- 👥 Возможность создавать и присоединяться к клубам
-- 📚 Поддержка различных форматов книг (EPUB, PDF, FB2)
-- 🎙️ Система голосового вещания для чтения вслух
-- 🔔 Уведомления и напоминания о сессиях
-- 📊 Система прогресса и достижений
-- ⚙️ Административная панель для модерации
+- `pnpm run dev:client` — Vite dev server на порту 3000;
+- `pnpm run dev:server` — Express server через `tsx`;
+- `pnpm run dev:services` — PostgreSQL и MinIO через Docker Compose;
+- `pnpm run dev` — подготовка портов, сервисов, storage и запуск клиента/сервера;
+- `pnpm test` — тесты через встроенный Node.js test runner;
+- `pnpm run quality:gate` — TypeScript, ESLint и production build.
 
-## 📚 Документация
+Перед первым запуском проверьте `.env.example`. Для локальной БД в правилах проекта используется PostgreSQL `postgresql://xlibris:xlibris_dev@localhost:5432/xlibris`.
 
-Полная документация проекта доступна в директории [/docs](./docs/). 
+## Что реализовано сейчас
 
-### 🚀 Для новых разработчиков
-- **[Онбординг разработчиков](./docs/ONBOARDING.md)** - пошаговое руководство для новичков
-- **[Введение в проект](./docs/01-introduction/)** - обзор и возможности
+- Книжные клубы, участники, приглашения, роли и модерация.
+- Личная и клубная библиотека, загрузка EPUB/FB2, обложки и S3/MinIO-хранилище.
+- Reader core/adapters и синхронизация статуса чтения.
+- Reading sessions, реакции, вопросы, расписание и записи.
+- VoxLibris Studio baseline на Icecast/streaming route; WebRTC/mediasoup — roadmap/reference.
+- Социальный граф, activity feed, presence и direct messages.
+- Рекомендации и геймификация.
+- Административные маршруты и feature flags.
+- Email через `nodemailer` и HTML-шаблоны из `email-templates/`.
 
-### 🔧 Для разработки
-- **[Архитектура системы](./docs/02-architecture/)** - техническая документация
-- **[API документация](./docs/05-server/api-routes/)** - эндпоинты и примеры
-- **[Серверная часть](./docs/05-server/)** - архитектура бэкенда
-- **[Клиентская часть](./docs/07-client/)** - архитектура фронтенда
-- **[Общие компоненты](./docs/09-shared/)** - утилиты и типы
+## Технологический стек
 
-### 🗄️ Для работы с данными
-- **[База данных](./docs/06-database/)** - схема и миграции
-- **[Email-шаблоны](./docs/08-email-templates/)** - шаблоны писем
+- TypeScript, Node.js 20+, pnpm 9.
+- React 19, Vite, Tailwind CSS, Radix UI, TanStack React Query.
+- Express 5, Socket.IO, cookie-parser, helmet, express-rate-limit, express-slow-down.
+- PostgreSQL, Drizzle ORM, SQL-миграции в `migrations/`.
+- Redis для rate limiting там, где настроен.
+- S3-совместимое хранилище/MinIO для файлов.
+- `nodemailer` для email.
+- Node.js test runner для текущих тестов.
 
-### 🧪 Для качества
-- **[Тестирование](./docs/10-testing/)** - стратегии и инструменты
-- **[Скрипты](./docs/04-scripts/)** - утилиты и автоматизация
+> В текущем `package.json` нет `resend`, `react-email`, Vitest, Playwright, Supertest или MSW. Они не считаются current baseline.
 
-### 🚀 Для развертывания
-- **[Развертывание](./docs/11-deployment/)** - инструкция по установке
-- **[Руководство администратора](./docs/12-admin-manual/)** - управление системой
+## Документация
 
-### 🎯 Специализированные разделы
-- **[VoxLibris Studio](./docs/vlstudio/)** - documentation для студии
-- **[Геймификация](./docs/GAMIFICATION_REFACTORING_COMPLETE.md)** - система достижений
+- [Центр документации](./docs/README.md)
+- [Аудит документации](./docs/DOCUMENTATION_AUDIT.md)
+- [Архитектура](./docs/02-architecture/README.md)
+- [API и маршруты](./docs/05-server/routes.md)
+- [База данных и миграции](./docs/06-database/README.md)
+- [Тестирование](./docs/10-testing/README.md)
+- [Деплой](./docs/11-deployment/deployment-guide.md)
+- [VoxLibris Studio](./docs/vlstudio/README.md)
 
-Для удобной навигации по документации смотрите [SUMMARY.md](./docs/SUMMARY.md).
+## Миграции
 
-## Технологии
+Production-миграции применяются вручную, строго по одной, через pgAdmin на CapRover. Автоматического запуска миграций при деплое нет. Это осознанное решение для полного контроля за миграциями. Подробные правила см. в [AGENTS.md](./AGENTS.md) и [deployment guide](./docs/11-deployment/deployment-guide.md).
 
-- **TypeScript** – язык программирования для клиента и сервера
-- **React** – фронтенд-библиотека
-- **Express.js** – серверный фреймворк
-- **PostgreSQL** – основная база данных
-- **Drizzle ORM** – объектно-реляционное отображение
-- **Tailwind CSS** – фреймворк для стилей
-- **Vite** – инструмент сборки
-- **Multer** – обработка загрузки файлов
-- **Zustand** – менеджер состояния
-- **React Hook Form** – работа с формами
-- **Zod** – валидация данных
-- **React Email** – создание электронных писем
-- **Resend** – отправка электронных писем
-- **WebSockets** – двунаправленная связь в реальном времени
+Для dev доступны команды Drizzle из `package.json`, но они не заменяют production-процесс:
 
-## Архитектура
+```bash
+pnpm run db:migrate
+pnpm run db:push
+```
 
-Приложение состоит из двух основных частей:
+## Тестирование
 
-1. **Клиентская часть** – реализована на React с использованием TypeScript, Vite и Tailwind CSS.
-2. **Серверная часть** – Express.js приложение с использованием TypeScript, Drizzle ORM и PostgreSQL.
+```bash
+pnpm test
+pnpm test:watch
+pnpm test:coverage
+pnpm run quality:gate
+```
 
-## Запуск проекта
-
-1. Клонируйте репозиторий
-2. Установите зависимости: `pnpm install`
-3. Настройте переменные окружения (см. [.env.example](.env.example))
-4. Запустите миграции базы данных: `pnpm run db:migrate`
-5. Запустите клиент и сервер: `pnpm run dev`
+Тесты находятся в `server/__tests__/` и запускаются через `node --test --experimental-strip-types`.
 
 ## Лицензия
 
-Репозиторий Voxlibris Platform распространяется на проприетарной основе и не
-является open-source.
+Репозиторий VoxLibris Platform распространяется на проприетарной основе и не является open-source.
 
-Допускается только просмотр и оценка содержимого репозитория. Любое
-использование, копирование, модификация, распространение или иная эксплуатация
-допускаются исключительно с предварительного письменного разрешения
-правообладателя.
+Допускается только просмотр и оценка содержимого репозитория. Любое использование, копирование, модификация, распространение или иная эксплуатация допускаются исключительно с предварительного письменного разрешения правообладателя.
 
 Подробные условия указаны в [LICENSE](LICENSE).

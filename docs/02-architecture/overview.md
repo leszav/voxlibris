@@ -1,111 +1,60 @@
 # Общая архитектура
 
-## Обзор архитектуры
+**Статус:** Current  
+**Дата обновления:** 2026-05-29
 
-VoxLibris построен на архитектуре, разделенной на слои, с использованием современных технологий и подходов. Архитектура обеспечивает масштабируемость, безопасность и поддерживаемость приложения.
+## Baseline
 
-## Архитектурные слои
+VoxLibris — клиент-серверное приложение для социального чтения. Текущий baseline подтверждён структурой `client/`, `server/`, `shared/`, `migrations/` и командами в `package.json`.
 
-### 1. Presentation Layer (Клиент)
+## Слои
 
-Расположен в директории `client/`:
+1. **Client (`client/src`)** — React 19, Vite, TypeScript, Tailwind CSS, Radix UI, TanStack React Query.
+2. **HTTP API (`server/index.ts`, `server/routes.ts`, `server/routes/*`)** — Express 5, JSON API, upload endpoints, rate limiting.
+3. **Realtime (`server/websocket*`, `server/lib/socket-registry.ts`)** — Socket.IO для чтения, чатов, DM и feed events.
+4. **Business services (`server/services/`, `server/lib/`)** — email, notifications, scheduler, activity, gamification, Studio streaming helpers.
+5. **Data access (`server/repositories/`)** — `RepositoryContainer`, domain repositories, Drizzle ORM.
+6. **Shared contracts (`shared/schema.ts`)** — Drizzle schema, типы и insert/select contracts.
+7. **Database migrations (`migrations/`)** — SQL-файлы с ручным production-применением.
 
-- **React 19**: Компонентный пользовательский интерфейс
-- **TypeScript**: Обеспечивает типизацию на клиенте
-- **Tailwind CSS**: Стилизация компонентов
-- **React Query**: Управление состоянием и кэширование данных
-- **react-hook-form**: Управление формами
+## Ключевые домены
 
-### 2. API Layer (Сервер)
+| Домен | Статус | Ключевые файлы |
+|---|---|---|
+| Auth/JWT/cookies | Current | `server/auth-routes.ts`, `server/auth-service.ts`, `server/jwt-middleware.ts` |
+| Clubs/books/library | Current | `server/club-routes.ts`, `server/club-books-routes.ts`, `server/personal-books-routes.ts`, `server/repositories/*Book*` |
+| Reader core/adapters | Current | `client/src`, `server/routes/reader.ts`, `server/club-reader-routes.ts`, `server/lib/sync-reading-status.ts` |
+| Reading sessions | Current | `server/routes/reading-sessions.ts`, `server/websocket/reading-sessions.ts`, `server/repositories/ReadingRepository.ts` |
+| Reactions/questions/schedule/recordings | Current | `server/routes/reactions.ts`, `questions.ts`, `schedule.ts`, `recordings.ts` |
+| Social graph | Current | `server/routes/social.ts`, `server/repositories/SocialRepository.ts`, `migrations/0041_add_social_graph.sql` |
+| Activity feed | Current | `server/routes/feed.ts`, `server/services/activity-service.ts`, `migrations/0042_add_activity_feed.sql` |
+| Direct messages | Current | `server/routes/direct-messages.ts`, `server/websocket-dm.ts`, `server/repositories/DmRepository.ts`, `migrations/0043_add_direct_messages.sql` |
+| Gamification | Current | `server/routes/gamification.ts`, `server/routes/gamification-admin.ts`, `server/services/gamification-service.ts`, `server/repositories/GamificationRepository.ts` |
+| Recommendations | Current | `server/routes/recommendations.ts`, `migrations/0046_add_recommendations.sql` |
+| Notifications/email | Current | `server/routes/notifications.ts`, `server/services/notification-service.ts`, `server/services/email-service.ts`, `email-templates/` |
+| Analytics | Partially current | `server/analytics/`, `server/analytics-routes.ts`, `server/routes/session-analytics.ts`, `server/services/session-analytics-service.ts` |
+| Studio audio | Current + Roadmap | Current: `server/routes/studio-stream.ts`, `server/lib/icecast-live-proxy.ts`; roadmap/reference: `docs/vlstudio/*WEBRTC*` материалы |
 
-Расположен в директории `server/`:
+## Аутентификация
 
-- **Express.js**: HTTP сервер и маршрутизация
-- **WebSocket (Socket.IO)**: Реальное время для синхронизации чтения
-- **Маршруты**: API эндпоинты по функциональным модулям
+JWT проверяется в `server/jwt-middleware.ts`. Важный проектный паттерн: `optionalJwtAuth` проверяет и `Authorization`, и cookie `accessToken`. Для части доменов применяется `requireActiveUser`.
 
-### 3. Business Logic Layer
+Socket.IO также пытается извлечь JWT из `socket.handshake.auth.token`, `Authorization` или cookie `accessToken` в `server/index.ts`.
 
-Расположен в директории `server/services/`:
+## RepositoryContainer
 
-- **Сервисы**: Бизнес-логика приложения
-- **Сchedulers**: Планирование задач
-- **Email Service**: Отправка email-уведомлений
-- **Analytics Service**: Обработка аналитических данных
+`server/repositories/index.ts` содержит `RepositoryContainer` с ленивой инициализацией (`??=`). Это основной доступ к доменным репозиториям. Старый `storage` сохраняется как адаптер совместимости, поэтому часть кода всё ещё обращается к `storage`, но реализация делегирует операции репозиториям.
 
-### 4. Data Access Layer
+## Realtime
 
-Расположен в директории `server/repositories/`:
+Глобальный Socket.IO instance регистрируется через `registerIO(io)` в `server/index.ts`; доступ из сервисов выполняется через `getIO()` из `server/lib/socket-registry.ts`.
 
-- **Drizzle ORM**: Объектно-реляционное отображение
-- **Repository Pattern**: Абстракция доступа к данным
-- **Миграции**: Управление схемой базы данных
+## Studio: Current vs Roadmap
 
-### 5. Infrastructure Layer
+Текущий аудио-baseline — Icecast/streaming route. Документы по WebRTC/mediasoup нужно читать как roadmap/reference, если конкретный релиз не говорит обратного.
 
-Расположен в директориях `server/lib/`, `server/config/`, `server/middleware/`:
+## Known gaps
 
-- **Middleware**: Аутентификация, логирование, безопасность
-- **Configuration**: Управление конфигурацией приложения
-- **Logging**: Система логирования (pino)
-
-## Архитектурные компоненты
-
-### Аутентификация и авторизация
-
-- **JWT токены**: Stateless аутентификация
-- **Refresh токены**: Долгосрочная аутентификация
-- **HttpOnly cookies**: Защита от XSS
-- **Middleware**: Проверка токенов и доступа
-
-### Система клубов
-
-- **Иерархия ролей**: Владелец, модератор, участник, гость
-- **Приглашения**: Управление доступом через токены
-- **Типы клубов**: Открытые, закрытые, с ограниченным доступом
-
-### Система чтения
-
-- **Сессии чтения**: Управление сессиями и участниками
-- **WebSocket**: Синхронизация прогресса в реальном времени
-- **Аудио трансляция**: Поддержка живого чтения и записей
-- **Прогресс чтения**: Отслеживание и синхронизация позиций
-
-### Система коммуникации
-
-- **Чат в реальном времени**: WebSocket для мгновенных сообщений
-- **Реакции**: Быстрая обратная связь во время чтения
-- **Вопросы**: Формальная система вопросов и ответов
-- **Уведомления**: Email, push и внутренние уведомления
-
-### Система хранения
-
-- **S3-совместимое хранилище**: Для книг, обложек и записей
-- **Безопасность**: Проверка файлов, ограничения по размеру
-- **Метаданные**: Хранение информации о файлах
-
-## Архитектурные паттерны
-
-### Repository Pattern
-
-Все взаимодействие с базой данных происходит через репозитории, которые абстрагируют детали доступа к данным и обеспечивают единый интерфейс.
-
-### Middleware Pattern
-
-Express middleware используется для обработки аутентификации, логирования, безопасности и других сквозных задач.
-
-### Event-Driven Architecture
-
-WebSocket используется для обработки событий в реальном времени, таких как синхронизация прогресса чтения и чат.
-
-### Modular Routing
-
-API маршруты разделены по функциональным областям (auth, clubs, reading-sessions и т.д.).
-
-## Безопасность
-
-- **Rate Limiting**: Защита от DDoS через express-rate-limit
-- **Input Validation**: Валидация через Zod
-- **File Security**: Проверка типов файлов, ограничения по размеру
-- **CORS**: Ограничение доступа с разных доменов
-- **Helmet**: Защита HTTP заголовков
+- Observability stack не оформлен как отдельный production baseline.
+- API reference пока остаётся ручной документацией, не OpenAPI source of truth.
+- Тестовый baseline ограничен Node.js test runner и `server/__tests__/`.

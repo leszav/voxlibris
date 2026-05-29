@@ -1,98 +1,47 @@
-# Архитектурный анализ приложения VoxLibris
+# Архитектура приложения VoxLibris
 
-## Общая информация о проекте
+**Статус:** Current  
+**Дата обновления:** 2026-05-29
 
-VoxLibris - это платформа для социального чтения, позволяющая пользователям создавать и участвовать в книжных клубах, где книги могут читаться вслух профессиональными чтецами или другими пользователями. Приложение представляет собой веб-платформу с архитектурой "клиент-сервер", где клиент реализован как SPA на React 19, а сервер - как Express-приложение на Node.js.
+## Краткое описание
 
-## Архитектурные особенности
+VoxLibris — SPA на React и API-сервер на Express. Общие схемы и типы лежат в `shared/schema.ts`, данные хранятся в PostgreSQL, файлы — в S3-совместимом хранилище/MinIO.
 
-### Технологический стек
+## Структура репозитория
 
-- **Frontend**: React 19 + TypeScript + Vite + Tailwind CSS + shadcn/ui
-- **Backend**: Express.js + TypeScript + Node.js 20+
-- **Database**: PostgreSQL 14+ + Drizzle ORM
-- **File Storage**: AWS S3-совместимое хранилище (MinIO)
-- **Real-time communication**: WebSocket (Socket.IO)
-- **Authentication**: JWT токены + система refresh токенов
-- **Security**: Helmet, express-rate-limit, bcrypt, CORS
-- **Build tool**: Vite + pnpm@9
-
-### Слои архитектуры
-
-1. **Presentation Layer** (client/src): UI компоненты, страницы, маршруты на стороне клиента
-2. **API Layer** (server/routes): REST API и WebSocket интерфейсы
-3. **Business Logic Layer** (server/services): бизнес-логика приложения
-4. **Data Access Layer** (server/repositories): взаимодействие с базой данных через Drizzle ORM
-5. **Infrastructure Layer** (server/lib, server/config): конфигурация, логирование, безопасность
-
-### Структура проекта
-
-```
-.
-├── client                      # Frontend приложения
-│   ├── src
-│   │   ├── api               # API клиенты
-│   │   ├── components        # React компоненты
-│   │   ├── hooks             # React хуки
-│   │   ├── lib               # Вспомогательные библиотеки
-│   │   ├── pages             # Страницы приложения
-│   │   └── styles            # Стили
-│   └── index.html
-├── server                     # Backend приложения
-│   ├── analytics             # Система аналитики
-│   ├── audio                 # Аудио обработка
-│   ├── config                # Конфигурационные файлы
-│   ├── lib                   # Вспомогательные библиотеки
-│   ├── repositories          # Репозитории данных
-│   ├── routes                # API маршруты
-│   ├── services              # Бизнес-логика
-│   ├── websocket             # WebSocket обработчики
-│   └── прочие файлы сервера
-├── shared                     # Общие типы и схемы
-├── migrations                # Миграции базы данных
-├── email-templates           # Шаблоны электронной почты
-├── script, scripts           # Скрипты разработки и деплоя
-└── корневые файлы проекта
+```text
+client/             React/Vite frontend
+server/             Express API, Socket.IO, services, repositories
+shared/             Drizzle schema и общие типы
+migrations/         SQL-миграции PostgreSQL
+email-templates/    HTML-шаблоны писем для nodemailer
+docs/               Документация
+script/, scripts/   Утилиты разработки/сборки
 ```
 
-### Паттерны проектирования
+## Server composition
 
-- **Repository pattern**: все операции с базой данных инкапсулированы в [repositories/](file:///home/odmen/DEV/voxlibris/server/repositories)
-- **Middleware pattern**: Express middleware для аутентификации (JWT), логирования, ограничения частоты запросов
-- **Event-driven architecture**: WebSocket используется для реального времени (синхронизация чтения, чат)
-- **Modular routing**: API маршруты разделены по функциям (auth, club, reading-session и т.д.)
+- `server/index.ts` создаёт Express app, HTTP server и Socket.IO, настраивает CORS, helmet, rate limiting, cookie parser, compression и mount points.
+- `server/routes.ts` регистрирует legacy/core routes и часть Studio routes.
+- `server/routes/*` содержит доменные роутеры для новых модулей.
+- `server/services/*` содержит бизнес-сервисы: email, notifications, scheduler, activity, gamification, analytics.
+- `server/repositories/*` инкапсулирует доступ к БД.
 
-## Взаимодействие компонентов
+## Client composition
 
-### Клиент-серверное взаимодействие
+Клиент расположен в `client/src` и использует React 19, Vite, Tailwind CSS, Radix UI и TanStack React Query. Для точной карты компонентов и страниц сверяйтесь с `docs/07-client/*` и фактической структурой `client/src`.
 
-1. Клиент (React SPA) делает HTTP-запросы к REST API сервера
-2. Для аутентификации используются JWT-токены (в заголовках и cookies)
-3. Для реального времени используются WebSocket-соединения (Socket.IO)
-4. Файлы (обложки, книги) загружаются и выгружаются через специальные API-эндпоинты
+## Data flow
 
-### Безопасность
+1. Клиент вызывает REST API или подключается к Socket.IO.
+2. Middleware проверяет CORS, rate limits, JWT/cookie auth и активность пользователя.
+3. Route вызывает сервис или репозиторий.
+4. Репозиторий работает с PostgreSQL через Drizzle schema из `shared/schema.ts`.
+5. Для realtime-событий сервисы используют Socket.IO через `server/lib/socket-registry.ts`.
 
-- Все пароли хранятся в зашифрованном виде с использованием bcrypt
-- JWT-токены используются для аутентификации
-- Вводимые данные очищаются с помощью dompurify для предотвращения XSS
-- Защита от чрезмерного использования API через express-rate-limit
-- Строгая политика CORS
+## Production/runtime notes
 
-### Масштабируемость и производительность
-
-- Поддержка Redis для хранения ограничений по частоте запросов
-- Потоковая передача аудиофайлов
-- Низкая задержка вещания через WebSocket (<100 мс)
-- Оптимизация загрузки страниц через разделение кода Vite
-
-## Основные зависимости и их роль
-
-- `drizzle-orm`: ORM для взаимодействия с PostgreSQL
-- `express`: основной фреймворк для сервера
-- `socket.io`: реализация WebSocket-соединений
-- `react`: основа клиентского приложения
-- `react-query`: управление состоянием на клиенте
-- `helmet`, `express-rate-limit`: обеспечение безопасности
-- `multer`, `sharp`: обработка загружаемых файлов
-- `bcrypt`, `jsonwebtoken`: аутентификация и авторизация
+- Production deploy — Docker/CapRover.
+- Миграции production применяются вручную через pgAdmin, по одной.
+- Email — `nodemailer`; Resend/React Email не являются текущими зависимостями.
+- Studio audio current baseline — Icecast/streaming; WebRTC/mediasoup — roadmap/reference.
