@@ -773,7 +773,7 @@ readers-file JSON format:
 
 Example:
   pnpm tsx script/studio-sim.ts \
-    --email svv@8ls.ru \
+    --email admin@example.com \
     --password '***' \
     --club-id <clubId> \
     --book-id <bookId> \

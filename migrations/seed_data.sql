@@ -1,14 +1,26 @@
 -- Seed data script for VoxLibris
 -- Run this after all migrations are applied
--- Creates only the essential admin user with confirmed email
 
--- Insert admin user (uses gen_random_uuid() for proper UUID format)
+-- ⚠️ ВАЖНО: Создание администратора
+-- 
+-- Для создания первого администратора выполните следующие шаги:
+--
+-- 1. Сгенерируйте bcrypt-хеш вашего пароля (используйте онлайн-генератор или Node.js):
+--    const bcrypt = require('bcrypt');
+--    const hash = await bcrypt.hash('ваш_надёжный_пароль', 10);
+--    console.log(hash);
+--
+-- 2. Замените YOUR_EMAIL и YOUR_BCRYPT_HASH ниже на ваши данные
+--
+-- 3. Раскомментируйте и выполните SQL-запросы:
+
+/*
+-- Insert admin user
 INSERT INTO users (username, email, password, role, status, email_confirmed, created_at)
 VALUES (
-  'svv@8ls.ru',
-  'svv@8ls.ru',
-  -- Password: (Hashed with bcrypt)
-  '$2b$10$ep9Jq/S3bHdPUQ3zT0CUI.s.0chRnTAEa8r4bTcUSgDW3Z.c6j5oO',
+  'YOUR_EMAIL',
+  'YOUR_EMAIL',
+  'YOUR_BCRYPT_HASH',
   'admin',
   'active',
   true,
@@ -27,8 +39,12 @@ SELECT
   false,
   NOW()
 FROM users u
-WHERE u.email = 'svv@8ls.ru'
+WHERE u.email = 'YOUR_EMAIL'
 ON CONFLICT (user_id) DO NOTHING;
 
--- Final message
-SELECT 'Admin user and profile created successfully with confirmed email!' as result;
+-- Verify creation
+SELECT 'Admin user and profile created successfully!' as result;
+*/
+
+-- Альтернативный способ: используйте API регистрации и затем вручную обновите роль в БД:
+-- UPDATE users SET role = 'admin', status = 'active', email_confirmed = true WHERE email = 'ваш_email';

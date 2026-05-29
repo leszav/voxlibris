@@ -24,7 +24,7 @@ pnpm dev
 - `pnpm test` — тесты через встроенный Node.js test runner;
 - `pnpm run quality:gate` — TypeScript, ESLint и production build.
 
-Перед первым запуском проверьте `.env.example`. Для локальной БД в правилах проекта используется PostgreSQL `postgresql://xlibris:xlibris_dev@localhost:5432/xlibris`.
+Перед первым запуском проверьте `.env.example` и настройте переменные окружения в `.env`, включая `DATABASE_URL` для PostgreSQL.
 
 ## Что реализовано сейчас
 
