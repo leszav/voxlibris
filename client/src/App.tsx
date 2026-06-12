@@ -12,7 +12,6 @@ import { queryClient } from "./lib/queryClient";
 import { YandexMetrikaTracker } from "./lib/yandexMetrika";
 
 const Catalog = lazy(() => import("@/pages/catalog"));
-const ReaderStudio = lazy(() => import("@/pages/reader-studio"));
 const GuestLibrary = lazy(() => import("@/pages/guest-library"));
 const GuestReader = lazy(() => import("@/pages/guest-reader"));
 const MyClubs = lazy(() => import("@/pages/clubs/my-clubs"));
@@ -77,7 +76,6 @@ function ProtectedRoute({ component: Component }: Readonly<{ component: React.Co
 
 // Именованные обёртки для защищённых маршрутов — вынесены на уровень модуля,
 // чтобы не создавать компоненты внутри компонента (S6478).
-const ProtectedStudio          = () => <ProtectedRoute component={ReaderStudio} />;
 const ProtectedMyClubs         = () => <ProtectedRoute component={MyClubs} />;
 const ProtectedCreateClub      = () => <ProtectedRoute component={CreateClub} />;
 const ProtectedReaderWorkspace = () => <ProtectedRoute component={ReaderWorkspacePage} />;
@@ -91,7 +89,6 @@ function Router() {
     <Switch>
       <Route path="/" component={Home} />
       <Route path="/catalog" component={Catalog} />
-      <Route path="/studio/:clubId/:bookId/:chapter?" component={ProtectedStudio} />
 
       {/* Guest Routes */}
       <Route path="/guest/library" component={GuestLibrary} />

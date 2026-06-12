@@ -1,4 +1,4 @@
-import type { NetworkQuality } from "@/components/studio/LiveTopBar";
+import type { NetworkQuality } from "@/lib/studio-types";
 
 interface ResolveReaderStudioViewParams {
   state: 'prep' | 'live' | 'paused';

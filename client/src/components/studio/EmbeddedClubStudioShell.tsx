@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { NetworkQuality } from "@/components/studio/LiveTopBar";
+import type { NetworkQuality } from "@/lib/studio-types";
 import { ControlBar } from "@/components/studio/ControlBar";
 import { MicrophoneCheckModal } from "@/components/studio/microphone-check-modal";
 import { StudioSessionOverlays } from "@/components/studio/StudioSessionOverlays";

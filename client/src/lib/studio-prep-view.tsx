@@ -14,14 +14,6 @@ export interface StudioPrepViewState {
   prepStatusText: string;
 }
 
-interface ResolveDedicatedStudioPrepModalOpenParams {
-  dismissed: boolean;
-  state: "prep" | "live" | "paused";
-  showMicCheck: boolean;
-  microphoneAvailable: boolean;
-  microphoneLoading: boolean;
-}
-
 interface ResolveEmbeddedStudioPrepBarOpenParams {
   isOpen: boolean;
   state: "prep" | "live" | "paused";
@@ -78,26 +70,6 @@ export function resolveStudioPrepView({
     startDisabled: !sessionId || !microphoneAvailable || !micCheckPassed || isStartingBroadcast,
     prepStatusText,
   };
-}
-
-export function resolveDedicatedStudioPrepModalOpen({
-  dismissed,
-  state,
-  showMicCheck,
-  microphoneAvailable,
-  microphoneLoading,
-}: ResolveDedicatedStudioPrepModalOpenParams): boolean {
-  if (dismissed || state !== "prep") {
-    return false;
-  }
-
-  // Пока активна отдельная проверка микрофона, prep modal скрываем,
-  // чтобы не наслаивать два конкурирующих prep-слоя.
-  if (showMicCheck && microphoneAvailable && !microphoneLoading) {
-    return false;
-  }
-
-  return true;
 }
 
 export function resolveEmbeddedStudioPrepBarOpen({
