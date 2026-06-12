@@ -200,3 +200,7 @@ voxli_mobile/
 
 # Documentation drafts
 KODA.md
+
+# Local assistant/workspace folders
+.tmp/
+.skills/
