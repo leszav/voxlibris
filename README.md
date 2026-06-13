@@ -1,7 +1,9 @@
 # VoxLibris
 
+![VoxLibris](./client/public/og-image.webp)
+
 **Статус документа:** Current  
-**Дата обновления:** 2026-05-29
+**Дата обновления:** 2026-06-13
 
 VoxLibris — платформа социального чтения: книжные клубы, совместное чтение, live/audio-сессии, ридеры, социальный граф, activity feed, direct messages, рекомендации, геймификация и административные инструменты.
 
@@ -34,9 +36,39 @@ pnpm dev
 - Reading sessions, реакции, вопросы, расписание и записи.
 - VoxLibris Studio baseline на Icecast/streaming route; WebRTC/mediasoup — roadmap/reference.
 - Социальный граф, activity feed, presence и direct messages.
-- Рекомендации и геймификация.
+- Рекомендации, геймификация и Web Push-уведомления для браузера/PWA.
 - Административные маршруты и feature flags.
 - Email через `nodemailer` и HTML-шаблоны из `email-templates/`.
+
+## Web Push-уведомления
+
+В проекте реализованы self-hosted Web Push-уведомления без внешнего push-сервера приложения. Backend использует `web-push` и VAPID, а доставка выполняется через стандартные push endpoints браузеров.
+
+Возможности:
+
+- пользователь включает push в личном кабинете через переключатель **Push уведомления**;
+- браузерная подписка сохраняется в `push_subscriptions`;
+- настройки канала хранятся в `push_notification_settings`;
+- отправки логируются в `push_notification_log`;
+- service worker `client/public/sw.js` показывает системные уведомления браузера/PWA;
+- администратор может отправить тестовый push выбранному пользователю из админки;
+- успешный админский тест также создаёт in-app уведомление для колокольчика.
+
+Для работы Web Push нужны переменные окружения:
+
+```env
+VAPID_EMAIL=support@example.com
+VAPID_PUBLIC_KEY=...
+VAPID_PRIVATE_KEY=...
+```
+
+Ключи VAPID генерируются специальной командой, это не произвольные строки:
+
+```bash
+pnpm exec web-push generate-vapid-keys
+```
+
+Для production требуется HTTPS. После смены VAPID-ключей пользователям может потребоваться выключить и снова включить push-уведомления, чтобы создать подписку с новым public key.
 
 ## Технологический стек
 
@@ -47,6 +79,7 @@ pnpm dev
 - Redis для rate limiting там, где настроен.
 - S3-совместимое хранилище/MinIO для файлов.
 - `nodemailer` для email.
+- `web-push` для Web Push/PWA уведомлений.
 - Node.js test runner для текущих тестов.
 
 > В текущем `package.json` нет `resend`, `react-email`, Vitest, Playwright, Supertest или MSW. Они не считаются current baseline.
@@ -65,6 +98,8 @@ pnpm dev
 ## Миграции
 
 Production-миграции применяются вручную, строго по одной, через pgAdmin на CapRover. Автоматического запуска миграций при деплое нет. Это осознанное решение для полного контроля за миграциями. Подробные правила см. в [AGENTS.md](./AGENTS.md) и [deployment guide](./docs/11-deployment/deployment-guide.md).
+
+Для Web Push используется миграция `0047_add_push_notifications.sql`. Она идемпотентна: таблицы создаются через `CREATE TABLE IF NOT EXISTS`, индексы — через `CREATE INDEX IF NOT EXISTS`.
 
 Для dev доступны команды Drizzle из `package.json`, но они не заменяют production-процесс:
 
