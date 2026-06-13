@@ -103,3 +103,51 @@ globalThis.addEventListener("fetch", (event) => {
     event.respondWith(handleStaticAsset(request));
   }
 });
+
+globalThis.addEventListener("push", (event) => {
+  let data = {};
+
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch {
+    data = {};
+  }
+
+  const title = data.title || "VoxLibris";
+  const options = {
+    body: data.body || "Новое уведомление",
+    icon: data.icon || "/web-app-manifest-192x192.png",
+    badge: data.badge || "/favicon-96x96.png",
+    tag: data.tag || "voxlibris-notification",
+    data: { url: data.url || "/" },
+    actions: [
+      { action: "open", title: "Открыть" },
+      { action: "dismiss", title: "Закрыть" },
+    ],
+  };
+
+  event.waitUntil(globalThis.registration.showNotification(title, options));
+});
+
+globalThis.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+
+  if (event.action === "dismiss") {
+    return;
+  }
+
+  const targetUrl = event.notification.data?.url || "/";
+
+  event.waitUntil((async () => {
+    const allClients = await globalThis.clients.matchAll({ type: "window", includeUncontrolled: true });
+    const absoluteTarget = new URL(targetUrl, globalThis.location.origin).href;
+    const existingClient = allClients.find((client) => client.url === absoluteTarget);
+
+    if (existingClient) {
+      await existingClient.focus();
+      return;
+    }
+
+    await globalThis.clients.openWindow(targetUrl);
+  })());
+});

@@ -9,6 +9,7 @@ import { jwtAuth, requireAdmin, requireModerator } from './jwt-middleware.js';
 import { storage } from './repositories/index.js';
 import { authService } from './auth-service.js';
 import { emailService } from './services/email-service.js';
+import { pushService } from './services/push-service.js';
 import { fileStorage } from './file-storage.js';
 import { CryptoService } from './crypto-service.js';
 import { z } from 'zod';
@@ -17,7 +18,7 @@ import { db } from './db.js';
 import postgres from 'postgres';
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { SQL } from 'drizzle-orm';
-import { books, personalBooks, clubBooks, users, clubs, clubMembers, readingSessions, conversations, directMessages, dmReports, dmAdminAccessLog } from '../shared/schema.js';
+import { books, personalBooks, clubBooks, users, clubs, clubMembers, readingSessions, conversations, directMessages, dmReports, dmAdminAccessLog, notifications } from '../shared/schema.js';
 import { logger } from './lib/logger.js';
 import { getStudioRecordingsDir } from './lib/studio-recording-storage.js';
 import {
@@ -27,6 +28,30 @@ import {
   platformBaseUrlSettingKey,
 } from './lib/public-base-url.js';
 const PostgresError = postgres.PostgresError;
+
+function isMissingRelationError(error: unknown): boolean {
+  const maybeError = error as { code?: string; cause?: { code?: string } };
+  return maybeError.code === '42P01' || maybeError.cause?.code === '42P01';
+}
+
+function getAdminPushSkipMessage(reason: string | undefined): string {
+  switch (reason) {
+    case 'not_configured':
+      return 'Push не отправлен: VAPID-переменные не настроены или backend не был перезапущен после их добавления.';
+    case 'disabled_by_settings':
+      return 'Push не отправлен: уведомления отключены в настройках пользователя.';
+    case 'quiet_hours':
+      return 'Push не отправлен: сейчас у пользователя включены тихие часы.';
+    case 'daily_limit':
+      return 'Push не отправлен: достигнут дневной лимит push-уведомлений для пользователя.';
+    case 'no_active_subscriptions':
+      return 'Push не отправлен: у пользователя нет активной серверной push-подписки. Попросите пользователя снова нажать «Включить push-уведомления» в личном кабинете.';
+    case 'send_failed':
+      return 'Push не отправлен: push-сервис браузера отклонил все активные подписки. Попробуйте пересоздать подписку у пользователя.';
+    default:
+      return 'Push не отправлен: причина не определена.';
+  }
+}
 
 const adminGenreUpsertSchema = z.object({
   code: z.string().trim().min(1).max(120),
@@ -716,6 +741,71 @@ router.post('/users/:id/reset-password', jwtAuth, requireFullAdmin, async (req, 
     res.json({ success: true, message: 'Письмо для сброса пароля отправлено' });
   } catch (error) {
     console.error('Error requesting password reset:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+// Отправить тестовое push-уведомление выбранному пользователю
+router.post('/users/:id/test-push', jwtAuth, requireFullAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const user = await storage.getUser(id);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const result = await pushService.sendToUser(
+      id,
+      {
+        type: 'test',
+        title: 'VoxLibris',
+        body: 'Тестовое push-уведомление от администратора',
+        url: '/dashboard?tab=notifications',
+        tag: 'admin-push-test',
+      },
+      { bypassLimits: true },
+    );
+
+    if (result.sent > 0) {
+      await db.insert(notifications).values({
+        userId: id,
+        type: 'mention',
+        kind: 'mention',
+        actorUserId: req.user!.userId,
+        entityType: 'admin_test_push',
+        entityId: user.id,
+        actionUrl: '/dashboard?tab=notifications',
+        payload: { sent: result.sent },
+        message: 'Тестовое push-уведомление от администратора',
+      });
+    }
+
+    await logAction(
+      req,
+      'send_test_push',
+      'user',
+      user.id,
+      `Admin sent test push notification to ${user.username}: sent=${result.sent}, skipped=${result.skipped}`
+    );
+
+    res.json({
+      success: true,
+      sent: result.sent,
+      skipped: result.skipped,
+      reason: result.reason,
+      message: result.sent > 0
+        ? 'Тестовое push-уведомление отправлено'
+        : getAdminPushSkipMessage(result.reason),
+    });
+  } catch (error) {
+    if (isMissingRelationError(error)) {
+      return res.status(503).json({
+        message: 'Push-таблицы ещё не созданы. Примените миграцию migrations/0047_add_push_notifications.sql и повторите отправку.',
+      });
+    }
+
+    console.error('Error sending admin test push:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 });

@@ -2,6 +2,7 @@ import { emailService } from './email-service.js';
 import { storage } from '../repositories/index.js';
 import { logger } from '../lib/logger.js';
 import type { ReadingSchedule } from '../../shared/schema.js';
+import { pushService, type PushNotificationType } from './push-service.js';
 
 /**
  * NotificationService — сервис уведомлений для VoxLibris Studio
@@ -246,10 +247,17 @@ class NotificationService {
         success = success || emailSuccess;
       }
 
-      // Push (будет реализовано позже)
+      // Browser Web Push
       if (channels.includes('push') && settings.pushEnabled) {
-        // Push-уведомления пока не реализованы.
-        logger.debug('Push notifications not implemented yet');
+        const pushType = this.mapPayloadTypeToPushType(payload.type);
+        const pushResult = await pushService.sendToUser(payload.userId, {
+          type: pushType,
+          title: payload.title,
+          body: payload.message,
+          url: typeof payload.data?.url === 'string' ? payload.data.url : '/dashboard',
+          tag: pushType,
+        });
+        success = success || pushResult.sent > 0;
       }
 
       // WebSocket (отправляем в реальном времени)
@@ -264,6 +272,21 @@ class NotificationService {
       const errorMessage = error instanceof Error ? error.message : String(error);
       logger.error({ error: errorMessage }, 'Error sending notification');
       return false;
+    }
+  }
+
+  private mapPayloadTypeToPushType(type: NotificationPayload['type']): PushNotificationType {
+    switch (type) {
+      case 'session_reminder':
+        return 'session_reminder';
+      case 'session_start':
+        return 'session_started';
+      case 'new_question':
+      case 'new_reaction':
+        return 'mention_in_chat';
+      case 'session_end':
+      default:
+        return 'club_discussion';
     }
   }
 

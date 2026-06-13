@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
   Ban,
+  BellRing,
   CheckCircle,
   Clock,
   Download,
@@ -143,6 +144,20 @@ async function updateUserFields(userId: string, fields: { username?: string; ema
 
 async function resetUserPassword(userId: string): Promise<void> {
   await apiRequest(`/api/v1/admin/users/${userId}/reset-password`, {
+    method: "POST",
+  });
+}
+
+interface TestPushResponse {
+  success: boolean;
+  sent: number;
+  skipped: boolean;
+  reason?: string;
+  message: string;
+}
+
+async function sendTestPush(userId: string): Promise<TestPushResponse> {
+  return apiRequest<TestPushResponse>(`/api/v1/admin/users/${userId}/test-push`, {
     method: "POST",
   });
 }
@@ -324,6 +339,26 @@ function UserActionsMenu({ user }: Readonly<{ user: User }>) {
     },
   });
 
+  const testPushMutation = useMutation({
+    mutationFn: (userId: string) => sendTestPush(userId),
+    onSuccess: (data) => {
+      void modalAlert({
+        title: data.sent > 0 ? "Push отправлен" : "Push не отправлен",
+        description: data.sent > 0
+          ? `Отправлено подписок: ${data.sent}.`
+          : data.message,
+        variant: data.sent > 0 ? "default" : "destructive",
+      });
+    },
+    onError: (error: unknown) => {
+      void modalAlert({
+        title: "Не удалось отправить push",
+        description: error instanceof Error ? error.message : "Ошибка отправки тестового push-уведомления",
+        variant: "destructive",
+      });
+    },
+  });
+
   const impersonateMutation = useMutation({
     mutationFn: (userId: string) => impersonateUser(userId),
     onSuccess: async (data) => {
@@ -496,6 +531,14 @@ function UserActionsMenu({ user }: Readonly<{ user: User }>) {
           >
             <KeyRound className="h-4 w-4 mr-2" />
             Сбросить пароль
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onClick={() => testPushMutation.mutate(user.id)}
+            disabled={testPushMutation.isPending}
+            className="text-indigo-600"
+          >
+            <BellRing className="h-4 w-4 mr-2" />
+            {testPushMutation.isPending ? "Отправляем push..." : "Отправить тестовый push"}
           </DropdownMenuItem>
           <DropdownMenuItem
             onClick={() => impersonateMutation.mutate(user.id)}

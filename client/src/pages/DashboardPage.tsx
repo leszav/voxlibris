@@ -14,6 +14,7 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { useAuth } from '@/hooks/use-auth';
 import { useEffect, useState } from 'react';
+import { usePushNotifications } from '@/hooks/use-push-notifications';
 
 const DASHBOARD_TABS = ['feed', 'people', 'messages', 'recommendations', 'notifications'] as const;
 type DashboardTab = (typeof DASHBOARD_TABS)[number];
@@ -32,6 +33,7 @@ export default function DashboardPage() {
   const { data: notificationSettings } = useNotificationSettings(!!user);
   const { mutate: updateNotificationSettings } = useUpdateNotificationSettings();
   const { mutate: markSeen } = useMarkFeedSeen();
+  const pushNotifications = usePushNotifications();
 
   const search = globalThis.window?.location?.search ?? '';
   const queryTab = new URLSearchParams(search).get('tab');
@@ -56,6 +58,15 @@ export default function DashboardPage() {
 
     setActiveTab(value);
     setLocation(`/dashboard?tab=${value}`);
+  };
+
+  const handlePushChannelChange = (checked: boolean) => {
+    if (checked) {
+      void pushNotifications.subscribe();
+      return;
+    }
+
+    void pushNotifications.unsubscribe();
   };
 
   return (
@@ -207,10 +218,19 @@ export default function DashboardPage() {
                     <Label htmlFor="notif-push" className="text-sm">Push уведомления</Label>
                     <Switch
                       id="notif-push"
-                      checked={notificationSettings?.pushEnabled ?? true}
-                      onCheckedChange={(checked) => updateNotificationSettings({ pushEnabled: checked })}
+                      checked={pushNotifications.isSubscribed}
+                      disabled={!pushNotifications.isSupported || pushNotifications.isLoading || pushNotifications.permission === 'denied'}
+                      onCheckedChange={handlePushChannelChange}
                     />
                   </div>
+                  {pushNotifications.error && (
+                    <p className="text-sm text-destructive">{pushNotifications.error}</p>
+                  )}
+                  {pushNotifications.permission === 'denied' && (
+                    <p className="text-sm text-muted-foreground">
+                      Push-уведомления заблокированы в браузере. Разрешите их в настройках сайта.
+                    </p>
+                  )}
                 </div>
 
                 <div className="space-y-3">

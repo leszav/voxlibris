@@ -4,7 +4,7 @@ import "./fonts.css";
 import "./index.css";
 import "./styles/reader-themes.css";
 
-if (import.meta.env.PROD && "serviceWorker" in navigator) {
+if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
     void navigator.serviceWorker.register("/sw.js");
   });

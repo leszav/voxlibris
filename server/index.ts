@@ -50,6 +50,7 @@ import usersRoutes from "./routes/users.js";
 import presenceRoutes from "./routes/presence.js";
 import dmRoutes from "./routes/direct-messages.js";
 import recommendationsRoutes from "./routes/recommendations.js";
+import pushRoutes from "./routes/push.js";
 import gamificationAdminRoutes from "./routes/gamification-admin.js";
 import gamificationRoutes from "./routes/gamification.js";
 import { logger } from "./lib/logger.js";
@@ -943,6 +944,9 @@ try {
 
 	// Recommendations (Sprint 2.6, Stage A) (email confirmed required)
 	app.use("/api/recommendations", jwtAuth, requireActiveUser, recommendationsRoutes);
+
+	// Browser Web Push subscriptions and settings (email confirmed required)
+	app.use("/api/push", jwtAuth, requireActiveUser, pushRoutes);
 
 	// Gamification admin constructor
 	app.use("/api/admin/gamification", jwtAuth, gamificationAdminRoutes);

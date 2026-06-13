@@ -718,7 +718,7 @@ export const moderationReports = pgTable("moderation_reports", {
 
 export const adminActionTypes = [
   "block_user", "unblock_user", "change_user_role", "change_user_status", "delete_user", "restore_user", "permanent_delete_user",
-  "reset_password", "impersonate", "edit_user_fields",
+  "reset_password", "impersonate", "edit_user_fields", "send_test_push",
   "archive_club", "delete_club", "block_club", "unblock_club", "update_club", "update_club_privacy",
   "delete_book", "block_book", "unblock_book", "update_book_status",
   "delete_message", "block_message",
@@ -1199,6 +1199,52 @@ export const notifications = pgTable("notifications", {
   message: text("message").notNull(),
   readAt: timestamp("read_at"),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
+});
+
+// Browser Web Push subscriptions
+export const pushSubscriptions = pgTable("push_subscriptions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  endpoint: text("endpoint").notNull(),
+  auth: text("auth").notNull(),
+  p256dh: text("p256dh").notNull(),
+  userAgent: text("user_agent"),
+  deviceName: text("device_name"),
+  isActive: boolean("is_active").notNull().default(true),
+  lastUsedAt: timestamp("last_used_at"),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+  updatedAt: timestamp("updated_at").notNull().default(sql`now()`),
+});
+
+export const pushNotificationSettings = pgTable("push_notification_settings", {
+  userId: varchar("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  pushEnabled: boolean("push_enabled").notNull().default(false),
+  emailEnabled: boolean("email_enabled").notNull().default(true),
+  sessionStarted: boolean("session_started").notNull().default(true),
+  sessionReminder: boolean("session_reminder").notNull().default(true),
+  clubDiscussion: boolean("club_discussion").notNull().default(false),
+  mentionInChat: boolean("mention_in_chat").notNull().default(true),
+  dmReceived: boolean("dm_received").notNull().default(true),
+  newFollower: boolean("new_follower").notNull().default(false),
+  streakReminder: boolean("streak_reminder").notNull().default(true),
+  achievementUnlocked: boolean("achievement_unlocked").notNull().default(true),
+  quietHoursEnabled: boolean("quiet_hours_enabled").notNull().default(false),
+  quietHoursStart: integer("quiet_hours_start").default(23),
+  quietHoursEnd: integer("quiet_hours_end").default(8),
+  updatedAt: timestamp("updated_at").notNull().default(sql`now()`),
+});
+
+export const pushNotificationLog = pgTable("push_notification_log", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  type: text("type").notNull(),
+  title: text("title").notNull(),
+  body: text("body").notNull(),
+  url: text("url"),
+  sentAt: timestamp("sent_at").notNull().default(sql`now()`),
+  deliveredAt: timestamp("delivered_at"),
+  clickedAt: timestamp("clicked_at"),
+  errorCode: text("error_code"),
 });
 
 // Избранные комментарии
