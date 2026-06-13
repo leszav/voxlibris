@@ -10,6 +10,7 @@ import {
   resolveStudioMicCheckModalOpen,
 } from "@/lib/studio-prep-view";
 import type { StudioSessionPhase } from "@/lib/studio-session-phase";
+import type { LiveSessionReaction } from "@/hooks/use-audio-session";
 
 interface EmbeddedClubStudioShellProps {
   isOpen: boolean;
@@ -24,6 +25,7 @@ interface EmbeddedClubStudioShellProps {
   micLevel: number;
   micBars: ReadonlyArray<number>;
   sessionConnected: boolean;
+  recentReactions: LiveSessionReaction[];
   streamStartError: string | null;
   micCheckPassed: boolean;
   showMicCheck: boolean;
@@ -66,6 +68,7 @@ export function EmbeddedClubStudioShell({
   micLevel,
   micBars,
   sessionConnected,
+  recentReactions,
   streamStartError,
   micCheckPassed,
   showMicCheck,
@@ -159,6 +162,7 @@ export function EmbeddedClubStudioShell({
               onMicToggle={onMicToggle}
               elapsedTime={elapsedTime}
               listenerCount={listenerCount}
+              recentReactions={recentReactions}
               sessionId={sessionId}
               micLevel={micLevel}
               micBars={micBars}

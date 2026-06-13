@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
-import { Mic, MicOff, Pause, Play, Square, Users, Bookmark } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Eye, EyeOff, Mic, MicOff, Pause, Play, Square, Users, Bookmark } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { StudioWordmark } from "@/components/studio/StudioWordmark";
 import { SessionListenerAvatars } from "@/components/presence/SessionListenerAvatars";
+import type { LiveSessionReaction } from "@/hooks/use-audio-session";
 
 interface ControlBarProps {
   state: "prep" | "live" | "paused";
@@ -12,6 +13,7 @@ interface ControlBarProps {
   onMicToggle: () => void;
   elapsedTime: number;
   listenerCount: number;
+  recentReactions?: LiveSessionReaction[];
   sessionId?: string | null;
   /** RMS-уровень сигнала микрофона (0..100) */
   micLevel: number;
@@ -49,6 +51,53 @@ function levelToDb(level: number): number {
 const SILENCE_GATE = 7;
 const SILENCE_SNAP = 2;
 
+function LiveReactionDock({ reactions }: Readonly<{ reactions: LiveSessionReaction[] }>) {
+  const [hidden, setHidden] = useState(false);
+  const latestReaction = reactions.at(-1);
+  const recentCount = reactions.length;
+  const floatingReactions = useMemo(() => reactions.slice(-4), [reactions]);
+
+  return (
+    <div className="relative flex items-center gap-1 border-r border-border px-2">
+      <style>{`
+        @keyframes voxlibris-reader-reaction-float {
+          0% { opacity: 0; transform: translate(-50%, 8px) scale(0.72); }
+          15% { opacity: 1; transform: translate(-50%, -4px) scale(1.04); }
+          100% { opacity: 0; transform: translate(-50%, -34px) scale(1.2); }
+        }
+      `}</style>
+
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="h-9 w-9 rounded-xl text-muted-foreground hover:text-foreground"
+        onClick={() => setHidden((value) => !value)}
+        title={hidden ? 'Показать реакции слушателей' : 'Скрыть реакции слушателей'}
+      >
+        {hidden ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+      </Button>
+
+      {!hidden && (
+        <div className="relative flex h-9 min-w-10 items-center justify-center rounded-xl bg-muted/40 px-2" title="Реакции слушателей">
+          {floatingReactions.map((reaction) => (
+            <span
+              key={reaction.id}
+              className="pointer-events-none absolute left-1/2 text-2xl drop-shadow-md"
+              style={{ animation: 'voxlibris-reader-reaction-float 1.2s ease-out forwards' }}
+              aria-hidden="true"
+            >
+              {reaction.emoji}
+            </span>
+          ))}
+          <span className="text-lg leading-none" aria-hidden="true">{latestReaction?.emoji ?? '♡'}</span>
+          <span className="ml-1 text-[10px] tabular-nums text-muted-foreground">{recentCount}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ControlBar({
   state,
   isOnline,
@@ -56,6 +105,7 @@ export function ControlBar({
   onMicToggle,
   elapsedTime,
   listenerCount,
+  recentReactions = [],
   sessionId,
   micLevel,
   micBars,
@@ -209,6 +259,8 @@ export function ControlBar({
           </>
         )}
       </div>
+
+      <LiveReactionDock reactions={recentReactions} />
 
       {/* Right group: listeners */}
       <div className="flex items-center gap-1 pl-2">

@@ -16,6 +16,7 @@ import { clearStudioMicCheckPassed, hasRecentStudioMicCheck, markStudioMicCheckP
 import { resolveStudioMicCheckState, resolveStudioStartGuard } from '@/lib/studio-mic-check-state';
 import { resolveStudioModeState } from '@/lib/studio-mode-state';
 import { resolveStudioSessionPhase, type StudioSessionPhase } from '@/lib/studio-session-phase';
+import type { LiveSessionReaction } from './use-audio-session';
 
 interface UseStudioModeOptions {
   clubId: string;
@@ -46,6 +47,7 @@ export interface StudioModeState {
   micBars: ReadonlyArray<number>;
   listenerCount: number;
   elapsedTime: number;
+  recentReactions: LiveSessionReaction[];
   completeMicCheck: () => void;
   skipMicCheck: () => void;
   handleStartBroadcast: (onAnnounce: (sessionId: string) => void) => Promise<void>;
@@ -107,6 +109,7 @@ export function useStudioMode({
     notifyBroadcastPaused,
     notifyBroadcastResumed,
     joinSessionRoom,
+    recentReactions,
   } = useAudioSession({ userId, enabled: resourcesEnabled });
 
   const {
@@ -406,6 +409,7 @@ export function useStudioMode({
     micBars,
     listenerCount,
     elapsedTime: session.elapsedTime,
+    recentReactions,
     completeMicCheck,
     skipMicCheck,
     handleStartBroadcast,

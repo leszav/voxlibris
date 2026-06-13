@@ -1,8 +1,20 @@
 import { Router, Request, Response } from 'express';
 import { repositories, storage } from '../repositories/index.js';
 import { logger } from '../lib/logger.js';
+import { getIO } from '../lib/socket-registry.js';
 
 const router = Router();
+
+function parseOptionalInt(value: unknown, min: number): number | undefined {
+  if (value === undefined || value === null || value === '') return undefined;
+  const numberValue = Number(value);
+  if (!Number.isInteger(numberValue) || numberValue < min) return undefined;
+  return numberValue;
+}
+
+function wasProvided(value: unknown): boolean {
+  return value !== undefined && value !== null && value !== '';
+}
 
 /**
  * POST /api/reactions
@@ -19,11 +31,21 @@ router.post('/', async (req: Request, res: Response) => {
     }
 
     const { sessionId, emoji, type = 'positive', position } = req.body;
+    const audioTimestampMs = parseOptionalInt(req.body.audioTimestampMs, 0);
+    const chapterNumber = parseOptionalInt(req.body.chapterNumber, 1);
 
     if (!sessionId || !emoji) {
       return res.status(400).json({
         success: false,
         error: 'Missing required fields: sessionId, emoji',
+      });
+    }
+
+    if ((wasProvided(req.body.audioTimestampMs) && audioTimestampMs === undefined)
+      || (wasProvided(req.body.chapterNumber) && chapterNumber === undefined)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid timestamp payload: audioTimestampMs must be >= 0, chapterNumber must be >= 1',
       });
     }
 
@@ -68,7 +90,23 @@ router.post('/', async (req: Request, res: Response) => {
       emoji,
       type,
       position,
+      audioTimestampMs,
+      chapterNumber,
     });
+
+    try {
+      getIO().of('/reading-sessions').to(`session:${sessionId}`).emit('reading-session:reaction', {
+        sessionId,
+        userId,
+        emoji,
+        type,
+        audioTimestampMs,
+        chapterNumber,
+      });
+    } catch (broadcastError) {
+      const broadcastErrorMessage = broadcastError instanceof Error ? broadcastError.message : String(broadcastError);
+      logger.warn(`Failed to broadcast reaction for session ${sessionId}: ${broadcastErrorMessage}`);
+    }
 
     res.json({
       success: true,

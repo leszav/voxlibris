@@ -5,6 +5,7 @@ import { setStudioStreamClosureIntent } from '../lib/studio-stream-intent-store.
 import { sessionAnalyticsService } from '../services/session-analytics-service.js';
 import { activityService } from '../services/activity-service.js';
 import { gamificationService } from '../services/gamification-service.js';
+import { emotionalMapService } from '../services/emotional-map-service.js';
 
 const router = Router();
 const readingSessionStatuses = ['active', 'paused', 'completed', 'cancelled'] as const;
@@ -109,6 +110,54 @@ router.post('/', async (req: Request, res: Response) => {
       success: false,
       error: 'Failed to create reading session',
     });
+  }
+});
+
+/**
+ * GET /api/reading-sessions/:sessionId/emotional-map
+ * Получить эмоциональную карту сессии по timestamped reactions.
+ */
+router.get('/:sessionId/emotional-map', async (req: Request, res: Response) => {
+  try {
+    const { sessionId } = req.params;
+    const map = await emotionalMapService.buildMap(sessionId, req.query.windowSizeMs);
+
+    if (!map) {
+      return res.status(404).json({
+        success: false,
+        error: 'Session not found',
+      });
+    }
+
+    return res.json({ success: true, map });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error(`Error getting emotional map: ${errorMessage}`);
+    return res.status(500).json({ success: false, error: 'Failed to get emotional map' });
+  }
+});
+
+/**
+ * GET /api/reading-sessions/:sessionId/highlights
+ * Получить топ эмоциональных моментов сессии.
+ */
+router.get('/:sessionId/highlights', async (req: Request, res: Response) => {
+  try {
+    const { sessionId } = req.params;
+    const highlights = await emotionalMapService.getHighlights(sessionId);
+
+    if (!highlights) {
+      return res.status(404).json({
+        success: false,
+        error: 'Session not found',
+      });
+    }
+
+    return res.json({ success: true, highlights });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error(`Error getting emotional map highlights: ${errorMessage}`);
+    return res.status(500).json({ success: false, error: 'Failed to get emotional map highlights' });
   }
 });
 

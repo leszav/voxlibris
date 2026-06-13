@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Play, LogOut, Volume2, VolumeX, Star } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
@@ -8,6 +9,17 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import type { LiveReader } from "@/hooks/use-live-readers";
 import type { PlayerStatus } from "@/hooks/use-icecast-player";
+import { SessionEmotionalMapPanel } from "@/components/emotional-map";
+import { reactionsApi } from "@/api/reactions";
+
+const LIVE_REACTIONS = [
+  { emoji: '😂', label: 'Смешно', className: 'from-yellow-200/80 to-amber-100/70 text-yellow-900 ring-yellow-300/60' },
+  { emoji: '😢', label: 'Трогательно', className: 'from-sky-200/80 to-blue-100/70 text-sky-900 ring-sky-300/60' },
+  { emoji: '🔥', label: 'Огонь', className: 'from-orange-200/80 to-red-100/70 text-orange-900 ring-orange-300/60' },
+  { emoji: '😱', label: 'Вот это да', className: 'from-purple-200/80 to-fuchsia-100/70 text-purple-900 ring-purple-300/60' },
+  { emoji: '😬', label: 'Напряжённо', className: 'from-slate-200/90 to-zinc-100/80 text-slate-900 ring-slate-300/60' },
+  { emoji: '🤩', label: 'Восторг', className: 'from-pink-200/80 to-rose-100/70 text-pink-900 ring-pink-300/60' },
+] as const;
 
 function PlayPauseIcon({ isLoading, isPlaying }: Readonly<{ isLoading: boolean; isPlaying: boolean }>) {
   if (isLoading) {
@@ -129,6 +141,17 @@ function getRatingButtonLabel(hasSubmittedRating: boolean, isSubmittingRating: b
   return "Оценить чтеца";
 }
 
+function getElapsedListeningMs(startedAt: number | null): number | undefined {
+  if (!startedAt) return undefined;
+  return Math.max(0, Date.now() - startedAt);
+}
+
+interface FlyingReaction {
+  id: number;
+  emoji: string;
+  offsetX: number;
+}
+
 interface ListenerOverlayProps {
   reader: LiveReader;
   /** URL обложки книги */
@@ -160,9 +183,14 @@ export function ListenerOverlay({
   const [selectedRating, setSelectedRating] = useState(0);
   const [isSubmittingRating, setIsSubmittingRating] = useState(false);
   const [hasSubmittedRating, setHasSubmittedRating] = useState(false);
+  const [lastReactionEmoji, setLastReactionEmoji] = useState<string | null>(null);
+  const [flyingReactions, setFlyingReactions] = useState<FlyingReaction[]>([]);
   const useCompactActionButtons = useCompactListenerActionButtons();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const streamEndedHandledRef = useRef(false);
+  const listeningStartedAtRef = useRef<number | null>(null);
+  const flyingReactionIdRef = useRef(0);
 
   const { status, error, play, stop, setVolume: setPlayerVolume, toggleMute, isMuted } = useIcecastPlayer({
     streamUrl: isPaused ? null : reader.streamUrl,
@@ -177,8 +205,42 @@ export function ListenerOverlay({
     setSelectedRating(0);
     setIsSubmittingRating(false);
     setHasSubmittedRating(false);
+    setLastReactionEmoji(null);
+    setFlyingReactions([]);
     streamEndedHandledRef.current = false;
+    listeningStartedAtRef.current = Date.now();
   }, [reader.sessionId]);
+
+  const reactionMutation = useMutation({
+    mutationFn: (emoji: string) => reactionsApi.addReaction({
+      sessionId: reader.sessionId,
+      emoji,
+      type: 'positive',
+      audioTimestampMs: getElapsedListeningMs(listeningStartedAtRef.current),
+      chapterNumber: reader.chapter,
+    }),
+    onSuccess: async (_data, emoji) => {
+      setLastReactionEmoji(emoji);
+      const id = flyingReactionIdRef.current + 1;
+      flyingReactionIdRef.current = id;
+      const offsetX = Math.round((Math.random() - 0.5) * 72);
+      setFlyingReactions((items) => [...items, { id, emoji, offsetX }].slice(-8));
+      globalThis.setTimeout(() => {
+        setLastReactionEmoji((current) => current === emoji ? null : current);
+      }, 700);
+      globalThis.setTimeout(() => {
+        setFlyingReactions((items) => items.filter((item) => item.id !== id));
+      }, 1400);
+      await queryClient.invalidateQueries({ queryKey: ['reading-session', reader.sessionId, 'emotional-map'] });
+    },
+    onError: (error) => {
+      toast({
+        title: 'Не удалось отправить реакцию',
+        description: error instanceof Error ? error.message : 'Попробуйте ещё раз',
+        variant: 'destructive',
+      });
+    },
+  });
 
   useEffect(() => {
     if (status !== "ended" || streamEndedHandledRef.current) {
@@ -242,9 +304,16 @@ export function ListenerOverlay({
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center px-4 py-6">
+      <style>{`
+        @keyframes voxlibris-float-reaction {
+          0% { opacity: 0; transform: translate(-50%, 10px) scale(0.72) rotate(-6deg); }
+          12% { opacity: 1; transform: translate(-50%, -8px) scale(1.08) rotate(4deg); }
+          100% { opacity: 0; transform: translate(calc(-50% + var(--reaction-offset-x, 0px)), -118px) scale(1.35) rotate(12deg); }
+        }
+      `}</style>
       <div className="absolute inset-0 bg-background/35 backdrop-blur-sm" />
       <div className={cn(
-        "relative z-10 w-full max-w-md rounded-3xl border border-border bg-card/95 shadow-2xl",
+        "relative z-10 max-h-[calc(100dvh-3rem)] w-full max-w-md overflow-y-auto rounded-3xl border border-border bg-card/95 shadow-2xl",
         "animate-in zoom-in-95 fade-in duration-300"
       )}>
         <div className="flex flex-col gap-5 p-5 sm:p-6">
@@ -366,6 +435,60 @@ export function ListenerOverlay({
               {ratingButtonLabel}
             </Button>
           </div>
+
+          <div className="relative space-y-3 overflow-hidden rounded-2xl bg-muted/40 p-4">
+            <div className="pointer-events-none absolute inset-x-0 bottom-16 z-10 flex justify-center">
+              {flyingReactions.map((reaction) => (
+                <span
+                  key={reaction.id}
+                  className="absolute text-4xl drop-shadow-lg"
+                  style={{
+                    '--reaction-offset-x': `${reaction.offsetX}px`,
+                    animation: 'voxlibris-float-reaction 1.35s ease-out forwards',
+                  } as CSSProperties}
+                  aria-hidden="true"
+                >
+                  {reaction.emoji}
+                </span>
+              ))}
+            </div>
+
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-sm text-muted-foreground">Реакция на эфир</span>
+              <span className="text-xs text-muted-foreground">с таймкодом</span>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
+              {LIVE_REACTIONS.map((reaction) => (
+                <button
+                  key={reaction.emoji}
+                  type="button"
+                  className={cn(
+                    'group relative flex min-h-12 items-center justify-center overflow-hidden rounded-2xl border bg-gradient-to-br px-2 py-2 shadow-sm ring-1 transition-all duration-200 ease-out sm:min-h-14 sm:py-3',
+                    'hover:-translate-y-0.5 hover:scale-[1.04] hover:shadow-md active:translate-y-0 active:scale-95',
+                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2',
+                    'disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:translate-y-0 disabled:hover:scale-100 disabled:hover:shadow-sm',
+                    reaction.className,
+                    lastReactionEmoji === reaction.emoji && 'scale-105 shadow-lg animate-pulse',
+                  )}
+                  onClick={() => reactionMutation.mutate(reaction.emoji)}
+                  disabled={!isPlaying || reactionMutation.isPending}
+                  aria-label={`Отправить реакцию: ${reaction.label}`}
+                  title={isPlaying ? reaction.label : 'Реакции доступны во время воспроизведения эфира'}
+                >
+                  <span className="block text-[1.7rem] leading-none transition-transform duration-200 group-hover:scale-110 sm:text-3xl">
+                    {reaction.emoji}
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            <p className="text-xs text-muted-foreground">
+              Реакция попадёт на эмоциональную карту в текущий момент прослушивания.
+            </p>
+          </div>
+
+          <SessionEmotionalMapPanel sessionId={reader.sessionId} />
 
           <div className="flex gap-3">
             <Button

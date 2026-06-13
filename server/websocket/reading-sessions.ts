@@ -309,9 +309,21 @@ export function setupReadingSessionsHandlers(_io: SocketIOServer, namespace: Nam
     /**
      * Отправить реакцию на сессию
      */
-    socket.on('reading-session:reaction', async (data: { sessionId: string; emoji: string; type?: 'positive' | 'negative' }) => {
+    socket.on('reading-session:reaction', async (data: { sessionId: string; emoji: string; type?: 'positive' | 'negative'; audioTimestampMs?: number; chapterNumber?: number }) => {
       try {
-        const { sessionId, emoji, type = 'positive' } = data;
+        const { sessionId, emoji, type = 'positive', audioTimestampMs, chapterNumber } = data;
+
+        const hasInvalidAudioTimestamp = audioTimestampMs !== undefined && (!Number.isInteger(audioTimestampMs) || audioTimestampMs < 0);
+        const hasInvalidChapterNumber = chapterNumber !== undefined && (!Number.isInteger(chapterNumber) || chapterNumber < 1);
+        if (hasInvalidAudioTimestamp || hasInvalidChapterNumber) {
+          socket.emit('error', { message: 'Invalid reaction timestamp payload' });
+          return;
+        }
+
+        if (!sessionId || !emoji || !['positive', 'negative'].includes(type)) {
+          socket.emit('error', { message: 'Invalid reaction payload' });
+          return;
+        }
 
         const session = await storage.readingSessions.getSession(sessionId);
         if (!session) {
@@ -325,6 +337,8 @@ export function setupReadingSessionsHandlers(_io: SocketIOServer, namespace: Nam
           sessionId,
           emoji,
           type,
+          audioTimestampMs,
+          chapterNumber,
         });
 
         // Уведомляем всех в комнате
@@ -333,6 +347,8 @@ export function setupReadingSessionsHandlers(_io: SocketIOServer, namespace: Nam
           userId,
           emoji,
           type,
+          audioTimestampMs,
+          chapterNumber,
         });
 
         logger.info(`User ${userId} sent reaction ${emoji} to session ${sessionId}`);

@@ -888,6 +888,7 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
         micLevel={studio.micLevel}
         micBars={studio.micBars}
         sessionConnected={studio.session.isConnected}
+        recentReactions={studio.recentReactions}
         streamStartError={studio.streamStartError}
         micCheckPassed={studio.micCheckPassed}
         showMicCheck={studio.showMicCheck}

@@ -34,6 +34,7 @@ pnpm dev
 - Личная и клубная библиотека, загрузка EPUB/FB2, обложки и S3/MinIO-хранилище.
 - Reader core/adapters и синхронизация статуса чтения.
 - Reading sessions, реакции, вопросы, расписание и записи.
+- Эмоциональная карта эфиров: таймкод-реакции слушателей, live-индикатор для чтеца, карта реакции аудитории и highlights завершённой сессии.
 - VoxLibris Studio baseline на Icecast/streaming route; WebRTC/mediasoup — roadmap/reference.
 - Социальный граф, activity feed, presence и direct messages.
 - Рекомендации, геймификация и Web Push-уведомления для браузера/PWA.
@@ -70,6 +71,17 @@ pnpm exec web-push generate-vapid-keys
 
 Для production требуется HTTPS. После смены VAPID-ключей пользователям может потребоваться выключить и снова включить push-уведомления, чтобы создать подписку с новым public key.
 
+## Эмоциональная карта эфиров
+
+В reading sessions реализован первый production-level слой эмоциональной карты:
+
+- слушатели отправляют быстрые emoji-реакции с таймкодом прослушивания;
+- реакции доставляются чтецу в live-режиме через существующий Socket.IO-контур `/reading-sessions`, с HTTP fallback для синхронизации;
+- завершённые сессии получают эмоциональную карту по временным окнам и топ-моменты/highlights;
+- карта кэшируется в PostgreSQL JSONB для завершённых сессий;
+- в VoxLibris Studio отображается компактный live-индикатор реакций;
+- в summary завершённого эфира доступна панель эмоциональной карты и highlights.
+
 ## Технологический стек
 
 - TypeScript, Node.js 20+, pnpm 9.
@@ -100,6 +112,8 @@ pnpm exec web-push generate-vapid-keys
 Production-миграции применяются вручную, строго по одной, через pgAdmin на CapRover. Автоматического запуска миграций при деплое нет. Это осознанное решение для полного контроля за миграциями. Подробные правила см. в [AGENTS.md](./AGENTS.md) и [deployment guide](./docs/11-deployment/deployment-guide.md).
 
 Для Web Push используется миграция `0047_add_push_notifications.sql`. Она идемпотентна: таблицы создаются через `CREATE TABLE IF NOT EXISTS`, индексы — через `CREATE INDEX IF NOT EXISTS`.
+
+Для эмоциональной карты используется миграция `0048_add_emotional_map.sql`: она добавляет таймкоды реакций и JSONB-кэш эмоциональной карты завершённых reading sessions.
 
 Для dev доступны команды Drizzle из `package.json`, но они не заменяют production-процесс:
 

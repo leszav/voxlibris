@@ -354,6 +354,8 @@ export const readingSessions = pgTable("reading_sessions", {
   isLive: boolean("is_live").notNull().default(false),
   startedAt: timestamp("started_at").notNull().default(sql`now()`),
   endedAt: timestamp("ended_at"),
+  emotionalMapCache: jsonb("emotional_map_cache"),
+  emotionalMapBuiltAt: timestamp("emotional_map_built_at"),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
 });
 
@@ -1498,6 +1500,8 @@ export const sessionReactions = pgTable("session_reactions", {
   emoji: varchar("emoji", { length: 50 }).notNull(), // "👍", "❤️", "🔥", "👎", "💩", etc
   type: varchar("type", { length: 20 }).notNull().default("positive").$type<ReactionType>(), // positive, negative
   position: text("position"), // Позиция в аудио (timestamp в секундах)
+  audioTimestampMs: integer("audio_timestamp_ms"), // Миллисекунды от начала аудио/записи
+  chapterNumber: integer("chapter_number"),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
 });
 
@@ -1995,6 +1999,8 @@ export const insertSessionReactionSchema = createInsertSchema(sessionReactions).
   emoji: true,
   type: true,
   position: true,
+  audioTimestampMs: true,
+  chapterNumber: true,
 });
 
 // Session Questions
