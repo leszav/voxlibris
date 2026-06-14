@@ -169,8 +169,14 @@ export function useClubLiveListening(meta: ClubListeningMeta) {
         if (cancelled || !currentListeningState) return;
         if (currentListeningState.reader.sessionId !== listeningInCurrentClub.reader.sessionId) return;
 
+        if (!status.isLive && !status.isPaused) {
+          stopIcecastPlayback();
+          updateListeningState(null);
+          return;
+        }
+
         const wasPaused = Boolean(currentListeningState.reader.isPaused);
-        const nextIsPaused = status.isPaused || (!status.isLive && wasPaused);
+        const nextIsPaused = status.isPaused;
         const nextReader: LiveReader = {
           ...currentListeningState.reader,
           streamUrl: status.streamUrl ?? currentListeningState.reader.streamUrl,

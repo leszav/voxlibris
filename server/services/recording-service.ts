@@ -27,6 +27,7 @@ export interface RecordingOptions {
   maxDuration?: number; // в секундах
   isBackup?: boolean;
   availableUntil?: Date;
+  publicationRequested?: boolean;
 }
 
 class RecordingService {
@@ -50,7 +51,12 @@ class RecordingService {
         bitrate: metadata.bitrate,
         sampleRate: metadata.sampleRate,
         channels: metadata.channels,
-        isAvailable: true,
+        isAvailable: false,
+        publicationRequested: options.publicationRequested ?? true,
+        moderationStatus: 'pending',
+        isPublished: false,
+        allowStreaming: false,
+        allowDownload: false,
         availableUntil: options.availableUntil,
         metadata: JSON.stringify({
           title: metadata.title,

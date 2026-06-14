@@ -10,7 +10,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { ErrorDialog } from "@/components/ui/error-dialog";
 import { useCreateClub } from "@/hooks/use-clubs";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Loader2, Users, CheckCircle, Clock } from "lucide-react";
+import { useAuth } from "@/hooks/use-auth";
+import { ArrowLeft, Loader2, Users, CheckCircle, Clock, Mic2 } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -23,6 +24,7 @@ import {
 export default function CreateClub() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
+  const { user } = useAuth();
   const createClubMutation = useCreateClub();
 
   const [formData, setFormData] = useState({
@@ -30,8 +32,23 @@ export default function CreateClub() {
     description: "",
     isPrivate: false,
     maxMembers: 50,
-    type: "standard" as const,
+    type: "standard" as "standard" | "reader-led",
   });
+
+  const isReaderLedClub = formData.type === "reader-led";
+  const canCreateReaderLedClubs = user?.canCreateReaderLedClubs === true;
+
+  const handleReaderLedChange = (checked: boolean) => {
+    if (checked && !canCreateReaderLedClubs) {
+      return;
+    }
+
+    setFormData((current) => ({
+      ...current,
+      type: checked ? "reader-led" : "standard",
+      isPrivate: checked ? true : current.isPrivate,
+    }));
+  };
 
   const [errorDialog, setErrorDialog] = useState<{
     open: boolean;
@@ -159,14 +176,35 @@ export default function CreateClub() {
 
               <div className="flex flex-col gap-3 rounded-lg border p-4 sm:flex-row sm:items-center sm:justify-between">
                 <div className="space-y-0.5">
+                  <Label htmlFor="isReaderLed" className="flex items-center gap-2">
+                    <Mic2 className="h-4 w-4" />
+                    Клуб чтецов
+                  </Label>
+                  <p className="text-sm text-muted-foreground">
+                    {canCreateReaderLedClubs
+                      ? "Аудио-клуб: книгу читает владелец, слушатели подключаются к эфиру"
+                      : "Доступно после одобрения заявки ПРО-чтеца администратором"}
+                  </p>
+                </div>
+                <Switch
+                  id="isReaderLed"
+                  checked={isReaderLedClub}
+                  disabled={!canCreateReaderLedClubs}
+                  onCheckedChange={handleReaderLedChange}
+                />
+              </div>
+
+              <div className="flex flex-col gap-3 rounded-lg border p-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="space-y-0.5">
                   <Label htmlFor="isPrivate">Приватный клуб</Label>
                   <p className="text-sm text-muted-foreground">
-                    Только по приглашениям
+                    {isReaderLedClub ? "Клуб чтецов всегда приватный" : "Только по приглашениям"}
                   </p>
                 </div>
                 <Switch
                   id="isPrivate"
                   checked={formData.isPrivate}
+                  disabled={isReaderLedClub}
                   onCheckedChange={(checked) => setFormData({ ...formData, isPrivate: checked })}
                 />
               </div>

@@ -554,8 +554,8 @@ class StorageAdapter implements Partial<IStorage> {
     return this.repos.clubs.getClubs(); // Alias для совместимости
   }
 
-  async getPublicCatalogClubs(limit?: number, offset?: number, searchQuery?: string) {
-    return this.repos.clubs.getPublicCatalogClubs(limit, offset, searchQuery);
+  async getPublicCatalogClubs(limit?: number, offset?: number, searchQuery?: string, type?: string) {
+    return this.repos.clubs.getPublicCatalogClubs(limit, offset, searchQuery, type);
   }
 
   async getClub(id: string) {

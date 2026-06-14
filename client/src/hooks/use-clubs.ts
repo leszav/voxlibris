@@ -66,6 +66,7 @@ export interface ClubMemberWithUser {
   }>;
   role: ClubMemberRole;
   joinedAt: Date;
+  isActive?: boolean;
   status: string;
   emailConfirmed: boolean;
   createdAt: Date;
@@ -97,6 +98,15 @@ export interface PublicCatalogClub {
   memberCount: number;
   maxMembers: number;
   tags: string[];
+  readerJoinRequestsEnabled?: boolean;
+}
+
+export interface LandingReaderClubsStatus {
+  enabled: boolean;
+}
+
+export interface LandingTopReadersStatus {
+  enabled: boolean;
 }
 
 // Получить все клубы для каталога (не требует аутентификации)
@@ -127,6 +137,54 @@ export function useCatalogClubs(limit?: number, searchQuery?: string) {
     refetchInterval: 1000 * 60 * 60 * 24, // Обновлять раз в сутки (24 часа)
     refetchIntervalInBackground: false, // Не обновлять в фоне
     staleTime: 1000 * 60 * 60 * 23, // Считать данные устаревшими через 23 часа
+  });
+}
+
+export function useCatalogClubsByType(type: string, limit?: number) {
+  return useQuery({
+    queryKey: ["catalog-clubs", type, limit ?? "all"],
+    queryFn: async (): Promise<PublicCatalogClub[]> => {
+      const params = new URLSearchParams({ type });
+
+      if (typeof limit === "number" && Number.isFinite(limit) && limit > 0) {
+        params.set("limit", String(Math.trunc(limit)));
+      }
+
+      const res = await fetch(`/api/clubs/catalog?${params}`);
+      if (!res.ok) {
+        throw new Error("Failed to fetch clubs");
+      }
+      return res.json();
+    },
+    staleTime: 1000 * 60 * 5,
+  });
+}
+
+export function useLandingReaderClubsStatus() {
+  return useQuery({
+    queryKey: ["landing-reader-clubs-status"],
+    queryFn: async (): Promise<LandingReaderClubsStatus> => {
+      const res = await fetch("/api/clubs/landing-reader-clubs/status");
+      if (!res.ok) {
+        throw new Error("Failed to fetch landing reader clubs status");
+      }
+      return res.json();
+    },
+    staleTime: 1000 * 60,
+  });
+}
+
+export function useLandingTopReadersStatus() {
+  return useQuery({
+    queryKey: ["landing-top-readers-status"],
+    queryFn: async (): Promise<LandingTopReadersStatus> => {
+      const res = await fetch("/api/readers/landing-top/status");
+      if (!res.ok) {
+        throw new Error("Failed to fetch landing top readers status");
+      }
+      return res.json();
+    },
+    staleTime: 1000 * 60,
   });
 }
 
@@ -344,15 +402,23 @@ export function useClubProgress(clubId: string) {
 
 // Расширенное приглашение для отображения в UI
 
+export type InviteToClubPayload =
+  | string
+  | {
+      email?: string;
+      userId?: string;
+    };
+
 // Пригласить пользователя в клуб (по email)
 export function useInviteToClub(clubId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (email: string): Promise<{ message: string }> => {
+    mutationFn: async (payload: InviteToClubPayload): Promise<{ message: string }> => {
+      const body = typeof payload === "string" ? { email: payload } : payload;
       return apiRequest(`/api/clubs/${clubId}/invite`, {
         method: "POST",
-        body: JSON.stringify({ email }),
+        body: JSON.stringify(body),
       });
     },
     onSuccess: () => {

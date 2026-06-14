@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Play, LogOut, Volume2, VolumeX, Star } from "lucide-react";
+import { Check, MessageCircle, Play, LogOut, Volume2, VolumeX, Star, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { useIcecastPlayer } from "@/hooks/use-icecast-player";
 import { useToast } from "@/hooks/use-toast";
@@ -152,6 +153,8 @@ interface FlyingReaction {
   offsetX: number;
 }
 
+type QuestionSendStatus = 'success' | 'error' | null;
+
 interface ListenerOverlayProps {
   reader: LiveReader;
   /** URL обложки книги */
@@ -184,6 +187,8 @@ export function ListenerOverlay({
   const [isSubmittingRating, setIsSubmittingRating] = useState(false);
   const [hasSubmittedRating, setHasSubmittedRating] = useState(false);
   const [lastReactionEmoji, setLastReactionEmoji] = useState<string | null>(null);
+  const [questionText, setQuestionText] = useState('');
+  const [questionSendStatus, setQuestionSendStatus] = useState<QuestionSendStatus>(null);
   const [flyingReactions, setFlyingReactions] = useState<FlyingReaction[]>([]);
   const useCompactActionButtons = useCompactListenerActionButtons();
   const { toast } = useToast();
@@ -206,6 +211,8 @@ export function ListenerOverlay({
     setIsSubmittingRating(false);
     setHasSubmittedRating(false);
     setLastReactionEmoji(null);
+    setQuestionText('');
+    setQuestionSendStatus(null);
     setFlyingReactions([]);
     streamEndedHandledRef.current = false;
     listeningStartedAtRef.current = Date.now();
@@ -236,6 +243,34 @@ export function ListenerOverlay({
     onError: (error) => {
       toast({
         title: 'Не удалось отправить реакцию',
+        description: error instanceof Error ? error.message : 'Попробуйте ещё раз',
+        variant: 'destructive',
+      });
+    },
+  });
+
+  const questionMutation = useMutation({
+    mutationFn: (question: string) => apiRequest('/api/questions', {
+      method: 'POST',
+      body: JSON.stringify({
+        sessionId: reader.sessionId,
+        question,
+      }),
+    }),
+    onSuccess: () => {
+      setQuestionText('');
+      setQuestionSendStatus('success');
+      globalThis.setTimeout(() => {
+        setQuestionSendStatus((current) => current === 'success' ? null : current);
+      }, 1800);
+    },
+    onError: (error) => {
+      setQuestionSendStatus('error');
+      globalThis.setTimeout(() => {
+        setQuestionSendStatus((current) => current === 'error' ? null : current);
+      }, 2200);
+      toast({
+        title: 'Не удалось отправить вопрос',
         description: error instanceof Error ? error.message : 'Попробуйте ещё раз',
         variant: 'destructive',
       });
@@ -287,6 +322,15 @@ export function ListenerOverlay({
     } finally {
       setIsSubmittingRating(false);
     }
+  };
+
+  const handleSubmitQuestion = () => {
+    const trimmed = questionText.trim();
+    if (!trimmed || questionMutation.isPending) {
+      return;
+    }
+
+    questionMutation.mutate(trimmed);
   };
 
   const handleVolumeChange = (v: number[]) => {
@@ -486,6 +530,52 @@ export function ListenerOverlay({
             <p className="text-xs text-muted-foreground">
               Реакция попадёт на эмоциональную карту в текущий момент прослушивания.
             </p>
+          </div>
+
+          <div className="space-y-3 rounded-2xl bg-muted/40 p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium text-foreground">Вопрос чтецу</p>
+                <p className="text-xs text-muted-foreground">Можно отправить короткий комментарий или вопрос во время эфира.</p>
+              </div>
+              <div className="relative mt-0.5 h-5 w-5">
+                <MessageCircle className={cn(
+                  "absolute inset-0 h-4 w-4 text-muted-foreground transition-all duration-300",
+                  questionSendStatus && "scale-75 opacity-0",
+                )} />
+                {questionSendStatus === 'success' && (
+                  <span className="absolute inset-0 flex h-5 w-5 animate-in fade-in zoom-in duration-200 items-center justify-center rounded-full bg-emerald-500 text-white shadow-sm transition-opacity">
+                    <Check className="h-3.5 w-3.5" />
+                  </span>
+                )}
+                {questionSendStatus === 'error' && (
+                  <span className="absolute inset-0 flex h-5 w-5 animate-in fade-in zoom-in duration-200 items-center justify-center rounded-full bg-destructive text-destructive-foreground shadow-sm transition-opacity">
+                    <X className="h-3.5 w-3.5" />
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <Textarea
+              value={questionText}
+              onChange={(event) => setQuestionText(event.target.value.slice(0, 1000))}
+              placeholder="Напишите вопрос, который чтец сможет открыть в студии…"
+              className="min-h-20 resize-none rounded-2xl bg-background/80"
+              disabled={!isPlaying || questionMutation.isPending}
+              maxLength={1000}
+            />
+
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xs text-muted-foreground tabular-nums">{questionText.length}/1000</span>
+              <Button
+                variant="outline"
+                className="rounded-2xl"
+                onClick={handleSubmitQuestion}
+                disabled={!isPlaying || questionText.trim().length === 0 || questionMutation.isPending}
+              >
+                {questionMutation.isPending ? 'Отправляем…' : 'Отправить вопрос'}
+              </Button>
+            </div>
           </div>
 
           <SessionEmotionalMapPanel sessionId={reader.sessionId} />

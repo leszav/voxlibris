@@ -1,152 +1,211 @@
+import { Link } from "wouter";
+import { useState } from "react";
+import { BookOpen, DollarSign, Mic, TrendingUp, Users } from "lucide-react";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
-import { ComingSoonOverlay } from "@/components/ui/coming-soon-overlay";
-import { Mic, Users, DollarSign, ArrowRight, Play } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { useToast } from "@/hooks/use-toast";
+import { apiRequest } from "@/lib/queryClient";
 import studioBg from "@assets/generated_images/professional_home_recording_studio_setup.png";
-import { Link } from "wouter";
 
 export default function BecomeReader() {
+  const { toast } = useToast();
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitResult, setSubmitResult] = useState<{
+    type: "success" | "error";
+    message: string;
+  } | null>(null);
+
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const formData = new FormData(form);
+
+    setIsSubmitting(true);
+    setSubmitResult(null);
+    try {
+      await apiRequest("/api/v1/feedback/reader-application", {
+        method: "POST",
+        body: JSON.stringify({
+          firstName: String(formData.get("firstName") || ""),
+          lastName: String(formData.get("lastName") || ""),
+          email: String(formData.get("email") || ""),
+          experience: String(formData.get("experience") || ""),
+          demo: String(formData.get("demo") || ""),
+        }),
+      });
+      form.reset();
+      setSubmitResult({
+        type: "success",
+        message: "Заявка успешно отправлена. Команда VoxLibris рассмотрит её и свяжется с вами.",
+      });
+      toast({
+        title: "Заявка отправлена",
+        description: "Спасибо! Команда VoxLibris рассмотрит заявку и свяжется с вами.",
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Попробуйте позже.";
+      setSubmitResult({
+        type: "error",
+        message: `Заявку не удалось отправить. ${message}`,
+      });
+      toast({
+        title: "Не удалось отправить заявку",
+        description: message,
+        variant: "destructive",
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   return (
     <MainLayout>
-      <ComingSoonOverlay>
-      {/* Hero */}
-      <div className="relative h-[500px] w-full overflow-hidden">
-        <div className="absolute inset-0">
-           <img src={studioBg} alt="Studio Microphone" className="w-full h-full object-cover" />
-        </div>
-        <div className="absolute inset-0 bg-stone-900/70" />
-        
-        <div className="container relative h-full flex flex-col justify-center px-6 md:px-12">
-          <div className="max-w-2xl space-y-6">
-             <h1 className="text-4xl md:text-6xl font-serif font-bold text-white leading-tight">
-               Ваш голос может<br />
-               <span className="text-amber-500">оживить историю</span>
-             </h1>
-             <p className="text-xl text-stone-200 leading-relaxed">
-               Станьте чтецом VoxLibris, создавайте свои клубы и монетизируйте талант, делая то, что любите — читая книги.
-             </p>
-             <div className="flex gap-4 pt-4">
-               <Button size="lg" className="bg-amber-600 hover:bg-amber-700 text-white border-none h-12 px-8">
-                 Подать заявку
-               </Button>
-               <Link href="/clubs">
-                 <Button size="lg" variant="outline" className="text-white border-white/20 hover:bg-white/10 h-12">
-                   <Play className="w-4 h-4 mr-2" /> Мои клубы
-                 </Button>
-               </Link>
-             </div>
+      <section className="relative min-h-[520px] overflow-hidden">
+        <img src={studioBg} alt="Домашняя студия для чтения" className="absolute inset-0 h-full w-full object-cover" />
+        <div className="absolute inset-0 bg-stone-900/55" />
+
+        <div className="container relative flex min-h-[520px] items-center px-6 py-16 md:px-12">
+          <div className="max-w-3xl space-y-6">
+            <Badge className="border-amber-400/30 bg-amber-400/15 text-amber-100 hover:bg-amber-400/20">
+              <Mic className="mr-2 h-3.5 w-3.5" />
+              Клубы чтецов VoxLibris
+            </Badge>
+            <h1 className="font-serif text-4xl font-bold leading-tight text-white md:text-6xl">
+              Ваш голос может <span className="text-amber-300">оживить историю</span>
+            </h1>
+            <p className="max-w-2xl text-lg leading-8 text-stone-200 md:text-xl">
+              Станьте чтецом VoxLibris, создавайте свои клубы, собирайте аудиторию и делитесь живым чтением с теми, кто любит слушать книги.
+            </p>
+            <div className="flex flex-col gap-3 pt-2 sm:flex-row">
+              <Button size="lg" className="border-none bg-amber-600 text-white hover:bg-amber-700" asChild>
+                <a href="#reader-application">Подать заявку</a>
+              </Button>
+              <Button size="lg" variant="outline" className="border-white/25 bg-white/5 text-white hover:bg-white/10 hover:text-white" asChild>
+                <Link href="/clubs">Мои клубы</Link>
+              </Button>
+            </div>
           </div>
         </div>
-      </div>
+      </section>
 
-      {/* Benefits */}
-      <div className="container py-20 px-6 md:px-12">
-        <div className="text-center max-w-3xl mx-auto mb-16">
-          <h2 className="text-3xl md:text-4xl font-serif font-bold mb-4">Почему стоит стать чтецом?</h2>
-          <p className="text-muted-foreground text-lg">
-            Мы предоставляем платформу, аудиторию и инструменты. Вы приносите талант.
+      <section className="container space-y-16 px-6 py-16 md:px-12 md:py-20">
+        <div className="mx-auto max-w-3xl text-center">
+          <h2 className="font-serif text-3xl font-bold md:text-4xl">Почему стоит стать чтецом</h2>
+          <p className="mt-4 text-lg leading-8 text-muted-foreground">
+            VoxLibris помогает превратить любовь к книгам и выразительному чтению в живое сообщество вокруг вашего голоса.
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-20">
-          <BenefitCard 
-            icon={<Users className="w-8 h-8 text-amber-500" />}
+        <div className="grid gap-6 md:grid-cols-3">
+          <FeatureCard
+            icon={<Users className="h-7 w-7 text-amber-500" />}
             title="Своя аудитория"
-            description="Собирайте вокруг себя сообщество любителей литературы. Общайтесь с слушателями напрямую во время эфиров."
+            description="Создавайте клубы, приглашайте слушателей и собирайте вокруг книг людей, которым близок ваш тембр и стиль чтения."
           />
-          <BenefitCard 
-            icon={<DollarSign className="w-8 h-8 text-green-500" />}
+          <FeatureCard
+            icon={<DollarSign className="h-7 w-7 text-emerald-500" />}
             title="Монетизация"
-            description="Получайте доход от платных подписок на ваш клуб, продаж билетов на специальные чтения и чаевых от фанатов."
+            description="Платные клубы и записи будут подключаться отдельным этапом, а сейчас можно готовить аудиторию и формат чтений."
           />
-          <BenefitCard 
-            icon={<Mic className="w-8 h-8 text-blue-500" />}
+          <FeatureCard
+            icon={<TrendingUp className="h-7 w-7 text-blue-500" />}
             title="Профессиональный рост"
-            description="Улучшайте навыки дикции и актерского мастерства. Получайте обратную связь и растите в рейтинге."
+            description="Пробуйте жанры, собирайте обратную связь и развивайте узнаваемую манеру чтения внутри книжного сообщества."
           />
         </div>
 
-        {/* Application Form */}
-        <div className="max-w-4xl mx-auto bg-card border rounded-2xl shadow-sm overflow-hidden flex flex-col md:flex-row">
-           <div className="p-8 md:p-12 flex-1 space-y-8">
-              <div>
-                 <h3 className="text-2xl font-serif font-bold mb-2">Заявка на статус Чтеца</h3>
-                 <p className="text-muted-foreground">Заполните форму, и мы свяжемся с вами для прослушивания.</p>
+        <div id="reader-application" className="grid gap-8 rounded-2xl border bg-muted/30 p-6 md:grid-cols-[1fr_360px] md:p-10">
+          <Card className="border-border/70 shadow-sm">
+            <CardContent className="p-6 md:p-8">
+              <div className="mb-6 space-y-2">
+                <h2 className="font-serif text-2xl font-bold md:text-3xl">Заявка чтеца</h2>
+                <p className="text-sm leading-6 text-muted-foreground">
+                  Расскажите о себе и приложите ссылку на демо — это поможет команде понять ваш формат и подобрать первые сценарии чтения.
+                </p>
               </div>
-              
-              <form className="space-y-6">
-                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                       <Label htmlFor="firstName">Имя</Label>
-                       <Input id="firstName" placeholder="Иван" />
-                    </div>
-                    <div className="space-y-2">
-                       <Label htmlFor="lastName">Фамилия</Label>
-                       <Input id="lastName" placeholder="Иванов" />
-                    </div>
-                 </div>
-                 
-                 <div className="space-y-2">
-                    <Label htmlFor="email">Email</Label>
-                    <Input id="email" type="email" placeholder="ivan@example.com" />
-                 </div>
-
-                 <div className="space-y-2">
-                    <Label htmlFor="experience">Опыт озвучки (если есть)</Label>
-                    <Textarea id="experience" placeholder="Расскажите о своем опыте..." />
-                 </div>
-                 
-                 <div className="space-y-2">
-                    <Label htmlFor="demo">Ссылка на демо (Google Drive / SoundCloud)</Label>
-                    <Input id="demo" placeholder="https://..." />
-                 </div>
-                 
-                 <Button className="w-full bg-primary text-primary-foreground h-11">
-                    Отправить заявку <ArrowRight className="ml-2 w-4 h-4" />
-                 </Button>
+              <form className="space-y-5" onSubmit={handleSubmit}>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="firstName">Имя</Label>
+                    <Input id="firstName" name="firstName" placeholder="Анна" required />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="lastName">Фамилия</Label>
+                    <Input id="lastName" name="lastName" placeholder="Петрова" />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="email">Email</Label>
+                  <Input id="email" name="email" type="email" placeholder="reader@example.com" required />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="experience">Опыт чтения</Label>
+                  <Textarea id="experience" name="experience" rows={4} placeholder="Расскажите о жанрах, опыте выступлений, подкастах или чтении вслух." required />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="demo">Ссылка на демо</Label>
+                  <Input id="demo" name="demo" placeholder="YouTube, облако или аудиофайл" required />
+                </div>
+                <Button type="submit" className="w-full bg-amber-600 hover:bg-amber-700" disabled={isSubmitting}>
+                  {isSubmitting ? "Отправляем..." : "Отправить заявку"}
+                </Button>
+                {submitResult ? (
+                  <div
+                    className={submitResult.type === "success"
+                      ? "rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm leading-6 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-200"
+                      : "rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm leading-6 text-red-800 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200"}
+                    role="status"
+                    aria-live="polite"
+                  >
+                    {submitResult.message}
+                  </div>
+                ) : null}
               </form>
-           </div>
-           
-           <div className="bg-secondary/30 p-8 md:p-12 w-full md:w-80 flex flex-col justify-center space-y-6">
-              <div className="space-y-2">
-                 <h4 className="font-bold text-lg">Советы для демо</h4>
-                 <ul className="space-y-3 text-sm text-muted-foreground">
-                    <li className="flex gap-2"><Check className="w-4 h-4 text-green-500 shrink-0" /> Выберите отрывок 1-2 минуты</li>
-                    <li className="flex gap-2"><Check className="w-4 h-4 text-green-500 shrink-0" /> Читайте в тишине без эха</li>
-                    <li className="flex gap-2"><Check className="w-4 h-4 text-green-500 shrink-0" /> Покажите эмоции персонажей</li>
-                    <li className="flex gap-2"><Check className="w-4 h-4 text-green-500 shrink-0" /> Не используйте музыку</li>
-                 </ul>
-              </div>
-           </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-amber-200 bg-amber-50/80 dark:border-amber-900 dark:bg-amber-950/20">
+            <CardContent className="space-y-5 p-6">
+              <BookOpen className="h-8 w-8 text-amber-600" />
+              <h3 className="text-xl font-bold">Советы для демо</h3>
+              <ul className="space-y-3 text-sm leading-6 text-muted-foreground">
+                <TipItem>Запишите 2–3 минуты чтения без музыки и лишней обработки.</TipItem>
+                <TipItem>Выберите фрагмент с диалогом или эмоциональным переходом.</TipItem>
+                <TipItem>Проверьте, чтобы голос был слышен ровно и без сильного шума.</TipItem>
+                <TipItem>Добавьте пару слов о жанрах, которые вам особенно близки.</TipItem>
+              </ul>
+            </CardContent>
+          </Card>
         </div>
-      </div>
-      </ComingSoonOverlay>
+      </section>
     </MainLayout>
   );
 }
 
-function BenefitCard({ icon, title, description }: Readonly<{ icon: React.ReactNode, title: string, description: string }>) {
+function FeatureCard({ icon, title, description }: Readonly<{ icon: React.ReactNode; title: string; description: string }>) {
   return (
-    <Card className="border-none shadow-none bg-secondary/20">
-      <CardContent className="pt-6 text-center space-y-4">
-        <div className="w-16 h-16 rounded-full bg-background flex items-center justify-center mx-auto shadow-sm">
+    <Card className="border-border/70 shadow-sm">
+      <CardContent className="space-y-4 p-6">
+        <div className="flex h-14 w-14 items-center justify-center rounded-full bg-muted">
           {icon}
         </div>
         <h3 className="text-xl font-bold">{title}</h3>
-        <p className="text-muted-foreground leading-relaxed">
-          {description}
-        </p>
+        <p className="text-sm leading-6 text-muted-foreground">{description}</p>
       </CardContent>
     </Card>
   );
 }
 
-function Check({ className }: Readonly<{ className?: string }>) {
-   return (
-      <svg className={className} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-   )
+function TipItem({ children }: Readonly<{ children: React.ReactNode }>) {
+  return (
+    <li className="flex gap-3">
+      <Mic className="mt-1 h-4 w-4 shrink-0 text-amber-500" />
+      <span>{children}</span>
+    </li>
+  );
 }

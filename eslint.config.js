@@ -57,6 +57,7 @@ export default [
       'data/**',
       'logs/**',
       'attached_assets/**',
+      '.skills/**',
       'script/**',
       'scripts/**',
       '.tmp/**',

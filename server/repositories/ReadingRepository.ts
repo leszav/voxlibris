@@ -960,6 +960,7 @@ export class ReadingRepository extends BaseRepository {
       const result = await this.db
         .select()
         .from(userProfiles)
+        .where(eq(userProfiles.isReader, true))
         .orderBy(desc(userProfiles.totalReadingSessions), desc(userProfiles.totalListeners))
         .limit(limit);
 

@@ -43,6 +43,10 @@ interface ClubBookContentResponse {
   chapter?: number;
 }
 
+function normalizeContentChapter(chapter: number | null): number | undefined {
+  return typeof chapter === "number" && Number.isFinite(chapter) && chapter > 0 ? chapter : undefined;
+}
+
 export function usePersonalReaderAdapter({
   bookId,
   currentChapter,
@@ -119,13 +123,14 @@ export function useClubReaderAdapter({
   bookId: string;
   currentChapter: number | null;
 }) {
+  const contentChapter = normalizeContentChapter(currentChapter);
   const progressQuery = useClubReadingProgress(clubId, bookId);
   const outlineContentQuery = useClubBookContent(clubId, bookId);
   const chapterContentQuery = useClubBookContent(
     clubId,
     bookId,
-    currentChapter ?? undefined,
-    currentChapter != null
+    contentChapter,
+    contentChapter !== undefined
   );
   const { mutate: updateProgress } = useUpdateClubProgress(clubId);
 

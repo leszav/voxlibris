@@ -93,29 +93,29 @@ export function StudioSummaryDialog({ open, sessionId, elapsedTime, listenerCoun
   });
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/60 px-4 py-6 backdrop-blur-sm">
-      <div className="max-h-[calc(100dvh-3rem)] w-full max-w-2xl overflow-y-auto rounded-2xl border border-border bg-card p-6 shadow-2xl">
-        <div className="space-y-2">
-          <h2 className="text-2xl font-semibold text-foreground">Итоги сессии</h2>
-          <p className="text-sm text-muted-foreground">Эфир завершен. Ниже краткая сводка текущей live-сессии.</p>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/60 px-4 py-4 backdrop-blur-sm">
+      <div className="max-h-[calc(100dvh-2rem)] w-full max-w-xl overflow-y-auto rounded-2xl border border-border bg-card p-4 shadow-2xl sm:p-5">
+        <div className="space-y-1">
+          <h2 className="text-xl font-semibold text-foreground">Итоги сессии</h2>
+          <p className="text-xs text-muted-foreground">Эфир завершен. Краткая сводка live-сессии.</p>
         </div>
 
-        <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
           {metrics.map((metric) => (
-            <div key={metric.label} className="rounded-xl border border-border bg-muted/30 p-4">
-              <p className="text-xs uppercase tracking-wide text-muted-foreground">{metric.label}</p>
-              <p className="mt-2 text-2xl font-semibold text-foreground tabular-nums">{metric.value}</p>
+            <div key={metric.label} className="rounded-lg border border-border bg-muted/30 p-3">
+              <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{metric.label}</p>
+              <p className="mt-1 text-lg font-semibold text-foreground tabular-nums">{metric.value}</p>
             </div>
           ))}
         </div>
 
         {sessionId ? (
-          <div className="mt-6">
-            <SessionEmotionalMapPanel sessionId={sessionId} defaultOpen />
+          <div className="mt-4">
+            <SessionEmotionalMapPanel sessionId={sessionId} />
           </div>
         ) : null}
 
-        <div className="mt-6 flex justify-end">
+        <div className="mt-4 flex justify-end">
           <Button onClick={onClose}>Закрыть</Button>
         </div>
       </div>

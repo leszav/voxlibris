@@ -30,7 +30,11 @@ export default function Register() {
     try {
       const params = new URLSearchParams(globalThis.location?.search ?? '');
       const invite = params.get('invite') || undefined;
+      const inviteEmail = params.get('email') || '';
       setInviteToken(invite || undefined);
+      if (inviteEmail) {
+        setEmail(inviteEmail.trim().toLowerCase());
+      }
     } catch {
       // Ignore URL parsing errors
     }
@@ -76,6 +80,19 @@ export default function Register() {
     setIsLoading(true);
     try {
       await register(normalizedDisplayName, email.trim().toLowerCase(), password, rememberMe, inviteToken);
+      const pendingInvitation = sessionStorage.getItem('pendingInvitation');
+      if (pendingInvitation) {
+        sessionStorage.removeItem('pendingInvitation');
+        try {
+          const parsed = JSON.parse(pendingInvitation) as { clubId?: string; token?: string };
+          if (parsed.clubId && (!inviteToken || parsed.token === inviteToken)) {
+            setLocation(`/clubs/${parsed.clubId}`);
+            return;
+          }
+        } catch {
+          // Если сохранённый редирект повреждён, используем обычный маршрут.
+        }
+      }
       setLocation('/');
     } catch (error) {
       setErrorMessage(parseRegisterError(error));

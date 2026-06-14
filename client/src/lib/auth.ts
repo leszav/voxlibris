@@ -6,6 +6,7 @@ export interface AuthUserClient extends Pick<
 > {
   avatar: string | null;
   displayName?: string | null;
+  canCreateReaderLedClubs?: boolean;
 }
 import { getAccessToken, isTokenExpired, syncTokenFromCookie } from './token-store';
 import { apiRequest } from './queryClient';

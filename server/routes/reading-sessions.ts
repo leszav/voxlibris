@@ -6,6 +6,7 @@ import { sessionAnalyticsService } from '../services/session-analytics-service.j
 import { activityService } from '../services/activity-service.js';
 import { gamificationService } from '../services/gamification-service.js';
 import { emotionalMapService } from '../services/emotional-map-service.js';
+import { isReaderLedClub } from '../lib/reader-club-access.js';
 
 const router = Router();
 const readingSessionStatuses = ['active', 'paused', 'completed', 'cancelled'] as const;
@@ -38,12 +39,27 @@ router.post('/', async (req: Request, res: Response) => {
       });
     }
 
-    // Проверяем, что пользователь является членом клуба
+    const club = await storage.getClub(clubId);
+    if (!club) {
+      return res.status(404).json({
+        success: false,
+        error: 'Club not found',
+      });
+    }
+
+    // Проверяем, что пользователь является активным членом клуба
     const membership = await storage.getUserClubMembership(clubId, userId);
-    if (!membership) {
+    if (!membership?.isActive) {
       return res.status(403).json({
         success: false,
         error: 'You are not a member of this club',
+      });
+    }
+
+    if (isReaderLedClub(club) && club.ownerId !== userId) {
+      return res.status(403).json({
+        success: false,
+        error: 'Only the reader club owner can start Studio',
       });
     }
 
@@ -82,6 +98,11 @@ router.post('/', async (req: Request, res: Response) => {
       sessionType: 'reader_club',
       isOpenForListeners: true,
     });
+
+    const existingAnalytics = await sessionAnalyticsService.getSessionAnalytics(session.id);
+    if (!existingAnalytics) {
+      await sessionAnalyticsService.initializeSessionAnalytics(session.id);
+    }
 
     // Событие ленты: чтец начал сессию
     activityService.emit({

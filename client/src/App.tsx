@@ -16,7 +16,7 @@ const GuestLibrary = lazy(() => import("@/pages/guest-library"));
 const GuestReader = lazy(() => import("@/pages/guest-reader"));
 const MyClubs = lazy(() => import("@/pages/clubs/my-clubs"));
 const CreateClub = lazy(() => import("@/pages/clubs/create-club"));
-const ClubDetails = lazy(() => import("@/pages/club-details"));
+const ClubRoute = lazy(() => import("@/pages/club-route"));
 const Login = lazy(() => import("@/pages/auth/login"));
 const Register = lazy(() => import("@/pages/auth/register"));
 const OnboardingGenres = lazy(() => import("@/pages/auth/onboarding-genres"));
@@ -103,9 +103,9 @@ function Router() {
       {/* Club Routes */}
       <Route path="/clubs" component={ProtectedMyClubs} />
       <Route path="/clubs/create" component={ProtectedCreateClub} />
-      <Route path="/clubs/:id" component={ClubDetails} />
+      <Route path="/clubs/:id" component={ClubRoute} />
       {/* Legacy route for compatibility */}
-      <Route path="/club/:id" component={ClubDetails} />
+      <Route path="/club/:id" component={ClubRoute} />
 
       {/* Book Routes */}
       <Route path="/books/:id" component={BookDetailsPage} />

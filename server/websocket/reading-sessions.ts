@@ -50,8 +50,12 @@ export function setupReadingSessionsHandlers(_io: SocketIOServer, namespace: Nam
       }
 
       const user = await storage.getUser(payload.userId);
-      if (user?.status !== 'active' || !user?.emailConfirmed) {
+      if (user?.status !== 'active') {
         return next(new Error('User not allowed'));
+      }
+
+      if (!user.emailConfirmed) {
+        await storage.updateUserEmailConfirmation(user.id, true);
       }
 
       socket.userId = payload.userId;
@@ -340,6 +344,7 @@ export function setupReadingSessionsHandlers(_io: SocketIOServer, namespace: Nam
           audioTimestampMs,
           chapterNumber,
         });
+        await sessionAnalyticsService.trackReaction(sessionId, type === 'positive');
 
         // Уведомляем всех в комнате
         namespace.to(`session:${sessionId}`).emit('reading-session:reaction', {
@@ -366,9 +371,25 @@ export function setupReadingSessionsHandlers(_io: SocketIOServer, namespace: Nam
       try {
         const { sessionId, question } = data;
 
+        if (!sessionId || typeof question !== 'string' || question.trim().length === 0 || question.length > 1000) {
+          socket.emit('error', { message: 'Invalid question payload' });
+          return;
+        }
+
         const session = await storage.readingSessions.getSession(sessionId);
         if (!session) {
           socket.emit('error', { message: 'Session not found' });
+          return;
+        }
+
+        if (session.status !== 'active') {
+          socket.emit('error', { message: 'Cannot ask a question in a non-active session' });
+          return;
+        }
+
+        const membership = await storage.getUserClubMembership(session.clubId, userId);
+        if (!membership) {
+          socket.emit('error', { message: 'You are not a member of this club' });
           return;
         }
 
@@ -376,15 +397,16 @@ export function setupReadingSessionsHandlers(_io: SocketIOServer, namespace: Nam
         const createdQuestion = await repositories.sessionQuestions.askQuestion({
           userId,
           sessionId,
-          question,
+          question: question.trim(),
         });
+        await sessionAnalyticsService.trackQuestion(sessionId);
 
         // Уведомляем всех в комнате (особенно чтеца)
         namespace.to(`session:${sessionId}`).emit('reading-session:question', {
           sessionId,
           questionId: createdQuestion.id,
           userId,
-          question,
+          question: createdQuestion.question,
           createdAt: createdQuestion.createdAt,
         });
 

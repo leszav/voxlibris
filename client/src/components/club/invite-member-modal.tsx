@@ -22,12 +22,12 @@ interface User {
   id: string;
   username: string;
   displayName?: string | null;
-  email: string;
+  email?: string | null;
   status: string;
 }
 
 interface InvitationResult {
-  email: string;
+  label: string;
   success: boolean;
   message?: string;
 }
@@ -98,10 +98,10 @@ export function InviteMemberModal({ clubId, clubTitle }: InviteMemberModalProps)
     for (const email of emails) {
       try {
         await inviteMutation.mutateAsync(email);
-        results.push({ email, success: true });
+        results.push({ label: email, success: true });
       } catch (error) {
         results.push({ 
-          email, 
+          label: email, 
           success: false, 
           message: error instanceof Error ? error.message : "Ошибка отправки" 
         });
@@ -131,12 +131,13 @@ export function InviteMemberModal({ clubId, clubTitle }: InviteMemberModalProps)
     const results: InvitationResult[] = [];
     
     for (const user of selectedUsers) {
+      const userLabel = user.displayName ?? user.username;
       try {
-        await inviteMutation.mutateAsync(user.email);
-        results.push({ email: user.email, success: true });
+        await inviteMutation.mutateAsync({ userId: user.id });
+        results.push({ label: userLabel, success: true });
       } catch (error) {
         results.push({ 
-          email: user.email, 
+          label: userLabel, 
           success: false, 
           message: error instanceof Error ? error.message : "Ошибка отправки" 
         });
@@ -217,7 +218,7 @@ export function InviteMemberModal({ clubId, clubTitle }: InviteMemberModalProps)
               <div className="space-y-2">
                 {invitationResults.map((result) => (
                   <div
-                    key={result.email}
+                    key={result.label}
                     className={`flex items-center justify-between p-3 rounded-lg ${
                       result.success ? "bg-green-50" : "bg-red-50"
                     }`}
@@ -229,7 +230,7 @@ export function InviteMemberModal({ clubId, clubTitle }: InviteMemberModalProps)
                         <AlertCircle className="w-5 h-5 text-red-600" />
                       )}
                       <div>
-                        <p className="font-medium text-sm">{result.email}</p>
+                        <p className="font-medium text-sm">{result.label}</p>
                         {result.message && (
                           <p className="text-xs text-muted-foreground">{result.message}</p>
                         )}
@@ -308,7 +309,7 @@ export function InviteMemberModal({ clubId, clubTitle }: InviteMemberModalProps)
                   <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
                   <Input
                     id="search"
-                    placeholder="Имя или email..."
+                    placeholder="Имя пользователя..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     className="pl-9"
@@ -359,7 +360,7 @@ export function InviteMemberModal({ clubId, clubTitle }: InviteMemberModalProps)
                             <div className="flex items-center justify-between">
                               <div>
                                 <p className="font-medium">{user.displayName ?? user.username}</p>
-                                <p className="text-xs text-muted-foreground">{user.email}</p>
+                                <p className="text-xs text-muted-foreground">@{user.username}</p>
                               </div>
                               {isSelected && <CheckCircle2 className="w-5 h-5 text-primary" />}
                             </div>

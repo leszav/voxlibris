@@ -2,7 +2,7 @@ import { Server as HttpServer } from "node:http";
 import { Server, Socket } from "socket.io";
 import jwt, { JwtPayload } from "jsonwebtoken";
 import { db } from "./db.js";
-import { users, readingProgress, bookmarks, notes, books, clubBooks, clubMembers } from "../shared/schema.js";
+import { users, readingProgress, bookmarks, notes, books, clubBooks, clubMembers, clubs } from "../shared/schema.js";
 import { eq, and, desc, isNull } from "drizzle-orm";
 import type {
   ReaderProgressUpdate,
@@ -170,6 +170,12 @@ async function handleProgressUpdate(
 ): Promise<void> {
   try {
     const normalized = normalizeProgressUpdate(data);
+    const hasAccess = await verifyBookAccess(authSocket.userId, data.bookId, normalized.clubId ?? undefined);
+    if (!hasAccess) {
+      socket.emit("error", { message: "Access denied to this book" });
+      return;
+    }
+
     const saveResult = await saveReadingProgress(authSocket.userId, data.bookId, normalized);
 
     if (saveResult.stale) {
@@ -328,6 +334,12 @@ export function initializeReaderWebSocket(httpServer: HttpServer) {
     // Добавление закладки
     socket.on("bookmark_add", async (data: Omit<BookmarkUpdate["bookmark"], "id" | "userId" | "createdAt">) => {
       try {
+        const hasAccess = await verifyBookAccess(authSocket.userId, data.bookId);
+        if (!hasAccess) {
+          socket.emit("error", { message: "Access denied to this book" });
+          return;
+        }
+
         const [bookmark] = await db
           .insert(bookmarks)
           .values({
@@ -349,6 +361,12 @@ export function initializeReaderWebSocket(httpServer: HttpServer) {
     // Добавление заметки
     socket.on("note_add", async (data: Omit<NoteUpdate["note"], "id" | "userId" | "createdAt" | "updatedAt">) => {
       try {
+        const hasAccess = await verifyBookAccess(authSocket.userId, data.bookId);
+        if (!hasAccess) {
+          socket.emit("error", { message: "Access denied to this book" });
+          return;
+        }
+
         const [note] = await db
           .insert(notes)
           .values({
@@ -456,6 +474,11 @@ export function initializeReaderWebSocket(httpServer: HttpServer) {
       const { clubId, bookId, sessionId } = data;
       const roomName = `club:${clubId}:book:${bookId}`;
       const clubRoom = `club:${clubId}`;
+      const canAccess = await verifyBookAccess(authSocket.userId, bookId, clubId);
+      if (!canAccess) {
+        socket.emit('error', { message: 'Access denied' });
+        return;
+      }
 
       await liveSessionsStore.remove(sessionId, clubId);
 
@@ -485,6 +508,11 @@ export function initializeReaderWebSocket(httpServer: HttpServer) {
     }) => {
       const { clubId, bookId, sessionId, chapter, positionRaw } = data;
       const roomName = `club:${clubId}:book:${bookId}`;
+      const canAccess = await verifyBookAccess(authSocket.userId, bookId, clubId);
+      if (!canAccess) {
+        socket.emit('error', { message: 'Access denied' });
+        return;
+      }
 
       await liveSessionsStore.updatePosition(sessionId, chapter, positionRaw);
 
@@ -531,8 +559,9 @@ async function verifyBookAccess(userId: string, bookId: string, clubId?: string)
 
     if (clubId) {
       const [clubBook] = await db
-        .select()
+        .select({ id: clubBooks.id, clubId: clubBooks.clubId, isDeleted: clubBooks.isDeleted, clubType: clubs.type, ownerId: clubs.ownerId })
         .from(clubBooks)
+        .innerJoin(clubs, eq(clubBooks.clubId, clubs.id))
         .where(
           and(
             eq(clubBooks.id, bookId),
@@ -556,7 +585,13 @@ async function verifyBookAccess(userId: string, bookId: string, clubId?: string)
         )
         .limit(1);
 
-      return !!membership;
+      if (!membership) return false;
+
+      if (clubBook.clubType === 'reader-led') {
+        return clubBook.ownerId === userId || membership.role === 'owner';
+      }
+
+      return true;
     }
 
     // Legacy/personal books path

@@ -18,7 +18,7 @@ import { db } from './db.js';
 import postgres from 'postgres';
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { SQL } from 'drizzle-orm';
-import { books, personalBooks, clubBooks, users, clubs, clubMembers, readingSessions, conversations, directMessages, dmReports, dmAdminAccessLog, notifications } from '../shared/schema.js';
+import { books, personalBooks, clubBooks, users, clubs, clubMembers, readingSessions, conversations, directMessages, dmReports, dmAdminAccessLog, notifications, sessionRecordings, userProfiles } from '../shared/schema.js';
 import { logger } from './lib/logger.js';
 import { getStudioRecordingsDir } from './lib/studio-recording-storage.js';
 import {
@@ -520,7 +520,21 @@ type AdminUserRow = {
   booksRead: number;
   clubsJoined: number;
   clubsCreated: number;
+  canCreateReaderLedClubs: boolean;
 };
+
+function parseCanCreateReaderLedClubs(readerSettings: string | null): boolean {
+  if (!readerSettings) return false;
+
+  try {
+    const parsed: unknown = JSON.parse(readerSettings);
+    return typeof parsed === 'object'
+      && parsed !== null
+      && (parsed as { canCreateReaderLedClubs?: unknown }).canCreateReaderLedClubs === true;
+  } catch {
+    return false;
+  }
+}
 
 function formatAdminUserForResponse(user: AdminUserRow) {
   return {
@@ -534,6 +548,7 @@ function formatAdminUserForResponse(user: AdminUserRow) {
     books_read: Number(user.booksRead || 0),
     clubs_joined: Number(user.clubsJoined || 0),
     clubs_created: Number(user.clubsCreated || 0),
+    can_create_reader_led_clubs: user.canCreateReaderLedClubs,
   };
 }
 
@@ -584,6 +599,12 @@ async function queryAdminUsersWithStats(params: {
         FROM ${clubs}
         WHERE ${clubs.ownerId} = ${users.id}
       )`,
+      canCreateReaderLedClubs: sql<boolean>`EXISTS (
+        SELECT 1
+        FROM user_profiles p
+        WHERE p.user_id = users.id
+          AND p.reader_settings::jsonb ->> 'canCreateReaderLedClubs' = 'true'
+      )`,
     })
     .from(users)
     .where(whereClause)
@@ -604,6 +625,10 @@ async function queryAdminUsersWithStats(params: {
 // Получить список всех пользователей
 router.get('/users', jwtAuth, requireAdmin, async (req, res) => {
   try {
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.set('Pragma', 'no-cache');
+    res.set('Expires', '0');
+
     const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
     const role = typeof req.query.role === 'string' ? req.query.role : undefined;
     const status = typeof req.query.status === 'string' ? req.query.status : undefined;
@@ -703,6 +728,72 @@ router.put('/users/:username/status', jwtAuth, requireAdmin, async (req, res) =>
     res.json({ user: safeUser });
   } catch (error) {
     console.error('Error updating user status:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+// Выдать или отозвать право создания клубов чтецов без повышения роли пользователя.
+router.put('/users/:id/reader-led-permission', jwtAuth, requireFullAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { allowed } = req.body;
+
+    if (typeof allowed !== 'boolean') {
+      return res.status(400).json({ message: 'allowed must be boolean' });
+    }
+
+    const user = await storage.getUser(id);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const existingProfile = await storage.getUserProfile(id).catch(() => undefined);
+    let existingSettings: Record<string, unknown> = {};
+    if (existingProfile?.readerSettings) {
+      try {
+        const parsed: unknown = JSON.parse(existingProfile.readerSettings);
+        if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+          existingSettings = parsed as Record<string, unknown>;
+        }
+      } catch {
+        existingSettings = {};
+      }
+    }
+
+    const nextReaderSettings = JSON.stringify({
+      ...existingSettings,
+      canCreateReaderLedClubs: allowed,
+    });
+
+    if (existingProfile) {
+      await db
+        .update(userProfiles)
+        .set({ readerSettings: nextReaderSettings, updatedAt: new Date() })
+        .where(eq(userProfiles.userId, id));
+    } else {
+      await db
+        .insert(userProfiles)
+        .values({
+          userId: id,
+          displayName: user.username,
+          isReader: false,
+          readerSettings: nextReaderSettings,
+        });
+    }
+
+    await logAction(
+      req,
+      'change_user_role',
+      'user',
+      id,
+      allowed ? 'Granted reader-led club creation permission' : 'Revoked reader-led club creation permission',
+      parseCanCreateReaderLedClubs(existingProfile?.readerSettings ?? null) ? 'allowed' : 'denied',
+      allowed ? 'allowed' : 'denied'
+    );
+
+    res.json({ success: true, can_create_reader_led_clubs: allowed });
+  } catch (error) {
+    console.error('Error updating reader-led permission:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 });
@@ -3732,15 +3823,80 @@ router.get('/recordings', jwtAuth, requireModerator, async (req, res) => {
 
     const files = await listStudioRecordingFiles();
     const sessionMetaMap = await getStudioRecordingSessionMeta([...new Set(files.map((file) => file.sessionId))]);
+    const existingRecordingRows = files.length === 0
+      ? []
+      : await db
+        .select()
+        .from(sessionRecordings)
+        .where(inArray(sessionRecordings.sessionId, [...new Set(files.map((file) => file.sessionId))]));
+    const existingRecordingSessionIds = new Set(existingRecordingRows.map((recording) => recording.sessionId));
+    const recordingRowBySessionId = new Map(
+      existingRecordingRows.map((recording) => [recording.sessionId, recording]),
+    );
+    const recordingRowByStorageKey = new Map(
+      existingRecordingRows
+        .filter((recording) => recording.storageKey)
+        .map((recording) => [recording.storageKey as string, recording]),
+    );
     const durationEntries = await Promise.all(
       files.map(async (file) => [file.id, await probeStudioRecordingDurationSeconds(file.filePath)] as const),
     );
     const durationMap = new Map(durationEntries);
 
+    for (const file of files) {
+      if (recordingRowByStorageKey.has(`local:${file.fileName}`)) {
+        continue;
+      }
+
+      const meta = sessionMetaMap.get(file.sessionId);
+      if (!meta?.clubId) {
+        continue;
+      }
+
+      const [createdRecording] = await db
+        .insert(sessionRecordings)
+        .values({
+          sessionId: file.sessionId,
+          clubId: meta.clubId,
+          recordingUrl: `/api/v1/admin/recordings/${encodeURIComponent(file.id)}/stream`,
+          storageKey: `local:${file.fileName}`,
+          duration: durationMap.get(file.id) ?? null,
+          fileSize: file.fileSize,
+          format: 'mp3',
+          status: 'ready',
+          isLocal: true,
+          isBackup: false,
+          bitrate: 64,
+          sampleRate: 48000,
+          channels: 1,
+          isAvailable: false,
+          publicationRequested: false,
+          moderationStatus: 'pending',
+          isPublished: false,
+          allowStreaming: false,
+          allowDownload: false,
+          metadata: JSON.stringify({
+            fileName: file.fileName,
+            title: meta.bookTitle ?? `Studio session ${file.sessionId}`,
+            arbitrationOnly: true,
+            syncedFromLocalFileAt: new Date().toISOString(),
+          }),
+        })
+        .returning();
+
+      if (createdRecording) {
+        recordingRowBySessionId.set(file.sessionId, createdRecording);
+        recordingRowByStorageKey.set(`local:${file.fileName}`, createdRecording);
+        existingRecordingSessionIds.add(file.sessionId);
+      }
+    }
+
     const recordings = files.map((file) => {
       const meta = sessionMetaMap.get(file.sessionId);
+      const recordingRow = recordingRowByStorageKey.get(`local:${file.fileName}`) ?? recordingRowBySessionId.get(file.sessionId);
       return {
         id: file.id,
+        databaseId: recordingRow?.id ?? null,
         fileName: file.fileName,
         sessionId: file.sessionId,
         clubId: meta?.clubId ?? null,
@@ -3754,6 +3910,14 @@ router.get('/recordings', jwtAuth, requireModerator, async (req, res) => {
         sessionStartedAt: meta?.startedAt?.toISOString() ?? null,
         durationSeconds: durationMap.get(file.id) ?? null,
         fileSize: file.fileSize,
+        moderationStatus: recordingRow?.moderationStatus ?? null,
+        publicationRequested: recordingRow?.publicationRequested ?? true,
+        moderationNotes: recordingRow?.moderationNotes ?? null,
+        moderatedAt: recordingRow?.moderatedAt?.toISOString() ?? null,
+        isPublished: recordingRow?.isPublished ?? false,
+        publishedAt: recordingRow?.publishedAt?.toISOString() ?? null,
+        allowStreaming: recordingRow?.allowStreaming ?? false,
+        allowDownload: recordingRow?.allowDownload ?? false,
         streamUrl: `/api/v1/admin/recordings/${encodeURIComponent(file.id)}/stream`,
         downloadUrl: `/api/v1/admin/recordings/${encodeURIComponent(file.id)}/download`,
       };
@@ -3877,6 +4041,73 @@ router.get('/recordings/:id/stream', jwtAuth, requireModerator, async (req, res)
 
     logger.error({ error }, 'Failed to stream admin studio recording');
     res.status(500).json({ message: 'Не удалось открыть запись эфира' });
+  }
+});
+
+router.put('/recordings/:id/moderation', jwtAuth, requireModerator, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { moderationStatus, moderationNotes } = req.body as { moderationStatus?: unknown; moderationNotes?: unknown };
+
+    if (moderationStatus !== 'approved' && moderationStatus !== 'rejected' && moderationStatus !== 'pending') {
+      return res.status(400).json({ message: 'Некорректный статус модерации' });
+    }
+
+    const [existingRecording] = await db
+      .select({ publicationRequested: sessionRecordings.publicationRequested })
+      .from(sessionRecordings)
+      .where(eq(sessionRecordings.id, id))
+      .limit(1);
+
+    if (!existingRecording) {
+      return res.status(404).json({ message: 'Запись не найдена в базе данных' });
+    }
+
+    if (!existingRecording.publicationRequested) {
+      return res.status(409).json({ message: 'Эта запись сохранена только для арбитража и не может быть отправлена в публикацию' });
+    }
+
+    const [recording] = await db
+      .update(sessionRecordings)
+      .set({
+        moderationStatus,
+        moderationNotes: typeof moderationNotes === 'string' ? moderationNotes.slice(0, 2000) : null,
+        moderatedBy: req.user?.id ?? req.user?.userId ?? null,
+        moderatedAt: new Date(),
+        ...(moderationStatus === 'approved'
+          ? {}
+          : {
+              isPublished: false,
+              isAvailable: false,
+              publishedBy: null,
+              publishedAt: null,
+              allowStreaming: false,
+              allowDownload: false,
+            }),
+        updatedAt: new Date(),
+      })
+      .where(eq(sessionRecordings.id, id))
+      .returning();
+
+    if (!recording) {
+      return res.status(404).json({ message: 'Запись не найдена в базе данных' });
+    }
+
+    res.json({
+      success: true,
+      recording: {
+        id: recording.id,
+        moderationStatus: recording.moderationStatus,
+        moderationNotes: recording.moderationNotes,
+        moderatedAt: recording.moderatedAt?.toISOString() ?? null,
+        isPublished: recording.isPublished,
+        allowStreaming: recording.allowStreaming,
+        allowDownload: recording.allowDownload,
+      },
+    });
+  } catch (error) {
+    logger.error({ error }, 'Failed to moderate admin studio recording');
+    res.status(500).json({ message: 'Не удалось обновить статус модерации записи' });
   }
 });
 

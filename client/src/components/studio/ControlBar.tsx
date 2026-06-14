@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { Eye, EyeOff, Mic, MicOff, Pause, Play, Square, Users, Bookmark } from "lucide-react";
+import { Check, Eye, EyeOff, HelpCircle, Mic, MicOff, Play, Square, Users, Bookmark } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { StudioWordmark } from "@/components/studio/StudioWordmark";
 import { SessionListenerAvatars } from "@/components/presence/SessionListenerAvatars";
-import type { LiveSessionReaction } from "@/hooks/use-audio-session";
+import type { LiveSessionQuestion, LiveSessionReaction } from "@/hooks/use-audio-session";
 
 interface ControlBarProps {
   state: "prep" | "live" | "paused";
@@ -14,6 +15,10 @@ interface ControlBarProps {
   elapsedTime: number;
   listenerCount: number;
   recentReactions?: LiveSessionReaction[];
+  reactionCount?: number;
+  sessionQuestions?: LiveSessionQuestion[];
+  unansweredQuestionCount?: number;
+  onQuestionAnswered?: (questionId: string) => Promise<void>;
   sessionId?: string | null;
   /** RMS-уровень сигнала микрофона (0..100) */
   micLevel: number;
@@ -51,10 +56,9 @@ function levelToDb(level: number): number {
 const SILENCE_GATE = 7;
 const SILENCE_SNAP = 2;
 
-function LiveReactionDock({ reactions }: Readonly<{ reactions: LiveSessionReaction[] }>) {
+function LiveReactionDock({ reactions, reactionCount }: Readonly<{ reactions: LiveSessionReaction[]; reactionCount: number }>) {
   const [hidden, setHidden] = useState(false);
   const latestReaction = reactions.at(-1);
-  const recentCount = reactions.length;
   const floatingReactions = useMemo(() => reactions.slice(-4), [reactions]);
 
   return (
@@ -91,9 +95,118 @@ function LiveReactionDock({ reactions }: Readonly<{ reactions: LiveSessionReacti
             </span>
           ))}
           <span className="text-lg leading-none" aria-hidden="true">{latestReaction?.emoji ?? '♡'}</span>
-          <span className="ml-1 text-[10px] tabular-nums text-muted-foreground">{recentCount}</span>
+          <span className="ml-1 text-[10px] tabular-nums text-muted-foreground">{reactionCount}</span>
         </div>
       )}
+    </div>
+  );
+}
+
+function formatQuestionTime(createdAt?: string | Date | null): string {
+  if (!createdAt) return 'только что';
+
+  const date = new Date(createdAt);
+  if (Number.isNaN(date.getTime())) return 'только что';
+
+  return date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+}
+
+function LiveQuestionDock({
+  questions,
+  unansweredQuestionCount,
+  onQuestionAnswered,
+}: Readonly<{
+  questions: LiveSessionQuestion[];
+  unansweredQuestionCount: number;
+  onQuestionAnswered?: (questionId: string) => Promise<void>;
+}>) {
+  const [open, setOpen] = useState(false);
+  const [answeringQuestionId, setAnsweringQuestionId] = useState<string | null>(null);
+  const hasUnanswered = unansweredQuestionCount > 0;
+  const orderedQuestions = useMemo(() => (
+    [...questions].sort((left, right) => Number(left.isAnswered) - Number(right.isAnswered))
+  ), [questions]);
+
+  const handleMarkAnswered = async (questionId: string) => {
+    if (!onQuestionAnswered || answeringQuestionId) return;
+
+    setAnsweringQuestionId(questionId);
+    try {
+      await onQuestionAnswered(questionId);
+    } finally {
+      setAnsweringQuestionId(null);
+    }
+  };
+
+  return (
+    <div className="border-r border-border px-2">
+      <Dialog open={open} onOpenChange={setOpen}>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className={cn(
+            "relative h-9 w-9 rounded-xl text-muted-foreground hover:text-foreground",
+            hasUnanswered && "bg-amber-500/10 text-amber-600 ring-1 ring-amber-500/30 animate-pulse hover:bg-amber-500/15 hover:text-amber-700",
+          )}
+          onClick={() => setOpen(true)}
+          title={hasUnanswered ? `Неотвеченные вопросы: ${unansweredQuestionCount}` : 'Вопросы слушателей'}
+          aria-label={hasUnanswered ? `Открыть неотвеченные вопросы слушателей: ${unansweredQuestionCount}` : 'Открыть вопросы слушателей'}
+        >
+          <HelpCircle className="h-4 w-4" />
+          {hasUnanswered && (
+            <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-500 px-1 text-[10px] font-semibold tabular-nums text-white shadow-sm">
+              {unansweredQuestionCount > 99 ? '99+' : unansweredQuestionCount}
+            </span>
+          )}
+        </Button>
+
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Вопросы слушателей</DialogTitle>
+            <DialogDescription>
+              Ответьте устно во время эфира и отметьте вопрос галочкой — счётчик неотвеченных уменьшится.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="max-h-[60vh] space-y-3 overflow-y-auto pr-1">
+            {orderedQuestions.length > 0 ? orderedQuestions.map((item) => (
+              <article
+                key={item.id}
+                className={cn(
+                  "rounded-2xl border p-4 transition-colors",
+                  item.isAnswered ? "border-border bg-muted/20 opacity-70" : "border-amber-500/25 bg-amber-500/5",
+                )}
+              >
+                <div className="mb-2 flex items-center justify-between gap-3 text-xs text-muted-foreground">
+                  <span>Слушатель</span>
+                  <time dateTime={item.createdAt ? new Date(item.createdAt).toISOString() : undefined}>
+                    {formatQuestionTime(item.createdAt)}
+                  </time>
+                </div>
+                <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">{item.question}</p>
+                <div className="mt-3 flex justify-end">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={item.isAnswered ? "secondary" : "outline"}
+                    className="rounded-xl"
+                    disabled={item.isAnswered || answeringQuestionId === item.id || !onQuestionAnswered}
+                    onClick={() => void handleMarkAnswered(item.id)}
+                  >
+                    <Check className="mr-2 h-3.5 w-3.5" />
+                    {item.isAnswered ? 'Отвечено' : 'Отметить отвеченным'}
+                  </Button>
+                </div>
+              </article>
+            )) : (
+              <div className="rounded-2xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
+                Пока нет вопросов от слушателей.
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -106,10 +219,13 @@ export function ControlBar({
   elapsedTime,
   listenerCount,
   recentReactions = [],
+  reactionCount = recentReactions.length,
+  sessionQuestions = [],
+  unansweredQuestionCount = 0,
+  onQuestionAnswered,
   sessionId,
   micLevel,
   micBars,
-  onPause,
   onResume,
   onEnd,
   onBookmark,
@@ -218,14 +334,6 @@ export function ControlBar({
         {state === "live" && (
           <>
             <Button
-              size="icon"
-              className="h-9 w-9 rounded-xl bg-amber-500 hover:bg-amber-600 text-white border-none"
-              onClick={onPause}
-              title="Пауза"
-            >
-              <Pause className="w-4 h-4 fill-current" />
-            </Button>
-            <Button
               variant="destructive"
               size="icon"
               className="h-9 w-9 rounded-xl"
@@ -260,7 +368,13 @@ export function ControlBar({
         )}
       </div>
 
-      <LiveReactionDock reactions={recentReactions} />
+      <LiveReactionDock reactions={recentReactions} reactionCount={reactionCount} />
+
+      <LiveQuestionDock
+        questions={sessionQuestions}
+        unansweredQuestionCount={unansweredQuestionCount}
+        onQuestionAnswered={onQuestionAnswered}
+      />
 
       {/* Right group: listeners */}
       <div className="flex items-center gap-1 pl-2">

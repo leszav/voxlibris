@@ -1,6 +1,8 @@
 import { Router, Request, Response } from 'express';
 import { repositories, storage } from '../repositories/index.js';
 import { logger } from '../lib/logger.js';
+import { getIO } from '../lib/socket-registry.js';
+import { sessionAnalyticsService } from '../services/session-analytics-service.js';
 
 const router = Router();
 
@@ -71,6 +73,15 @@ router.post('/', async (req: Request, res: Response) => {
       userId,
       sessionId,
       question: question.trim(),
+    });
+    await sessionAnalyticsService.trackQuestion(sessionId);
+
+    getIO().of('/reading-sessions').to(`session:${sessionId}`).emit('reading-session:question', {
+      sessionId,
+      questionId: createdQuestion.id,
+      userId,
+      question: createdQuestion.question,
+      createdAt: createdQuestion.createdAt,
     });
 
     res.json({
@@ -242,6 +253,13 @@ router.put('/:questionId/answer', async (req: Request, res: Response) => {
       questionId,
       answer.trim()
     );
+
+    getIO().of('/reading-sessions').to(`session:${question.sessionId}`).emit('reading-session:question-answered', {
+      sessionId: question.sessionId,
+      questionId,
+      answer: updatedQuestion.answer,
+      answeredAt: updatedQuestion.answeredAt,
+    });
 
     res.json({
       success: true,

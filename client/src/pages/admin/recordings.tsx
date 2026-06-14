@@ -13,8 +13,11 @@ import { useAuth } from "@/hooks/use-auth";
 import { modalConfirm, toast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 
+type RecordingModerationStatus = "pending" | "approved" | "rejected";
+
 interface AdminRecording {
   id: string;
+  databaseId: string | null;
   fileName: string;
   sessionId: string;
   clubId: string | null;
@@ -28,6 +31,14 @@ interface AdminRecording {
   sessionStartedAt: string | null;
   durationSeconds: number | null;
   fileSize: number;
+  moderationStatus: RecordingModerationStatus | null;
+  publicationRequested: boolean;
+  moderationNotes: string | null;
+  moderatedAt: string | null;
+  isPublished: boolean;
+  publishedAt: string | null;
+  allowStreaming: boolean;
+  allowDownload: boolean;
   streamUrl: string;
   downloadUrl: string;
 }
@@ -89,6 +100,17 @@ async function bulkDeleteRecordings(ids: string[]): Promise<{ deleted: number; n
   });
 }
 
+async function moderateRecording(params: {
+  databaseId: string;
+  moderationStatus: RecordingModerationStatus;
+}): Promise<void> {
+  await apiRequest(`/api/v1/admin/recordings/${encodeURIComponent(params.databaseId)}/moderation`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ moderationStatus: params.moderationStatus }),
+  });
+}
+
 function formatDateTime(value: string): string {
   return new Intl.DateTimeFormat("ru-RU", {
     dateStyle: "medium",
@@ -111,6 +133,22 @@ function formatDuration(seconds: number | null): string {
     return `${hours}:${minutes.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
   }
   return `${minutes.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+}
+
+function getModerationBadge(recording: AdminRecording): { label: string; variant: "default" | "secondary" | "outline" | "destructive" } {
+  if (!recording.databaseId) {
+    return { label: "Нет записи в БД", variant: "outline" };
+  }
+
+  switch (recording.moderationStatus) {
+    case "approved":
+      return { label: "Одобрена", variant: "default" };
+    case "rejected":
+      return { label: "Отклонена", variant: "destructive" };
+    case "pending":
+    default:
+      return { label: "На модерации", variant: "secondary" };
+  }
 }
 
 function RecordingCardSkeleton() {
@@ -193,12 +231,31 @@ export default function AdminRecordings() {
     },
   });
 
+  const moderateMutation = useMutation({
+    mutationFn: moderateRecording,
+    onSuccess: async (_, variables) => {
+      await queryClient.invalidateQueries({ queryKey: ["admin-recordings"] });
+      toast({
+        title: variables.moderationStatus === "approved" ? "Запись одобрена" : variables.moderationStatus === "rejected" ? "Запись отклонена" : "Статус модерации обновлён",
+        description: "Статус записи эфира обновлён.",
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "Не удалось обновить модерацию",
+        description: error instanceof Error ? error.message : "Неизвестная ошибка",
+        variant: "destructive",
+      });
+    },
+  });
+
   const recordings = data?.recordings ?? [];
   const clubOptions = data?.filters.clubs ?? [];
   const bookOptions = data?.filters.books ?? [];
   const readerOptions = data?.filters.readers ?? [];
   const pagination = data?.pagination;
   const canDelete = user?.role === "admin";
+  const canModerate = user?.role === "admin" || user?.role === "moderator";
 
   const allSelected = recordings.length > 0 && recordings.every((r) => selectedIds.has(r.id));
   const someSelected = recordings.some((r) => selectedIds.has(r.id));
@@ -267,6 +324,30 @@ export default function AdminRecordings() {
 
     if (!confirmed) return;
     deleteMutation.mutate(recording.id);
+  };
+
+  const handleModerate = async (recording: AdminRecording, moderationStatus: RecordingModerationStatus) => {
+    if (!recording.databaseId) {
+      toast({
+        title: "Запись не синхронизирована",
+        description: "Для этого файла нет записи в session_recordings, поэтому модерация недоступна.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const confirmed = await modalConfirm({
+      title: moderationStatus === "approved" ? "Одобрить запись?" : moderationStatus === "rejected" ? "Отклонить запись?" : "Вернуть на модерацию?",
+      description: moderationStatus === "approved"
+        ? "После одобрения владелец клуба сможет оформить и опубликовать запись. Слушателям она всё ещё не будет доступна до публикации владельцем и тарифной проверки."
+        : "Запись будет снята с публикации и недоступна слушателям.",
+      confirmLabel: moderationStatus === "approved" ? "Одобрить" : moderationStatus === "rejected" ? "Отклонить" : "Вернуть",
+      cancelLabel: "Отмена",
+      variant: moderationStatus === "rejected" ? "destructive" : "default",
+    });
+    if (!confirmed) return;
+
+    moderateMutation.mutate({ databaseId: recording.databaseId, moderationStatus });
   };
 
   const handleTogglePlayback = async (recording: AdminRecording) => {
@@ -365,6 +446,7 @@ export default function AdminRecordings() {
             const isPlayingThisRecording = playingId === recording.id;
             const playbackLabel = isPlayingThisRecording ? "Остановить" : "Прослушать";
             const isSelected = selectedIds.has(recording.id);
+            const moderationBadge = getModerationBadge(recording);
 
             return (
               <Card key={recording.id} className={`border-border/70 shadow-sm transition-colors ${isSelected ? "ring-2 ring-primary/50" : ""}`}>
@@ -383,6 +465,8 @@ export default function AdminRecordings() {
                       <CardDescription className="mt-1 flex flex-wrap items-center gap-2">
                         <Badge variant="secondary">{recording.clubName}</Badge>
                         {recording.chapter !== null && <Badge variant="outline">Глава {recording.chapter}</Badge>}
+                        <Badge variant={moderationBadge.variant}>{moderationBadge.label}</Badge>
+                        {recording.isPublished ? <Badge variant="default">Опубликована</Badge> : <Badge variant="outline">Не опубликована</Badge>}
                       </CardDescription>
                     </div>
 
@@ -427,11 +511,39 @@ export default function AdminRecordings() {
                         Скачать
                       </a>
                     </Button>
+                    {canModerate && recording.databaseId && recording.publicationRequested ? (
+                      <>
+                        <Button
+                          variant="outline"
+                          onClick={() => void handleModerate(recording, "approved")}
+                          disabled={moderateMutation.isPending || recording.moderationStatus === "approved"}
+                        >
+                          {moderateMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                          Одобрить
+                        </Button>
+                        <Button
+                          variant="outline"
+                          className="text-destructive hover:text-destructive"
+                          onClick={() => void handleModerate(recording, "rejected")}
+                          disabled={moderateMutation.isPending || recording.moderationStatus === "rejected"}
+                        >
+                          Отклонить
+                        </Button>
+                      </>
+                    ) : null}
                   </div>
 
                   <div className="rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
                     <div>Сессия: {recording.sessionId}</div>
                     <div>Файл: {recording.fileName}</div>
+                    <div>Запись в БД: {recording.databaseId ?? "не найдена"}</div>
+                    {!recording.publicationRequested ? <div>Режим: только для арбитража, без публикации в клубе</div> : null}
+                    {recording.moderatedAt ? <div>Модерация: {formatDateTime(recording.moderatedAt)}</div> : null}
+                    {recording.publicationRequested && recording.isPublished ? (
+                      <div>
+                        Опубликована: прослушивание — {recording.allowStreaming ? "включено" : "выключено"}, скачивание — {recording.allowDownload ? "включено" : "выключено"}
+                      </div>
+                    ) : null}
                   </div>
                 </CardContent>
               </Card>

@@ -13,6 +13,7 @@ import { logger } from './lib/logger.js';
 import { optimizeImage } from './image-optimizer.js';
 import { storeOptimizedImageIfNeeded } from './lib/uploaded-image-storage.js';
 import { genreService } from './services/genre-service.js';
+import { serializeClubBook } from './lib/client-serializers.js';
 
 const router = Router();
 
@@ -442,7 +443,7 @@ router.post('/clubs/:clubId/books/upload/:sessionId/confirm', jwtAuth, requireAc
 
         const genresPayload = await genreService.getBookGenresPayload('club', book.id);
         res.json({
-            ...bookWithGenres,
+            ...serializeClubBook(bookWithGenres),
             primaryGenre: genresPayload.primaryGenre,
             genres: genresPayload.genres,
         });
@@ -510,7 +511,7 @@ router.get('/clubs/:clubId/books', jwtAuth, async (req, res) => {
         books.map(async (book) => {
             const genresPayload = await genreService.getBookGenresPayload('club', book.id);
             return {
-                ...book,
+                ...serializeClubBook(book),
                 primaryGenre: genresPayload.primaryGenre,
                 genres: genresPayload.genres,
             };
@@ -530,7 +531,7 @@ router.get('/clubs/:clubId/books/:bookId', jwtAuth, async (req, res) => {
 
     const genresPayload = await genreService.getBookGenresPayload('club', book.id);
     res.json({
-        ...book,
+        ...serializeClubBook(book),
         primaryGenre: genresPayload.primaryGenre,
         genres: genresPayload.genres,
     });
@@ -625,7 +626,7 @@ router.patch('/clubs/:clubId/books/:bookId', jwtAuth, requireActiveUser, upload.
         const genresPayload = await genreService.getBookGenresPayload('club', bookId);
 
         res.json({
-            ...enrichedBook,
+            ...serializeClubBook(enrichedBook),
             primaryGenre: genresPayload.primaryGenre,
             genres: genresPayload.genres,
         });

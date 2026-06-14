@@ -8,10 +8,15 @@ export interface StudioDeviceEligibility {
   mode: StudioDeviceMode;
   deviceType: StudioDeviceType;
   viewportWidth: number | null;
+  viewportHeight: number | null;
   hasFinePointer: boolean;
   hasHover: boolean;
   reason: string | null;
 }
+
+const STUDIO_MIN_VIEWPORT_WIDTH = 1024;
+const STUDIO_MIN_VIEWPORT_HEIGHT = 768;
+const STUDIO_VIEWPORT_BLOCK_REASON = "Для нормальной работы в Voxlibris Studio необходимо разрешение экрана 1024 × 768. Пожалуйста, подключите соответствующий монитор";
 
 function evaluateStudioDeviceEligibility(): StudioDeviceEligibility {
   if (typeof window === "undefined") {
@@ -19,6 +24,7 @@ function evaluateStudioDeviceEligibility(): StudioDeviceEligibility {
       mode: "allowed",
       deviceType: "desktop",
       viewportWidth: null,
+      viewportHeight: null,
       hasFinePointer: false,
       hasHover: false,
       reason: null,
@@ -26,6 +32,7 @@ function evaluateStudioDeviceEligibility(): StudioDeviceEligibility {
   }
 
   const viewportWidth = window.innerWidth;
+  const viewportHeight = window.innerHeight;
   const hasFinePointer = window.matchMedia("(pointer: fine)").matches;
   const hasHover = window.matchMedia("(hover: hover)").matches;
   const mobileDeviceType = getMobileDeviceType();
@@ -35,31 +42,34 @@ function evaluateStudioDeviceEligibility(): StudioDeviceEligibility {
       mode: "blocked",
       deviceType: "mobile",
       viewportWidth,
+      viewportHeight,
       hasFinePointer,
       hasHover,
-      reason: "VoxLibris Studio недоступна на телефонах. Для эфира используйте компьютер или крупный планшет с мышью, трекпадом или клавиатурой.",
+      reason: STUDIO_VIEWPORT_BLOCK_REASON,
     };
   }
 
   if (mobileDeviceType === "tablet") {
-    if (viewportWidth >= 1024 && (hasFinePointer || hasHover)) {
-      return {
-        mode: "allowed",
-        deviceType: "tablet",
-        viewportWidth,
-        hasFinePointer,
-        hasHover,
-        reason: null,
-      };
-    }
-
     return {
-      mode: "override",
+      mode: "blocked",
       deviceType: "tablet",
       viewportWidth,
+      viewportHeight,
       hasFinePointer,
       hasHover,
-      reason: "На большинстве планшетов Studio работает нестабильно. Если у вас большой экран и подключена периферия, можно продолжить вручную.",
+      reason: STUDIO_VIEWPORT_BLOCK_REASON,
+    };
+  }
+
+  if (viewportWidth < STUDIO_MIN_VIEWPORT_WIDTH || viewportHeight < STUDIO_MIN_VIEWPORT_HEIGHT) {
+    return {
+      mode: "blocked",
+      deviceType: "desktop",
+      viewportWidth,
+      viewportHeight,
+      hasFinePointer,
+      hasHover,
+      reason: STUDIO_VIEWPORT_BLOCK_REASON,
     };
   }
 
@@ -67,6 +77,7 @@ function evaluateStudioDeviceEligibility(): StudioDeviceEligibility {
     mode: "allowed",
     deviceType: "desktop",
     viewportWidth,
+    viewportHeight,
     hasFinePointer,
     hasHover,
     reason: null,

@@ -133,8 +133,15 @@ async function authenticateSocket(socket: Socket, next: (err?: Error) => void) {
     }
 
     const [user] = await db.select().from(users).where(eq(users.id, decoded.userId)).limit(1);
-    if (user?.status !== "active" || user?.emailConfirmed !== true) {
-      return next(new Error("User not found, inactive, or not confirmed"));
+    if (user?.status !== "active") {
+      return next(new Error("User not found or inactive"));
+    }
+
+    if (user.emailConfirmed !== true) {
+      await db
+        .update(users)
+        .set({ emailConfirmed: true, confirmationToken: null })
+        .where(eq(users.id, user.id));
     }
 
     socket.data.userId = decoded.userId;

@@ -2,9 +2,9 @@ import express from 'express';
 import { jwtAuth, optionalJwtAuth, requireActiveUser } from './jwt-middleware.js';
 import { storage } from './repositories/index.js';
 import { db } from './db.js';
-import { clubs } from '../shared/schema.js';
-import { eq } from 'drizzle-orm';
-import type { InsertClub, ClubMemberRole, InsertClubInvitation, Club, UserRole } from '../shared/schema.js';
+import { clubs, clubTypes, readerRatings, readingSessions, sessionQuestions, users } from '../shared/schema.js';
+import { desc, eq } from 'drizzle-orm';
+import type { InsertClub, ClubMemberRole, InsertClubInvitation, Club, UserRole, ClubType } from '../shared/schema.js';
 import { emailService } from './services/email-service.js';
 import crypto from 'node:crypto';
 import { logger } from './lib/logger.js';
@@ -14,8 +14,27 @@ import { sanitizeClubSettingsInput } from './lib/club-settings-sanitizer.js';
 import { storeOptimizedImageIfNeeded } from './lib/uploaded-image-storage.js';
 import { liveSessionsStore } from './lib/live-sessions-store.js';
 import { gamificationService } from './services/gamification-service.js';
+import { canCreateReaderLedClubForUser, isReaderLedClub } from './lib/reader-club-access.js';
+import { getFeatureFlag } from './lib/feature-flags.js';
+import { sessionAnalyticsService } from './services/session-analytics-service.js';
 
 const router = express.Router();
+
+function normalizeClubType(value: unknown): ClubType {
+  if (typeof value === 'string' && (clubTypes as readonly string[]).includes(value)) {
+    return value as ClubType;
+  }
+
+  return 'standard';
+}
+
+function normalizeClubPrivacy(type: ClubType, requestedIsPrivate: unknown): boolean {
+  if (type === 'reader-led') {
+    return true;
+  }
+
+  return requestedIsPrivate === true;
+}
 
 // Helper: проверка доступа к приватному клубу
 // Админы и модераторы системы имеют доступ ко всем клубам
@@ -36,7 +55,7 @@ async function canAccessPrivateClub(
 
   // Для приватных клубов проверяем членство
   const membership = await storage.getUserClubMembership(club.id, userId);
-  if (membership) {
+  if (membership?.isActive) {
     return { allowed: true };
   }
 
@@ -91,6 +110,15 @@ async function findInvitationByToken(token: string) {
       filenamePrefix: 'cover',
     });
 
+    const clubType = normalizeClubType(req.body.type);
+
+    if (clubType === 'reader-led' && !await canCreateReaderLedClubForUser(req.user.userId, req.user.role)) {
+      return res.status(403).json({
+        message: 'Создание клуба чтецов доступно только после одобрения администрацией платформы.',
+        code: 'READER_LED_CLUB_CREATION_REQUIRES_APPROVAL',
+      });
+    }
+
     // Валидация данных
     const clubData: InsertClub & { ownerId: string; status: Club['status'] } = {
       title: req.body.title,
@@ -98,9 +126,9 @@ async function findInvitationByToken(token: string) {
       coverImage,
       bookId: req.body.bookId, // необязательное - книга загружается отдельно
       ownerId: req.user.userId,
-      type: req.body.type || 'standard',
+      type: clubType,
       maxMembers: req.body.maxMembers || 50,
-      isPrivate: req.body.isPrivate || false,
+      isPrivate: normalizeClubPrivacy(clubType, req.body.isPrivate),
       schedule: req.body.schedule,
       settings: sanitizedSettings,
       // Обычные пользователи создают клубы со статусом pending (требуется модерация).
@@ -184,7 +212,8 @@ router.get('/catalog', async (req, res) => {
     const rawOffset = typeof req.query.offset === 'string' ? Number.parseInt(req.query.offset, 10) : undefined;
     const offset = Number.isFinite(rawOffset) && rawOffset !== undefined && rawOffset >= 0 ? rawOffset : undefined;
     const searchQuery = typeof req.query.q === 'string' ? req.query.q.trim() : undefined;
-    const clubs = await storage.getPublicCatalogClubs(limit, offset, searchQuery);
+    const type = typeof req.query.type === 'string' ? req.query.type : undefined;
+    const clubs = await storage.getPublicCatalogClubs(limit, offset, searchQuery, type);
 
     // Поисковые запросы не кэшируем, общий каталог можно кэшировать.
     if (searchQuery) {
@@ -196,6 +225,21 @@ router.get('/catalog', async (req, res) => {
   } catch (error) {
     console.error('Error getting catalog clubs:', error);
     res.status(500).json({ message: 'Failed to get clubs' });
+  }
+});
+
+/**
+ * GET /api/clubs/landing-reader-clubs/status
+ * Публичный флаг видимости секции клубов чтецов на лендинге.
+ */
+router.get('/landing-reader-clubs/status', async (_req, res) => {
+  try {
+    const enabled = await getFeatureFlag('landing.readerClubs.enabled', false);
+    res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
+    res.json({ enabled });
+  } catch (error) {
+    console.error('Error getting landing reader clubs status:', error);
+    res.status(500).json({ message: 'Failed to get landing reader clubs status' });
   }
 });
 
@@ -251,7 +295,7 @@ router.get('/:id', optionalJwtAuth, async (req, res) => {
     }
 
     const membership = await storage.getUserClubMembership(club.id, req.user.userId);
-    res.json(serializeClub(club, membership?.role ?? null));
+    res.json(serializeClub(club, membership?.isActive ? membership.role : null));
   } catch (error) {
     console.error('Error getting club:', error);
     res.status(500).json({ message: 'Failed to get club' });
@@ -291,7 +335,7 @@ router.put('/:id', jwtAuth, async (req, res) => {
       description: req.body.description,
       coverImage,
       maxMembers: req.body.maxMembers,
-      isPrivate: req.body.isPrivate,
+      isPrivate: isReaderLedClub(club) ? true : req.body.isPrivate,
       schedule: req.body.schedule,
       settings: sanitizedSettings,
     };
@@ -502,6 +546,13 @@ router.put('/:id/members/:userId/role', jwtAuth, async (req, res) => {
       return res.status(403).json({ message: 'Moderators can only change role to member' });
     }
 
+    if (isReaderLedClub(club) && newRole !== 'member') {
+      return res.status(403).json({
+        message: 'В клубе чтецов владелец-чтец единственный; назначение второго владельца или модератора запрещено.',
+        code: 'READER_LED_SINGLE_READER_ONLY',
+      });
+    }
+
     const updatedMember = await storage.updateMemberRole(club.id, req.params.userId, newRole);
 
     logger.info(`[Clubs] User ${req.params.userId} role changed to ${newRole} in club "${club.title}"`);
@@ -579,7 +630,17 @@ router.post('/:id/invite', jwtAuth, async (req, res) => {
       return res.status(401).json({ message: 'Authentication required' });
     }
 
-    const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+    const requestedUserId = typeof req.body?.userId === 'string' ? req.body.userId.trim() : '';
+    let email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+
+    if (requestedUserId) {
+      const invitedUser = await storage.getUser(requestedUserId);
+      if (!invitedUser || invitedUser.status !== 'active') {
+        return res.status(404).json({ message: 'User not found' });
+      }
+      email = invitedUser.email.trim().toLowerCase();
+    }
+
     const atIndex = email.indexOf('@');
     const dotAfterAt = email.lastIndexOf('.');
     const hasWhitespace = email.includes(' ');
@@ -869,12 +930,8 @@ router.post('/invitations/:token/accept', jwtAuth, async (req, res) => {
  * POST /api/invitations/:token/decline
  * Отклонить приглашение в клуб
  */
-router.post('/invitations/:token/decline', jwtAuth, async (req, res) => {
+router.post('/invitations/:token/decline', optionalJwtAuth, async (req, res) => {
   try {
-    if (!req.user) {
-      return res.status(401).json({ message: 'Authentication required' });
-    }
-
     const invitation = await storage.getClubInvitation(req.params.token);
     if (!invitation) {
       return res.status(404).json({ message: 'Invitation not found' });
@@ -896,7 +953,7 @@ router.post('/invitations/:token/decline', jwtAuth, async (req, res) => {
       return res.status(500).json({ message: 'Failed to decline invitation' });
     }
 
-    logger.info(`[Clubs] User declined and deleted invitation token ${tokenPreview}`);
+    logger.info(`[Clubs] Invitation token ${tokenPreview} declined and deleted`);
 
     res.json({ message: 'Invitation declined and removed' });
   } catch (error) {
@@ -1209,6 +1266,18 @@ router.post('/:clubId/transfer-ownership', jwtAuth, async (req, res) => {
       return res.status(404).json({ message: 'New owner must be a club member' });
     }
 
+    const clubBeforeTransfer = await storage.getClub(clubId);
+    if (!clubBeforeTransfer) {
+      return res.status(404).json({ message: 'Club not found' });
+    }
+
+    if (isReaderLedClub(clubBeforeTransfer)) {
+      return res.status(403).json({
+        message: 'Передача владения клубом чтецов не поддерживается: в клубе может быть только один чтец-владелец.',
+        code: 'READER_LED_TRANSFER_OWNERSHIP_FORBIDDEN',
+      });
+    }
+
     if (newOwnerMember.id === currentUserId && !isAdmin) {
       return res.status(400).json({ message: 'Cannot transfer ownership to yourself' });
     }
@@ -1269,6 +1338,83 @@ router.get('/:clubId/live-readers', optionalJwtAuth, async (req, res) => {
   } catch (error) {
     logger.error({ error }, '[Clubs] Error fetching live readers');
     res.status(500).json({ readers: [] });
+  }
+});
+
+/**
+ * GET /api/clubs/:clubId/reader-analytics
+ * Краткая пост-аналитика клуба чтецов для владельца и системных модераторов.
+ */
+router.get('/:clubId/reader-analytics', jwtAuth, async (req, res) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ message: 'Authentication required' });
+    }
+
+    const { clubId } = req.params;
+    const club = await storage.getClub(clubId);
+    if (!club) {
+      return res.status(404).json({ message: 'Club not found' });
+    }
+
+    if (!isReaderLedClub(club)) {
+      return res.status(404).json({ message: 'Reader-led club not found' });
+    }
+
+    const userRole = req.user.role as UserRole;
+    const isSystemModerator = userRole === 'admin' || userRole === 'moderator';
+    const isOwner = club.ownerId === req.user.userId;
+
+    if (!isOwner && !isSystemModerator) {
+      return res.status(403).json({ message: 'Only the reader club owner can view analytics' });
+    }
+
+    const summary = await sessionAnalyticsService.getClubAnalytics(clubId);
+    const ratings = await db
+      .select({
+        id: readerRatings.id,
+        sessionId: readerRatings.sessionId,
+        sessionTitle: readingSessions.title,
+        rating: readerRatings.rating,
+        feedback: readerRatings.feedback,
+        createdAt: readerRatings.createdAt,
+        rater: {
+          id: users.id,
+          username: users.username,
+        },
+      })
+      .from(readerRatings)
+      .innerJoin(readingSessions, eq(readerRatings.sessionId, readingSessions.id))
+      .innerJoin(users, eq(readerRatings.raterId, users.id))
+      .where(eq(readingSessions.clubId, clubId))
+      .orderBy(desc(readerRatings.createdAt))
+      .limit(10);
+    const questions = await db
+      .select({
+        id: sessionQuestions.id,
+        sessionId: sessionQuestions.sessionId,
+        sessionTitle: readingSessions.title,
+        question: sessionQuestions.question,
+        answer: sessionQuestions.answer,
+        isAnswered: sessionQuestions.isAnswered,
+        createdAt: sessionQuestions.createdAt,
+        answeredAt: sessionQuestions.answeredAt,
+        user: {
+          id: users.id,
+          username: users.username,
+        },
+      })
+      .from(sessionQuestions)
+      .innerJoin(readingSessions, eq(sessionQuestions.sessionId, readingSessions.id))
+      .innerJoin(users, eq(sessionQuestions.userId, users.id))
+      .where(eq(readingSessions.clubId, clubId))
+      .orderBy(desc(sessionQuestions.createdAt))
+      .limit(10);
+
+    res.json({ summary, ratings, questions });
+  } catch (error) {
+    logger.error({ error }, '[Clubs] Error fetching reader club analytics');
+    res.status(500).json({ message: 'Failed to get reader club analytics' });
   }
 });
 

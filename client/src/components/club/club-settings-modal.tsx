@@ -30,12 +30,14 @@ interface ClubSettings {
   welcomeHtml?: string;
   rulesHtml?: string;
   shortDescription?: string;
+  readerJoinRequestsEnabled?: boolean;
 }
 
 export function ClubSettingsModal({ club }: ClubSettingsModalProps) {
   const [isOpen, setIsOpen] = useState(false);
   const { toast } = useToast();
   const updateClubMutation = useUpdateClub();
+  const isReaderLedClub = club.type === "reader-led";
 
   const [coverImage, setCoverImage] = useState(club.coverImage || "");
   const [coverPreview, setCoverPreview] = useState(club.coverImage || "");
@@ -49,6 +51,7 @@ export function ClubSettingsModal({ club }: ClubSettingsModalProps) {
   const [rulesHtml, setRulesHtml] = useState("");
   const [shortDescription, setShortDescription] = useState("");
   const [isPrivate, setIsPrivate] = useState(false);
+  const [readerJoinRequestsEnabled, setReaderJoinRequestsEnabled] = useState(true);
   const [schedule, setSchedule] = useState<ScheduleItem[]>([]);
   const [newSchedule, setNewSchedule] = useState<ScheduleItem>({
     id: "",
@@ -73,7 +76,8 @@ export function ClubSettingsModal({ club }: ClubSettingsModalProps) {
       setWelcomeHtml(parsedSettings?.welcomeHtml || "");
       setRulesHtml(parsedSettings?.rulesHtml || "");
       setShortDescription(parsedSettings?.shortDescription || "");
-      setIsPrivate(club.isPrivate || false);
+      setIsPrivate(isReaderLedClub ? true : club.isPrivate || false);
+      setReaderJoinRequestsEnabled(parsedSettings?.readerJoinRequestsEnabled !== false);
       setSchedule(parsedSchedule);
       setNewSchedule({
         id: "",
@@ -83,7 +87,7 @@ export function ClubSettingsModal({ club }: ClubSettingsModalProps) {
         description: "",
       });
     }
-  }, [isOpen, club.settings]);
+  }, [isOpen, club.settings, club.isPrivate, isReaderLedClub]);
 
   useEffect(() => {
     return () => {
@@ -172,13 +176,14 @@ export function ClubSettingsModal({ club }: ClubSettingsModalProps) {
         welcomeHtml,
         rulesHtml,
         shortDescription,
+        readerJoinRequestsEnabled: isReaderLedClub ? readerJoinRequestsEnabled : undefined,
       });
       const scheduleJson = JSON.stringify(schedule);
 
       const updateData: { settings: string; schedule: string; coverImage?: string | null; isPrivate?: boolean } = {
         settings: settingsJson,
         schedule: scheduleJson,
-        isPrivate,
+        isPrivate: isReaderLedClub ? true : isPrivate,
       };
 
       if (coverImage && coverImage !== club.coverImage) {
@@ -229,12 +234,12 @@ export function ClubSettingsModal({ club }: ClubSettingsModalProps) {
           Настройки
         </Button>
       </DialogTrigger>
-      <DialogContent className="w-[95vw] max-w-[95%] sm:max-w-2xl md:max-w-3xl max-h-[85vh] flex flex-col">
-        <DialogHeader>
+      <DialogContent className="flex max-h-[85vh] w-[95vw] max-w-[95%] flex-col overflow-hidden sm:max-w-2xl md:max-w-3xl">
+        <DialogHeader className="shrink-0">
           <DialogTitle>Настройки клуба</DialogTitle>
         </DialogHeader>
 
-        <Tabs defaultValue="appearance" className="flex-1 flex flex-col min-h-0">
+        <Tabs defaultValue="appearance" className="flex min-h-0 flex-1 flex-col overflow-hidden">
           <TabsList className="grid grid-cols-2 md:grid-cols-4 w-full shrink-0 overflow-x-auto whitespace-nowrap">
             <TabsTrigger value="appearance">Оформление</TabsTrigger>
             <TabsTrigger value="welcome">Приветствие</TabsTrigger>
@@ -242,7 +247,7 @@ export function ClubSettingsModal({ club }: ClubSettingsModalProps) {
             <TabsTrigger value="schedule">Расписание</TabsTrigger>
           </TabsList>
 
-          <ScrollArea className="flex-1 -mx-4 px-4">
+          <ScrollArea className="min-h-0 flex-1 -mx-4 px-4 pr-5">
             <TabsContent value="appearance" className="space-y-6 mt-0">
               <div className="space-y-4">
                 <Label>Фон клуба</Label>
@@ -319,19 +324,37 @@ export function ClubSettingsModal({ club }: ClubSettingsModalProps) {
                     />
                   </div>
 
-                  <div className="flex items-center justify-between p-4 bg-muted/50 rounded-lg">
-                    <div>
-                      <Label htmlFor="club-privacy" className="text-base">Тип клуба</Label>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        {isPrivate ? "Закрытый клуб — только по приглашению" : "Публичный клуб — виден в каталоге"}
-                      </p>
+                  {!isReaderLedClub ? (
+                    <div className="flex items-center justify-between p-4 bg-muted/50 rounded-lg">
+                      <div>
+                        <Label htmlFor="club-privacy" className="text-base">Тип клуба</Label>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {isPrivate ? "Закрытый клуб — только по приглашению" : "Публичный клуб — виден в каталоге"}
+                        </p>
+                      </div>
+                      <Switch
+                        id="club-privacy"
+                        checked={isPrivate}
+                        onCheckedChange={setIsPrivate}
+                      />
                     </div>
-                    <Switch
-                      id="club-privacy"
-                      checked={isPrivate}
-                      onCheckedChange={setIsPrivate}
-                    />
-                  </div>
+                  ) : null}
+
+                  {isReaderLedClub ? (
+                    <div className="flex items-center justify-between p-4 bg-muted/50 rounded-lg">
+                      <div>
+                        <Label htmlFor="reader-join-requests" className="text-base">Заявки на вступление</Label>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Если выключить, кнопка заявки исчезнет с карточки клуба.
+                        </p>
+                      </div>
+                      <Switch
+                        id="reader-join-requests"
+                        checked={readerJoinRequestsEnabled}
+                        onCheckedChange={setReaderJoinRequestsEnabled}
+                      />
+                    </div>
+                  ) : null}
                 </div>
               </div>
             </TabsContent>
@@ -475,7 +498,7 @@ export function ClubSettingsModal({ club }: ClubSettingsModalProps) {
           </ScrollArea>
         </Tabs>
 
-        <div className="flex justify-end gap-2 pt-4 border-t">
+        <div className="flex shrink-0 justify-end gap-2 pt-4 border-t">
           <Button variant="outline" onClick={() => setIsOpen(false)}>
             Отмена
           </Button>

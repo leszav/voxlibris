@@ -5,7 +5,7 @@
  * на отдельную страницу.
  */
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, type Dispatch, type SetStateAction } from 'react';
 import { apiRequest } from '@/lib/queryClient';
 import { useReadingSession } from './use-reading-session';
 import { useAudioSession } from './use-audio-session';
@@ -16,7 +16,7 @@ import { clearStudioMicCheckPassed, hasRecentStudioMicCheck, markStudioMicCheckP
 import { resolveStudioMicCheckState, resolveStudioStartGuard } from '@/lib/studio-mic-check-state';
 import { resolveStudioModeState } from '@/lib/studio-mode-state';
 import { resolveStudioSessionPhase, type StudioSessionPhase } from '@/lib/studio-session-phase';
-import type { LiveSessionReaction } from './use-audio-session';
+import type { LiveSessionQuestion, LiveSessionReaction } from './use-audio-session';
 
 interface UseStudioModeOptions {
   clubId: string;
@@ -38,6 +38,8 @@ export interface StudioModeState {
   streamStartError: string | null;
   microphoneIssue: string | null;
   micCheckPassed: boolean;
+  publicationRecordingEnabled: boolean;
+  setPublicationRecordingEnabled: Dispatch<SetStateAction<boolean>>;
   showMicCheck: boolean;
   microphoneAvailable: boolean;
   microphoneLoading: boolean;
@@ -48,6 +50,10 @@ export interface StudioModeState {
   listenerCount: number;
   elapsedTime: number;
   recentReactions: LiveSessionReaction[];
+  reactionCount: number;
+  sessionQuestions: LiveSessionQuestion[];
+  unansweredQuestionCount: number;
+  markQuestionAnswered: (questionId: string) => Promise<void>;
   completeMicCheck: () => void;
   skipMicCheck: () => void;
   handleStartBroadcast: (onAnnounce: (sessionId: string) => void) => Promise<void>;
@@ -76,6 +82,7 @@ export function useStudioMode({
   const [showMicCheck, setShowMicCheck] = useState(true);
   const [showEndConfirm, setShowEndConfirm] = useState(false);
   const [showSummary, setShowSummary] = useState(false);
+  const [publicationRecordingEnabled, setPublicationRecordingEnabled] = useState(true);
   const [isInitialized, setIsInitialized] = useState(false);
   const initRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const startLockRef = useRef(false);
@@ -110,6 +117,10 @@ export function useStudioMode({
     notifyBroadcastResumed,
     joinSessionRoom,
     recentReactions,
+    reactionCount,
+    sessionQuestions,
+    unansweredQuestionCount,
+    markQuestionAnswered,
   } = useAudioSession({ userId, enabled: resourcesEnabled });
 
   const {
@@ -122,7 +133,7 @@ export function useStudioMode({
     mute: muteAudioStream,
   } = useAudioStream({
     sessionId: session.sessionId ?? null,
-    enableRecording: false,
+    enableRecording: publicationRecordingEnabled,
     onError: (msg, source) => {
       if (source === 'microphone') {
         setMicrophoneIssue(msg);
@@ -400,6 +411,8 @@ export function useStudioMode({
     streamStartError,
     microphoneIssue,
     micCheckPassed,
+    publicationRecordingEnabled,
+    setPublicationRecordingEnabled,
     showMicCheck,
     microphoneAvailable,
     microphoneLoading,
@@ -410,6 +423,10 @@ export function useStudioMode({
     listenerCount,
     elapsedTime: session.elapsedTime,
     recentReactions,
+    reactionCount,
+    sessionQuestions,
+    unansweredQuestionCount,
+    markQuestionAnswered,
     completeMicCheck,
     skipMicCheck,
     handleStartBroadcast,

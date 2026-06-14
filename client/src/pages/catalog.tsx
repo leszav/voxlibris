@@ -376,6 +376,7 @@ export default function Catalog() {
                     isPrivate={club.isPrivate}
                     type={club.type as "standard" | "premium" | "reader-led" | "reading_club"}
                     tags={club.tags}
+                    readerJoinRequestsEnabled={club.readerJoinRequestsEnabled}
                   />
                 ))}
               </div>

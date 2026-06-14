@@ -101,6 +101,7 @@ pnpm exec web-push generate-vapid-keys
 - [Центр документации](./docs/README.md)
 - [Аудит документации](./docs/DOCUMENTATION_AUDIT.md)
 - [Архитектура](./docs/02-architecture/README.md)
+- [Клубы чтецов](./docs/02-architecture/reader-clubs-system.md)
 - [API и маршруты](./docs/05-server/routes.md)
 - [База данных и миграции](./docs/06-database/README.md)
 - [Тестирование](./docs/10-testing/README.md)

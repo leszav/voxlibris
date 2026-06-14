@@ -21,6 +21,7 @@ import {
 import { Link, useLocation, useRoute } from "wouter";
 import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
+import { getClubCoverUrl } from "@/lib/club-cover";
 import { ClubSettingsModal } from "@/components/club/club-settings-modal";
 import { EditClubBookDialog } from "@/components/club/EditClubBookDialog";
 import { InvitationsList } from "@/components/club/invitations-list";
@@ -449,16 +450,11 @@ interface ClubHeaderProps {
 function ClubHeader({ club, members, isOwner, isMember, removeMemberMutation, handleLeaveClub, setLocation, user, onOwnershipTransferred }: ClubHeaderProps) {
   return (
     <div className="relative min-h-[18rem] w-full overflow-hidden md:min-h-[22rem] lg:min-h-[26rem]">
-      {club.coverImage ? (
-        <img
-          src={club.coverImage}
-          alt={club.title}
-          className="absolute inset-0 w-full h-full object-cover"
-        />
-      ) : (
-        <div className="absolute inset-0 bg-primary/90" />
-      )}
-      <div className="absolute inset-0 bg-gradient-to-br from-primary/10 to-accent/10 opacity-50" />
+      <img
+        src={getClubCoverUrl(club.coverImage)}
+        alt={club.title}
+        className="absolute inset-0 w-full h-full object-cover"
+      />
 
       <div className="container relative flex h-full flex-col justify-between px-4 py-6 sm:px-6 md:px-12 md:py-8">
         <div>

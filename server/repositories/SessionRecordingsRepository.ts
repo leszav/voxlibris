@@ -2,6 +2,8 @@ import { BaseRepository } from './BaseRepository.js';
 import { eq, and, desc } from 'drizzle-orm';
 import { sessionRecordings, type SessionRecording, type InsertSessionRecording } from '../../shared/schema.js';
 
+type SessionRecordingInsert = typeof sessionRecordings.$inferInsert;
+
 /**
  * Репозиторий для записей сессий чтения
  */
@@ -10,7 +12,7 @@ export class SessionRecordingsRepository extends BaseRepository {
   /**
    * Создать запись
    */
-  async createRecording(recording: InsertSessionRecording & { sessionId: string; clubId: string }): Promise<SessionRecording> {
+  async createRecording(recording: SessionRecordingInsert & Pick<InsertSessionRecording, 'sessionId' | 'clubId'>): Promise<SessionRecording> {
     try {
       const result = await this.db
         .insert(sessionRecordings)
@@ -64,7 +66,10 @@ export class SessionRecordingsRepository extends BaseRepository {
       return await this.db
         .select()
         .from(sessionRecordings)
-        .where(eq(sessionRecordings.clubId, clubId))
+        .where(and(
+          eq(sessionRecordings.clubId, clubId),
+          eq(sessionRecordings.publicationRequested, true)
+        ))
         .orderBy(desc(sessionRecordings.createdAt));
     } catch (error) {
       this.logError('getClubRecordings', error);
@@ -82,6 +87,7 @@ export class SessionRecordingsRepository extends BaseRepository {
         .from(sessionRecordings)
         .where(and(
           eq(sessionRecordings.clubId, clubId),
+          eq(sessionRecordings.publicationRequested, true),
           eq(sessionRecordings.isAvailable, true)
         ))
         .orderBy(desc(sessionRecordings.createdAt));
@@ -209,6 +215,86 @@ export class SessionRecordingsRepository extends BaseRepository {
     } catch (error) {
       this.logError('updateRecordingAvailability', error);
       throw new Error('Failed to update recording availability');
+    }
+  }
+
+  /**
+   * Обновить статус модерации записи.
+   */
+  async updateModerationStatus(
+    id: string,
+    moderationStatus: 'pending' | 'approved' | 'rejected',
+    moderatedBy: string,
+    moderationNotes?: string | null,
+  ): Promise<SessionRecording | undefined> {
+    try {
+      const statusDependentUpdates = moderationStatus === 'approved'
+        ? {}
+        : {
+            isPublished: false,
+            isAvailable: false,
+            publishedBy: null,
+            publishedAt: null,
+            allowStreaming: false,
+            allowDownload: false,
+          };
+      const result = await this.db
+        .update(sessionRecordings)
+        .set({
+          moderationStatus,
+          moderatedBy,
+          moderatedAt: new Date(),
+          moderationNotes: moderationNotes || null,
+          ...statusDependentUpdates,
+          updatedAt: new Date(),
+        })
+        .where(eq(sessionRecordings.id, id))
+        .returning();
+      return this.getFirstResult(result);
+    } catch (error) {
+      this.logError('updateModerationStatus', error);
+      throw new Error('Failed to update recording moderation status');
+    }
+  }
+
+  /**
+   * Опубликовать или снять с публикации запись владельцем клуба.
+   */
+  async updatePublication(
+    id: string,
+    updates: {
+      isPublished: boolean;
+      publishedBy?: string | null;
+      publicTitle?: string | null;
+      publicAuthor?: string | null;
+      publicDescription?: string | null;
+      coverImageUrl?: string | null;
+      allowStreaming?: boolean;
+      allowDownload?: boolean;
+    },
+  ): Promise<SessionRecording | undefined> {
+    try {
+      const result = await this.db
+        .update(sessionRecordings)
+        .set({
+          isPublished: updates.isPublished,
+          isAvailable: updates.isPublished,
+          publishedBy: updates.isPublished ? updates.publishedBy ?? null : null,
+          publishedAt: updates.isPublished ? new Date() : null,
+          publicTitle: updates.publicTitle ?? null,
+          publicAuthor: updates.publicAuthor ?? null,
+          publicDescription: updates.publicDescription ?? null,
+          coverImageUrl: updates.coverImageUrl ?? null,
+          allowStreaming: updates.allowStreaming ?? false,
+          allowDownload: updates.allowDownload ?? false,
+          updatedAt: new Date(),
+        })
+        .where(eq(sessionRecordings.id, id))
+        .returning();
+      return this.getFirstResult(result);
+    } catch (error) {
+      this.logError('updatePublication', error);
+      throw new Error('Failed to update recording publication');
     }
   }
 

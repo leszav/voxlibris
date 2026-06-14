@@ -16,6 +16,7 @@ import {
   Trash2,
   User as UserIcon,
   UserPlus,
+  Mic2,
 } from "lucide-react";
 import { Pencil } from "lucide-react";
 import { useState } from "react";
@@ -75,6 +76,7 @@ interface User {
   books_read: number;
   clubs_joined: number;
   clubs_created: number;
+  can_create_reader_led_clubs: boolean;
 }
 
 interface UsersResponse {
@@ -100,7 +102,9 @@ async function fetchUsers(filters: UsersFilters): Promise<UsersResponse> {
   params.append("page", filters.page.toString());
   params.append("limit", filters.limit.toString());
 
-  return apiRequest<UsersResponse>(`/api/v1/admin/users?${params.toString()}`);
+  return apiRequest<UsersResponse>(`/api/v1/admin/users?${params.toString()}`, {
+    cache: "no-store",
+  });
 }
 
 async function updateUserRole(username: string, role: string): Promise<void> {
@@ -139,6 +143,13 @@ async function updateUserFields(userId: string, fields: { username?: string; ema
   await apiRequest(`/api/v1/admin/users/${userId}/fields`, {
     method: "PUT",
     body: JSON.stringify(fields),
+  });
+}
+
+async function updateReaderLedPermission(userId: string, allowed: boolean): Promise<void> {
+  await apiRequest(`/api/v1/admin/users/${userId}/reader-led-permission`, {
+    method: "PUT",
+    body: JSON.stringify({ allowed }),
   });
 }
 
@@ -359,6 +370,30 @@ function UserActionsMenu({ user }: Readonly<{ user: User }>) {
     },
   });
 
+  const readerLedPermissionMutation = useMutation({
+    mutationFn: (allowed: boolean) => updateReaderLedPermission(user.id, allowed),
+    onSuccess: (_data, allowed) => {
+      queryClient.setQueriesData<UsersResponse>({ queryKey: ["admin-users"] }, (current) => {
+        if (!current) return current;
+
+        return {
+          ...current,
+          users: current.users.map((currentUser) => currentUser.id === user.id
+            ? { ...currentUser, can_create_reader_led_clubs: allowed }
+            : currentUser),
+        };
+      });
+      queryClient.invalidateQueries({ queryKey: ["admin-users"] });
+    },
+    onError: (error: unknown) => {
+      void modalAlert({
+        title: "Не удалось изменить ПРО-допуск",
+        description: error instanceof Error ? error.message : "Ошибка сохранения права чтеца",
+        variant: "destructive",
+      });
+    },
+  });
+
   const impersonateMutation = useMutation({
     mutationFn: (userId: string) => impersonateUser(userId),
     onSuccess: async (data) => {
@@ -512,6 +547,14 @@ function UserActionsMenu({ user }: Readonly<{ user: User }>) {
                 Заблокировать
               </>
             )}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onClick={() => readerLedPermissionMutation.mutate(!user.can_create_reader_led_clubs)}
+            disabled={readerLedPermissionMutation.isPending}
+            className={user.can_create_reader_led_clubs ? "text-orange-600" : "text-amber-700"}
+          >
+            <Mic2 className="h-4 w-4 mr-2" />
+            {user.can_create_reader_led_clubs ? "Отозвать ПРО-чтеца" : "Выдать ПРО-чтеца"}
           </DropdownMenuItem>
           <DropdownMenuItem
             onClick={() => {
@@ -674,7 +717,15 @@ function UsersTable({ users }: Readonly<{ users: User[] }>) {
                 </div>
               </td>
               <td className="p-4">
-                <UserRoleBadge role={user.role} />
+                <div className="flex flex-wrap gap-1.5">
+                  <UserRoleBadge role={user.role} />
+                  {user.can_create_reader_led_clubs && (
+                    <Badge variant="secondary" className="bg-amber-50 text-amber-700 border-amber-200">
+                      <Mic2 className="w-3 h-3 mr-1" />
+                      ПРО-чтец
+                    </Badge>
+                  )}
+                </div>
               </td>
               <td className="p-4">
                 <UserStatusBadge status={user.status} />

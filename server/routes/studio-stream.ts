@@ -25,6 +25,7 @@ import http from 'node:http';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import { PassThrough } from 'node:stream';
+import { db } from '../db.js';
 import { jwtAuth } from '../jwt-middleware.js';
 import { logger } from '../lib/logger.js';
 import {
@@ -37,6 +38,7 @@ import {
 } from '../lib/studio-recording-storage.js';
 import { buildStudioStreamStatus, resolveStudioStreamSessionForReader } from '../lib/studio-streaming-service.js';
 import { recordingService } from '../services/recording-service.js';
+import { sessionRecordings } from '../../shared/schema.js';
 import {
   clearActiveStudioStream,
   getStudioMountPath,
@@ -167,6 +169,7 @@ router.post(
     }
 
     await clearStudioStreamClosureIntent(sessionId);
+    const publicationRequested = req.query.record !== 'false';
 
     // Mount point формата /live/<sessionId>
     const mountPath = getStudioMountPath(sessionId);
@@ -278,20 +281,55 @@ router.post(
           return;
         }
 
-        const { recordingId } = await recordingService.createRecording({
-          sessionId,
-          clubId: session.clubId,
-          title: `Studio session ${sessionId}`,
-          format: 'mp3',
-          bitrate: 64,
-          sampleRate: 48000,
-          channels: 1,
-        });
+        if (publicationRequested) {
+          const { recordingId } = await recordingService.createRecording({
+            sessionId,
+            clubId: session.clubId,
+            title: `Studio session ${sessionId}`,
+            format: 'mp3',
+            bitrate: 64,
+            sampleRate: 48000,
+            channels: 1,
+          }, { publicationRequested: true });
 
-        const audioBuffer = await fs.promises.readFile(recordingPath);
-        await recordingService.uploadRecordingFile(recordingId, audioBuffer, 'mp3');
+          const audioBuffer = await fs.promises.readFile(recordingPath);
+          await recordingService.uploadRecordingFile(recordingId, audioBuffer, 'mp3');
 
-        logger.info({ sessionId, recordingId, recordingPath }, 'Studio recording finalized successfully');
+          logger.info({ sessionId, recordingId, recordingPath }, 'Studio recording finalized successfully');
+          return;
+        }
+
+        const [arbitrationRecording] = await db
+          .insert(sessionRecordings)
+          .values({
+            sessionId,
+            clubId: session.clubId,
+            recordingUrl: `/api/v1/admin/recordings/${encodeURIComponent(recordingFileName.replace(/\.mp3$/i, ''))}/stream`,
+            storageKey: `local:${recordingFileName}`,
+            duration: null,
+            fileSize: stats.size,
+            format: 'mp3',
+            status: 'ready',
+            isLocal: true,
+            isBackup: false,
+            bitrate: 64,
+            sampleRate: 48000,
+            channels: 1,
+            isAvailable: false,
+            publicationRequested: false,
+            moderationStatus: 'pending',
+            isPublished: false,
+            allowStreaming: false,
+            allowDownload: false,
+            metadata: JSON.stringify({
+              title: `Studio arbitration session ${sessionId}`,
+              arbitrationOnly: true,
+              createdAt: new Date().toISOString(),
+            }),
+          })
+          .returning();
+
+        logger.info({ sessionId, recordingId: arbitrationRecording?.id, recordingPath }, 'Studio arbitration recording saved without publication workflow');
       } catch (err) {
         logger.error({ err, sessionId, recordingPath }, 'Failed to finalize studio recording');
       } finally {
@@ -443,8 +481,14 @@ router.post(
  */
 router.get('/:sessionId/status', jwtAuth, async (req: Request, res: Response): Promise<void> => {
   const { sessionId } = req.params;
+  const userId = req.user?.id || req.user?.userId;
 
-  const status = await buildStudioStreamStatus(sessionId);
+  if (!userId) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+
+  const status = await buildStudioStreamStatus(sessionId, { userId, role: req.user?.role });
   if (!status.ok) {
     if (status.status === 500) {
       logger.error({ sessionId }, 'Failed to fetch session for studio stream status');

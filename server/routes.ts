@@ -27,6 +27,7 @@ import {
 import { sessionAnalyticsService } from "./services/session-analytics-service.js";
 import { db } from "./db.js";
 import { getIO } from "./lib/socket-registry.js";
+import { getFeatureFlag } from "./lib/feature-flags.js";
 import {
   analyticsEvents,
   insertClubSchema,
@@ -34,6 +35,7 @@ import {
   type InsertAnalyticsEvent,
   type InsertBook
 } from "../shared/schema.js";
+import { isReaderLedClub } from "./lib/reader-club-access.js";
 
 // Helper: robust lookup of invitation by token with fallbacks
 async function findInvitationByToken(token: string) {
@@ -349,8 +351,12 @@ export async function registerRoutes(
         return res.status(409).json({ message: 'You are already a member of this club' });
       }
 
-      // Добавляем пользователя в клуб
-      const membership = await storage.joinClub(club.id, req.user.userId, 'member');
+      // Для reader-led клуба приглашённый пользователь становится слушателем.
+      // В текущей модели ролей слушатель хранится как обычный active member;
+      // доступ к тексту книги остаётся закрыт серверными guard'ами владельца.
+      const membershipRole = 'member' as const;
+      const membership = await storage.joinClub(club.id, req.user.userId, membershipRole);
+      const listenerAccess = club.type === 'reader-led';
 
       // Обновляем статус приглашения
       await storage.updateInvitationStatus(req.params.token, 'accepted', new Date());
@@ -387,8 +393,10 @@ export async function registerRoutes(
           id: club.id,
           title: club.title,
           description: club.description,
+          type: club.type,
         },
         membership,
+        listenerAccess,
       });
     } catch (error) {
       console.error('Error accepting invitation:', error);
@@ -1022,11 +1030,15 @@ export async function registerRoutes(
         return res.status(404).json({ message: "Клуб не найден" });
       }
 
-      const isOwner = club.ownerId === userId;
-      const membership = isOwner ? true : await storage.getUserClubMembership(clubId, userId);
+      const membership = await storage.getUserClubMembership(clubId, userId);
+      const isOwner = club.ownerId === userId && membership?.isActive === true;
 
-      if (!membership) {
+      if (!membership?.isActive) {
         return res.status(403).json({ message: "Вы не являетесь участником этого клуба" });
+      }
+
+      if (isReaderLedClub(club) && !isOwner) {
+        return res.status(403).json({ message: "В клубе чтецов Studio может запускать только владелец клуба" });
       }
 
       const sessionData = {
@@ -1347,6 +1359,17 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Get top readers error:", error);
       res.status(500).json({ message: "Внутренняя ошибка сервера" });
+    }
+  });
+
+  app.get("/api/readers/landing-top/status", async (_req: Request, res: Response) => {
+    try {
+      const enabled = await getFeatureFlag("landing.topReaders.enabled", false);
+      res.setHeader("Cache-Control", "public, max-age=60, stale-while-revalidate=300");
+      res.json({ enabled });
+    } catch (error) {
+      console.error("Error getting landing top readers status:", error);
+      res.status(500).json({ message: "Failed to get landing top readers status" });
     }
   });
 

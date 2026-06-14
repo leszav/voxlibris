@@ -133,9 +133,13 @@ export class UserRepository extends BaseRepository {
     this.validateRequired(status, 'status');
     
     try {
+      const updateData = status === 'active'
+        ? { status, emailConfirmed: true, confirmationToken: null }
+        : { status };
+
       const result = await this.db
         .update(users)
-        .set({ status })
+        .set(updateData)
         .where(eq(users.username, username))
         .returning();
       
@@ -255,9 +259,13 @@ export class UserRepository extends BaseRepository {
     this.validateRequired(userId, 'userId');
     
     try {
+      const updateData = confirmed
+        ? { emailConfirmed: true, status: 'active' as UserStatus, confirmationToken: null }
+        : { emailConfirmed: false };
+
       const result = await this.db
         .update(users)
-        .set({ emailConfirmed: confirmed })
+        .set(updateData)
         .where(eq(users.id, userId))
         .returning();
       

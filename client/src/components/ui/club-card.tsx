@@ -1,5 +1,11 @@
 import { Badge } from "@/components/ui/badge";
-import { Users, BookOpen, Mic, Lock } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { apiRequest } from "@/lib/queryClient";
+import { getClubCoverUrl } from "@/lib/club-cover";
+import { useAuth } from "@/hooks/use-auth";
+import { useToast } from "@/hooks/use-toast";
+import { Users, Mic, Lock, UserPlus, Loader2 } from "lucide-react";
+import { useState } from "react";
 import { Link } from "wouter";
 
 function formatMemberCount(members: number, maxMembers: number): string {
@@ -22,6 +28,7 @@ interface ClubCardProps {
   readonly isPrivate?: boolean;
   readonly type?: "standard" | "premium" | "reader-led" | "reading_club";
   readonly tags?: string[];
+  readonly readerJoinRequestsEnabled?: boolean;
 }
 
 export function ClubCard({
@@ -38,22 +45,48 @@ export function ClubCard({
   isPrivate,
   type = "standard",
   tags = [],
+  readerJoinRequestsEnabled = true,
 }: Readonly<ClubCardProps>) {
+  const { isAuthenticated } = useAuth();
+  const { toast } = useToast();
+  const [joinRequestSending, setJoinRequestSending] = useState(false);
+  const canRequestReaderClubJoin = isAuthenticated && type === "reader-led" && readerJoinRequestsEnabled;
+
+  const handleReaderClubJoinRequest = async (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (joinRequestSending) return;
+
+    setJoinRequestSending(true);
+    try {
+      await apiRequest(`/api/dm/reader-clubs/${id}/join-request`, { method: "POST" });
+      toast({
+        title: "Заявка отправлена",
+        description: "Чтец получит её в личных сообщениях.",
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Не удалось отправить заявку";
+      toast({
+        title: "Не удалось отправить заявку",
+        description: message,
+        variant: "destructive",
+      });
+    } finally {
+      setJoinRequestSending(false);
+    }
+  };
+
   return (
-    <Link href={`/clubs/${id}`}>
-      <div className="group relative bg-card rounded-xl border hover:border-accent/50 hover:shadow-lg transition-all duration-300 overflow-hidden cursor-pointer h-full flex flex-col">
+    <div className="relative h-full">
+      <Link href={`/clubs/${id}`}>
+        <div className="group relative bg-card rounded-xl border hover:border-accent/50 hover:shadow-lg transition-all duration-300 overflow-hidden cursor-pointer h-full flex flex-col">
         <div className="relative aspect-[16/9] overflow-hidden">
-          {coverUrl ? (
-            <img
-              src={coverUrl}
-              alt={bookTitle || title}
-              className="object-cover w-full h-full group-hover:scale-105 transition-transform duration-500"
-            />
-          ) : (
-            <div className="w-full h-full bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center">
-              <BookOpen className="w-16 h-16 text-muted-foreground" />
-            </div>
-          )}
+          <img
+            src={getClubCoverUrl(coverUrl)}
+            alt={bookTitle || title}
+            className="object-cover w-full h-full group-hover:scale-105 transition-transform duration-500"
+          />
           {bookCoverUrl && (
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
               <img
@@ -107,33 +140,51 @@ export function ClubCard({
           </div>
         </div>
 
-        <div className="p-4 flex flex-col flex-1 gap-4">
-          {description && (
-            <p className="text-sm text-muted-foreground line-clamp-3">{description}</p>
-          )}
+          <div className="p-4 flex flex-col flex-1 gap-4">
+            {description && (
+              <p className="text-sm text-muted-foreground line-clamp-3">{description}</p>
+            )}
 
-          <div className="flex flex-wrap gap-2">
-            {tags.slice(0, 3).map((tag) => (
-              <Badge key={tag} variant="outline" className="text-xs font-normal">
-                {tag}
-              </Badge>
-            ))}
-          </div>
-
-          <div className="mt-auto flex items-center justify-between text-muted-foreground text-sm">
-            <div className="flex items-center gap-1.5">
-              <Users className="h-4 w-4" />
-              <span>
-                {formatMemberCount(members, maxMembers)}
-              </span>
+            <div className="flex flex-wrap gap-2">
+              {tags.slice(0, 3).map((tag) => (
+                <Badge key={tag} variant="outline" className="text-xs font-normal">
+                  {tag}
+                </Badge>
+              ))}
             </div>
-            <div className="flex items-center gap-1.5">
-              <Mic className="h-4 w-4" />
-              <span>{isLive ? "Читают сейчас" : "По расписанию"}</span>
+
+            <div className="mt-auto flex items-center justify-between gap-3 text-sm text-muted-foreground">
+              <div className="flex min-w-0 items-center gap-2">
+                <div className="flex items-center gap-1.5">
+                  <Users className="h-4 w-4" />
+                  <span>
+                    {formatMemberCount(members, maxMembers)}
+                  </span>
+                </div>
+                {canRequestReaderClubJoin ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="h-8 w-8 rounded-md bg-background/95 shadow-sm"
+                    aria-label="Оставить заявку на вступление"
+                    title="Оставить заявку на вступление"
+                    disabled={joinRequestSending}
+                    onClick={handleReaderClubJoinRequest}
+                  >
+                    {joinRequestSending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserPlus className="h-3.5 w-3.5" />}
+                  </Button>
+                ) : null}
+              </div>
+              <div className="flex shrink-0 items-center gap-1.5">
+                <Mic className="h-4 w-4" />
+                <span>{isLive ? "Читают сейчас" : "По расписанию"}</span>
+              </div>
             </div>
           </div>
         </div>
-      </div>
-    </Link>
+      </Link>
+
+    </div>
   );
 }

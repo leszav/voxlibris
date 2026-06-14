@@ -33,6 +33,7 @@ describe('Client serializers', () => {
 
     assert.deepEqual(Object.keys(serialized).sort((left, right) => left.localeCompare(right)), [
       'avatar',
+      'canCreateReaderLedClubs',
       'createdAt',
       'displayName',
       'email',
@@ -141,7 +142,7 @@ describe('Client serializers', () => {
       joinedAt: new Date('2026-03-05T10:00:00.000Z'),
     });
 
-    assert.deepEqual(Object.keys(serialized).sort((left, right) => left.localeCompare(right)), ['achievements', 'avatar', 'displayName', 'id', 'joinedAt', 'readerRating', 'role', 'username']);
+    assert.deepEqual(Object.keys(serialized).sort((left, right) => left.localeCompare(right)), ['achievements', 'avatar', 'displayName', 'id', 'isActive', 'joinedAt', 'readerRating', 'role', 'username']);
     assert.equal(serialized.readerRating, 480);
     assert.deepEqual(serialized.achievements, []);
   });

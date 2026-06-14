@@ -204,3 +204,7 @@ KODA.md
 # Local assistant/workspace folders
 .tmp/
 .skills/
+
+# Kodik hackathon local artifacts
+info
+metadata.json

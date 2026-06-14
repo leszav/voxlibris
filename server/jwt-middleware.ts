@@ -148,13 +148,10 @@ export function requireActiveUser(req: Request, res: Response, next: NextFunctio
         });
       }
 
-      // Проверяем подтверждение email
+      // Активный статус уже означает подтверждённый email.
+      // Для старых аккаунтов синхронизируем флаг без блокировки доступа.
       if (!user.emailConfirmed) {
-        return res.status(403).json({
-          message: "Необходимо подтвердить email для доступа к этой функции.",
-          code: "EMAIL_NOT_CONFIRMED",
-          userStatus: user.status
-        });
+        await storage.updateUserEmailConfirmation(user.id, true);
       }
 
       next();

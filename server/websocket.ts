@@ -70,9 +70,13 @@ export function setupWebSocketHandlers(io: SocketIOServer) {
       }
 
       const user = await storage.getUser(payload.userId);
-      if (user?.status !== "active" || !user.emailConfirmed) {
-        logger.error({ userId: payload.userId }, "WebSocket auth failed: user inactive or not confirmed");
+      if (user?.status !== "active") {
+        logger.error({ userId: payload.userId }, "WebSocket auth failed: user inactive");
         return next(new Error("User not allowed"));
+      }
+
+      if (!user.emailConfirmed) {
+        await storage.updateUserEmailConfirmation(user.id, true);
       }
 
       socket.userId = payload.userId;

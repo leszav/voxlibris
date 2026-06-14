@@ -6,6 +6,7 @@ export interface StartStudioStreamIngestOptions {
   mimeType: string;
   body: ReadableStream<Uint8Array>;
   signal: AbortSignal;
+  publicationRequested?: boolean;
 }
 
 export function startStudioStreamIngest({
@@ -13,10 +14,11 @@ export function startStudioStreamIngest({
   mimeType,
   body,
   signal,
+  publicationRequested = true,
 }: StartStudioStreamIngestOptions): Promise<Response> {
   const token = getAccessToken();
 
-  return fetch(getStudioStreamIngestUrl(sessionId), {
+  return fetch(getStudioStreamIngestUrl(sessionId, publicationRequested), {
     method: 'POST',
     // @ts-expect-error duplex не в стандартных типах TS, но нужен для request streaming
     duplex: 'half',

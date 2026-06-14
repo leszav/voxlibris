@@ -1771,6 +1771,8 @@ export const readingSchedule = pgTable("reading_schedule", {
 // Статусы записи
 export const recordingStatuses = ["processing", "ready", "failed", "deleted"] as const;
 export type RecordingStatus = typeof recordingStatuses[number];
+export const recordingModerationStatuses = ["pending", "approved", "rejected"] as const;
+export type RecordingModerationStatus = typeof recordingModerationStatuses[number];
 
 // Записи сессий (для клубов Чтеца)
 export const sessionRecordings = pgTable("session_recordings", {
@@ -1800,6 +1802,26 @@ export const sessionRecordings = pgTable("session_recordings", {
   // Доступность
   isAvailable: boolean("is_available").notNull().default(true),
   availableUntil: timestamp("available_until"), // Дата, когда запись перестанет быть доступной
+
+  // Модерация и публикация
+  publicationRequested: boolean("publication_requested").notNull().default(true),
+  moderationStatus: varchar("moderation_status", { length: 20 }).notNull().default("pending").$type<RecordingModerationStatus>(),
+  moderatedBy: varchar("moderated_by").references(() => users.id),
+  moderatedAt: timestamp("moderated_at"),
+  moderationNotes: text("moderation_notes"),
+  publishedBy: varchar("published_by").references(() => users.id),
+  publishedAt: timestamp("published_at"),
+  isPublished: boolean("is_published").notNull().default(false),
+
+  // Будущее оформление публичной карточки записи
+  publicTitle: varchar("public_title", { length: 255 }),
+  publicAuthor: varchar("public_author", { length: 255 }),
+  publicDescription: text("public_description"),
+  coverImageUrl: text("cover_image_url"),
+
+  // Тарифные ворота: фактический доступ дополнительно проверяется тарифом пользователя
+  allowStreaming: boolean("allow_streaming").notNull().default(false),
+  allowDownload: boolean("allow_download").notNull().default(false),
   
   // Дополнительно
   metadata: text("metadata"), // JSON для любых дополнительных данных
@@ -2137,6 +2159,19 @@ export const insertSessionRecordingSchema = createInsertSchema(sessionRecordings
   channels: true,
   isAvailable: true,
   availableUntil: true,
+  moderationStatus: true,
+  moderatedBy: true,
+  moderatedAt: true,
+  moderationNotes: true,
+  publishedBy: true,
+  publishedAt: true,
+  isPublished: true,
+  publicTitle: true,
+  publicAuthor: true,
+  publicDescription: true,
+  coverImageUrl: true,
+  allowStreaming: true,
+  allowDownload: true,
   metadata: true,
 });
 

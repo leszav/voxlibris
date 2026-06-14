@@ -6,6 +6,7 @@ import { storage } from "./repositories/index.js";
 import { jwtAuth, requireActiveUser } from "./jwt-middleware.js";
 import { serializeAuthUser } from "./lib/client-serializers.js";
 import { getPublicBaseUrl } from "./lib/public-base-url.js";
+import { canCreateReaderLedClubForUser } from "./lib/reader-club-access.js";
 // insertUserSchema больше не используется: схема регистрации локальная,
 // чтобы не тащить ограничения users.username на displayName.
 
@@ -205,7 +206,8 @@ export function setupAuthRoutes(app: Express): void {
         invitedBy,
         invitedToClub,
         rememberMe,
-        baseUrl
+        baseUrl,
+        Boolean(inviteToken && invitedToClub)
       );
 
       // Присоединение к клубу по приглашению
@@ -485,13 +487,11 @@ export function setupAuthRoutes(app: Express): void {
           });
         }
 
-        // Проверяем подтверждение email для обычных пользователей
+        // Активный статус уже означает подтверждённый email.
+        // Для старых аккаунтов синхронизируем флаг без блокировки доступа.
         if (!user.emailConfirmed) {
-          return res.status(403).json({
-            message: "Необходимо подтвердить email для доступа к этой функции.",
-            code: "EMAIL_NOT_CONFIRMED",
-            userStatus: user.status
-          });
+          await storage.updateUserEmailConfirmation(user.id, true);
+          user.emailConfirmed = true;
         }
       }
 
@@ -500,6 +500,7 @@ export function setupAuthRoutes(app: Express): void {
           ...user,
           displayName: profile?.displayName ?? null,
           avatar: profile?.avatar ?? null,
+          canCreateReaderLedClubs: await canCreateReaderLedClubForUser(user.id, user.role),
         })
       });
     } catch (error) {

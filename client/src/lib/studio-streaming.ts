@@ -13,8 +13,8 @@ function getStudioBackendBaseUrl(): string {
   return `${window.location.protocol}//${window.location.hostname}:5000`;
 }
 
-export function getStudioStreamIngestUrl(sessionId: string): string {
-  return `${getStudioBackendBaseUrl()}/api/studio/stream/${sessionId}`;
+export function getStudioStreamIngestUrl(sessionId: string, publicationRequested: boolean = true): string {
+  return `${getStudioBackendBaseUrl()}/api/studio/stream/${sessionId}?record=${publicationRequested ? 'true' : 'false'}`;
 }
 
 export function getStudioStreamStatusUrl(sessionId: string): string {

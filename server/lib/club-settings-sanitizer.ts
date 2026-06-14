@@ -37,6 +37,7 @@ interface RawClubSettings {
   welcomeHtml?: unknown;
   rulesHtml?: unknown;
   shortDescription?: unknown;
+  readerJoinRequestsEnabled?: unknown;
 }
 
 interface SanitizedClubSettings {
@@ -44,6 +45,7 @@ interface SanitizedClubSettings {
   welcomeHtml?: string;
   rulesHtml?: string;
   shortDescription?: string;
+  readerJoinRequestsEnabled?: boolean;
 }
 
 function clampText(value: unknown, maxLength: number): string | undefined {
@@ -115,6 +117,7 @@ export function sanitizeClubSettingsInput(input: unknown): string | undefined {
     shortDescription: clampText(raw.shortDescription, 1200),
     welcomeHtml: sanitizeHtml(raw.welcomeHtml, 20000),
     rulesHtml: sanitizeHtml(raw.rulesHtml, 20000),
+    readerJoinRequestsEnabled: typeof raw.readerJoinRequestsEnabled === "boolean" ? raw.readerJoinRequestsEnabled : undefined,
   };
 
   // Remove undefined keys for compact deterministic payload.

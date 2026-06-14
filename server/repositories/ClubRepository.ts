@@ -22,7 +22,8 @@ import type {
   InsertClubInvitation,
   InvitationStatus,
   User,
-  ClubWithDetails
+  ClubWithDetails,
+  ClubType,
 } from '../../shared/schema.js';
 import { logger } from '../lib/logger.js';
 import type { ClientPublicCatalogClub } from '../lib/client-serializers.js';
@@ -37,6 +38,12 @@ function matchesCatalogSearch(
     || (club.author ?? '').toLowerCase().includes(q);
 }
 
+function normalizeCatalogClubType(value: string): ClubType | null {
+  return value === 'standard' || value === 'premium' || value === 'reader-led' || value === 'reading_club'
+    ? value
+    : null;
+}
+
 function buildTagsMap(tagRows: Array<{ clubId: string; slug: string }>): Map<string, string[]> {
   const map = new Map<string, string[]>();
   for (const row of tagRows) {
@@ -48,6 +55,17 @@ function buildTagsMap(tagRows: Array<{ clubId: string; slug: string }>): Map<str
     }
   }
   return map;
+}
+
+function parseReaderJoinRequestsEnabled(settings: string | null | undefined): boolean {
+  if (!settings) return true;
+
+  try {
+    const parsed = JSON.parse(settings) as { readerJoinRequestsEnabled?: unknown };
+    return parsed.readerJoinRequestsEnabled !== false;
+  } catch {
+    return true;
+  }
 }
 
 /**
@@ -164,7 +182,7 @@ export class ClubRepository extends BaseRepository {
     }
   }
 
-  async getPublicCatalogClubs(limit?: number, offset?: number, searchQuery?: string): Promise<ClientPublicCatalogClub[]> {
+  async getPublicCatalogClubs(limit?: number, offset?: number, searchQuery?: string, type?: string): Promise<ClientPublicCatalogClub[]> {
     try {
       const PAGE_SIZE = 12;
       const normalizedLimit = typeof limit === 'number' && Number.isFinite(limit) && limit > 0
@@ -174,6 +192,12 @@ export class ClubRepository extends BaseRepository {
         ? Math.trunc(offset)
         : 0;
       const normalizedSearch = typeof searchQuery === 'string' ? searchQuery.trim().toLowerCase() : '';
+      const normalizedType = typeof type === 'string' && type.trim() ? normalizeCatalogClubType(type.trim()) : null;
+      const conditions = [ne(clubs.status, 'pending')];
+
+      if (normalizedType) {
+        conditions.push(eq(clubs.type, normalizedType));
+      }
 
       let query = this.db
         .select({
@@ -185,9 +209,10 @@ export class ClubRepository extends BaseRepository {
           isPrivate: clubs.isPrivate,
           isLive: clubs.isLive,
           maxMembers: clubs.maxMembers,
+          settings: clubs.settings,
         })
         .from(clubs)
-        .where(ne(clubs.status, 'pending'))
+        .where(and(...conditions))
         .orderBy(desc(clubs.popularityScore), desc(clubs.createdAt))
         .$dynamic();
 
@@ -259,6 +284,7 @@ export class ClubRepository extends BaseRepository {
         memberCount: memberCountMap.get(club.id) ?? 0,
         maxMembers: club.maxMembers,
         tags: tagsMap.get(club.id) ?? [],
+        readerJoinRequestsEnabled: club.type === 'reader-led' ? parseReaderJoinRequestsEnabled(club.settings) : undefined,
       }));
 
       const filtered = normalizedSearch
@@ -342,7 +368,7 @@ export class ClubRepository extends BaseRepository {
       const memberCountResult = await this.db
         .select({ count: count() })
         .from(clubMembers)
-        .where(eq(clubMembers.clubId, id));
+        .where(and(eq(clubMembers.clubId, id), eq(clubMembers.isActive, true)));
       
       const memberCount = memberCountResult[0]?.count || 0;
 
@@ -647,6 +673,7 @@ export class ClubRepository extends BaseRepository {
     email: string;
     role: ClubMemberRole;
     joinedAt: Date;
+    isActive: boolean;
     status: User['status'];
     emailConfirmed: boolean;
     createdAt: Date;
@@ -664,6 +691,7 @@ export class ClubRepository extends BaseRepository {
           email: users.email,
           role: clubMembers.role,
           joinedAt: clubMembers.joinedAt,
+          isActive: clubMembers.isActive,
           status: users.status,
           emailConfirmed: users.emailConfirmed,
           createdAt: users.createdAt

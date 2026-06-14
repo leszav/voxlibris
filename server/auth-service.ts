@@ -239,14 +239,19 @@ export class AuthService {
       return null;
     }
 
-    // ШАГ 3: Проверяем статус пользователя
-    // Блокируем обновление токенов для неактивных/неподтвержденных аккаунтов
-    // Исключение для админов и модераторов
-    if (!['admin', 'moderator'].includes(user.role)) {
-      if (user.status !== 'active' || !user.emailConfirmed) {
+      // ШАГ 3: Проверяем статус пользователя.
+      // Активный статус уже означает подтверждённый email: админская активация равна проверке email.
+      // Исключение для админов и модераторов
+      if (!['admin', 'moderator'].includes(user.role)) {
+      if (user.status !== 'active') {
         // Токен уже отозван, новые токены не создаем
         return null;
       }
+    }
+
+    if (user.status === 'active' && !user.emailConfirmed) {
+      await storage.updateUserEmailConfirmation(user.id, true);
+      user.emailConfirmed = true;
     }
 
     // ШАГ 4: Определяем тип сессии по сроку действия исходного токена
@@ -295,8 +300,14 @@ export class AuthService {
         throw new Error('ACCOUNT_DELETED');
       }
 
-      // Проверяем подтверждение email - требуется для всех пользователей
-      if (!dbUser.emailConfirmed) {
+      // Активный статус уже означает подтверждённый email.
+      // Для старых аккаунтов синхронизируем флаг при первом успешном входе.
+      if (dbUser.status === 'active' && !dbUser.emailConfirmed) {
+        await storage.updateUserEmailConfirmation(dbUser.id, true);
+        dbUser.emailConfirmed = true;
+      }
+
+      if (dbUser.status !== 'active' && !dbUser.emailConfirmed) {
         throw new Error('EMAIL_NOT_CONFIRMED');
       }
 
@@ -329,7 +340,8 @@ export class AuthService {
     invitedBy?: string,
     invitedToClub?: string,
     rememberMe: boolean = false,
-    baseUrl?: string
+    baseUrl?: string,
+    activateByInvite: boolean = false
   ): Promise<AuthResult> {
     try {
       const normalizedDisplayName = displayName.trim().replace(/\s+/gu, ' ');
@@ -363,8 +375,8 @@ export class AuthService {
       const saltRounds = 10;
       const hashedPassword = await bcrypt.hash(password, saltRounds);
 
-      // Генерируем токен подтверждения email
-      const confirmationToken = randomBytes(32).toString('hex');
+      // Генерируем токен подтверждения email только для обычной регистрации.
+      const confirmationToken = activateByInvite ? null : randomBytes(32).toString('hex');
 
       // Создаем пользователя с правильной типизацией InsertUser
       const userCreateData: InsertUser = {
@@ -373,14 +385,18 @@ export class AuthService {
         password: hashedPassword,
         invitedBy: invitedBy || null,
         invitedToClub: invitedToClub || null,
-        status: 'pending', // все пользователи начинают как pending
+        status: activateByInvite ? 'active' : 'pending',
       };
       
-      const dbNewUser = await storage.createUser(userCreateData);
+      let dbNewUser = await storage.createUser(userCreateData);
       
       // После создания обновляем токен подтверждения через отдельный метод
       if (dbNewUser && isDatabaseUser(dbNewUser)) {
-        await storage.updateUserConfirmationToken(dbNewUser.id, confirmationToken);
+        if (confirmationToken) {
+          await storage.updateUserConfirmationToken(dbNewUser.id, confirmationToken);
+        } else if (activateByInvite) {
+          dbNewUser = await storage.updateUserEmailConfirmation(dbNewUser.id, true) ?? dbNewUser;
+        }
         
         // Создаем базовый профиль пользователя
         try {
@@ -402,14 +418,15 @@ export class AuthService {
         throw new Error('CRITICAL: Ошибка создания пользователя - некорректные данные из БД');
       }
 
-      // Отправляем email подтверждения
-      try {
-        const safeUserForEmail = toSafeUser(dbNewUser);
-        await this.sendConfirmationEmail(safeUserForEmail, confirmationToken, baseUrl);
-        logger.info({ email }, 'Confirmation email sent');
-      } catch (emailError) {
-        console.error('Failed to send confirmation email:', emailError);
-        // Не блокируем регистрацию если email не отправился
+      if (!activateByInvite && confirmationToken) {
+        try {
+          const safeUserForEmail = toSafeUser(dbNewUser);
+          await this.sendConfirmationEmail(safeUserForEmail, confirmationToken, baseUrl);
+          logger.info({ email }, 'Confirmation email sent');
+        } catch (emailError) {
+          console.error('Failed to send confirmation email:', emailError);
+          // Не блокируем регистрацию если email не отправился
+        }
       }
 
       // Генерируем токены с безопасным преобразованием типа

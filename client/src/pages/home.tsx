@@ -3,21 +3,71 @@ import { MainLayout } from "@/components/layout/MainLayout";
 import { Button } from "@/components/ui/button";
 import { ClubCard } from "@/components/ui/club-card";
 import { Badge } from "@/components/ui/badge";
-import { ArrowRight, Sparkles, Loader2 } from "lucide-react";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Card, CardContent } from "@/components/ui/card";
+import { ArrowRight, Sparkles, Loader2, Mic2, Star, Users, Radio } from "lucide-react";
 import { ReadingDreamIllustration } from "@/components/illustrations/reading-dream";
 import { Link } from "wouter";
-import { useCatalogClubs } from "@/hooks/use-clubs";
+import { useQuery } from "@tanstack/react-query";
+import { useCatalogClubs, useCatalogClubsByType, useLandingReaderClubsStatus, useLandingTopReadersStatus, type PublicCatalogClub } from "@/hooks/use-clubs";
 import { useGridColumns } from "@/hooks/use-grid-columns";
+import { apiRequest } from "@/lib/queryClient";
 import heroImageAvif from "@assets/generated_images/cozy_library_atmosphere_with_warm_lighting.avif";
 import heroImagePng from "@assets/generated_images/cozy_library_atmosphere_with_warm_lighting.png";
 import heroImageWebp from "@assets/generated_images/cozy_library_atmosphere_with_warm_lighting.webp";
 
+interface LandingReaderProfile {
+  id: string;
+  userId: string;
+  displayName: string | null;
+  avatar: string | null;
+  coverImage: string | null;
+  bio: string | null;
+  readerRating: number;
+  totalReadingSessions: number;
+  totalListeners: number;
+  followersCount: number;
+}
+
+interface TopReadersResponse {
+  readers: LandingReaderProfile[];
+}
+
+function getReaderName(reader: LandingReaderProfile): string {
+  return reader.displayName || "Чтец VoxLibris";
+}
+
+function getInitials(name: string): string {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("") || "ЧТ";
+}
+
+function formatReaderRating(value: number): string {
+  return value > 0 ? (value / 100).toFixed(1) : "—";
+}
 
 export default function Home() {
   // Главная: grid md:grid-cols-2 lg:grid-cols-3 → breakpoints md=768, lg=1024
   const cols = useGridColumns({ sm: 768, lg: 1024 });
   // Показываем 2 строки, кратно cols
   const { data: clubs, isLoading, error } = useCatalogClubs(cols * 2);
+  const { data: readerClubsStatus } = useLandingReaderClubsStatus();
+  const readerClubsEnabled = readerClubsStatus?.enabled === true;
+  const { data: readerClubs = [], isLoading: readerClubsLoading, error: readerClubsError } = useCatalogClubsByType("reader-led", 6);
+  const { data: topReadersStatus } = useLandingTopReadersStatus();
+  const topReadersEnabled = topReadersStatus?.enabled === true;
+  const { data: topReaders = [], isLoading: topReadersLoading, error: topReadersError } = useQuery({
+    queryKey: ["landing-top-readers", 6],
+    queryFn: async () => {
+      const response = await apiRequest<TopReadersResponse>("/api/readers/top?limit=6");
+      return response.readers;
+    },
+    staleTime: 1000 * 60 * 5,
+  });
 
   const featuredClubs = clubs || [];
 
@@ -125,6 +175,7 @@ export default function Home() {
                 isPrivate={club.isPrivate}
                 type={club.type as "standard" | "premium" | "reader-led" | "reading_club"}
                 tags={club.tags}
+                readerJoinRequestsEnabled={club.readerJoinRequestsEnabled}
               />
             ))}
             
@@ -145,6 +196,94 @@ export default function Home() {
           </div>
         )}
       </section>
+
+      {readerClubsEnabled ? (
+        <section className="container px-4 pb-12 sm:px-6 md:px-12 md:pb-20">
+          <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between md:mb-10">
+            <div>
+              <Badge variant="secondary" className="mb-3 w-fit bg-accent/10 text-accent">
+                <Mic2 className="mr-2 h-3.5 w-3.5" />
+                Голосовые клубы
+              </Badge>
+              <h2 className="mb-2 font-serif text-3xl font-bold text-primary">Клубы чтецов</h2>
+              <p className="text-muted-foreground">Слушайте книги в живом исполнении и присоединяйтесь к клубам любимых голосов.</p>
+            </div>
+            <Link href="/catalog">
+              <Button variant="ghost" className="group w-full justify-between sm:w-auto sm:justify-center">
+                Все клубы <ArrowRight className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-1" />
+              </Button>
+            </Link>
+          </div>
+
+          {readerClubsLoading && (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+              <span className="ml-2 text-muted-foreground">Загружаем клубы чтецов...</span>
+            </div>
+          )}
+
+          {readerClubsError && (
+            <div className="py-12 text-center">
+              <div className="mb-2 text-red-600">Не удалось загрузить клубы чтецов</div>
+              <div className="text-sm text-muted-foreground">Попробуйте обновить страницу позже</div>
+            </div>
+          )}
+
+          {!readerClubsLoading && !readerClubsError && readerClubs.length > 0 ? (
+            <div className="rounded-2xl border border-border/50 bg-card/50 p-4 backdrop-blur-sm sm:p-6">
+              <div className="grid grid-cols-1 gap-4 sm:gap-6 md:grid-cols-2 lg:grid-cols-3">
+                {readerClubs.slice(0, 6).map((club) => (
+                  <HomeClubCard key={club.id} club={club} />
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+
+      {topReadersEnabled ? (
+        <section className="container px-4 pb-12 sm:px-6 md:px-12 md:pb-20">
+          <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between md:mb-10">
+            <div>
+              <Badge variant="secondary" className="mb-3 w-fit bg-amber-500/10 text-amber-600">
+                <Star className="mr-2 h-3.5 w-3.5" />
+                Рейтинг голосов
+              </Badge>
+              <h2 className="mb-2 font-serif text-3xl font-bold text-primary">Лучшие чтецы</h2>
+              <p className="text-muted-foreground">Голоса VoxLibris, которые собирают слушателей вокруг живого чтения.</p>
+            </div>
+            <Link href="/readers">
+              <Button variant="ghost" className="group w-full justify-between sm:w-auto sm:justify-center">
+                Весь рейтинг <ArrowRight className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-1" />
+              </Button>
+            </Link>
+          </div>
+
+          {topReadersLoading && (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+              <span className="ml-2 text-muted-foreground">Загружаем рейтинг чтецов...</span>
+            </div>
+          )}
+
+          {topReadersError && (
+            <div className="py-12 text-center">
+              <div className="mb-2 text-red-600">Не удалось загрузить рейтинг чтецов</div>
+              <div className="text-sm text-muted-foreground">Попробуйте обновить страницу позже</div>
+            </div>
+          )}
+
+          {!topReadersLoading && !topReadersError && topReaders.length > 0 ? (
+            <div className="rounded-2xl border border-border/50 bg-card/50 p-4 backdrop-blur-sm sm:p-6">
+              <div className="grid grid-cols-1 gap-4 sm:gap-6 md:grid-cols-2 lg:grid-cols-3">
+                {topReaders.slice(0, 6).map((reader) => (
+                  <HomeReaderCard key={reader.id} reader={reader} />
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
 
       {/* For Beginners Section */}
       <section className="bg-secondary/30 py-12 md:py-20">
@@ -194,5 +333,78 @@ export default function Home() {
         </div>
       </section>
     </MainLayout>
+  );
+}
+
+function HomeClubCard({ club }: Readonly<{ club: PublicCatalogClub }>) {
+  return (
+    <ClubCard
+      id={club.id}
+      title={club.title}
+      bookTitle={club.bookTitle ?? undefined}
+      author={club.author ?? undefined}
+      coverUrl={club.coverImage ?? undefined}
+      bookCoverUrl={club.bookCoverUrl ?? undefined}
+      description={club.description ?? undefined}
+      members={club.memberCount}
+      maxMembers={club.maxMembers}
+      isLive={club.isLive}
+      isPrivate={club.isPrivate}
+      type={club.type as "standard" | "premium" | "reader-led" | "reading_club"}
+      tags={club.tags}
+      readerJoinRequestsEnabled={club.readerJoinRequestsEnabled}
+    />
+  );
+}
+
+function HomeReaderCard({ reader }: Readonly<{ reader: LandingReaderProfile }>) {
+  const name = getReaderName(reader);
+  const hasCoverImage = Boolean(reader.coverImage);
+
+  return (
+    <Card
+      className="relative h-full overflow-hidden transition-all hover:-translate-y-1 hover:shadow-lg"
+      style={hasCoverImage ? { backgroundImage: `url(${reader.coverImage})`, backgroundSize: "cover", backgroundPosition: "center" } : undefined}
+    >
+      {hasCoverImage ? <div className="absolute inset-0 bg-background/88 backdrop-blur-[1px]" /> : null}
+      <CardContent className="relative flex h-full flex-col gap-5 p-5">
+        <div className="flex items-start gap-4">
+          <Avatar className="h-14 w-14 border-2 border-background shadow-sm">
+            <AvatarImage src={reader.avatar ?? undefined} />
+            <AvatarFallback className="bg-primary/10 text-lg font-bold text-primary">
+              {getInitials(name)}
+            </AvatarFallback>
+          </Avatar>
+          <div className="min-w-0 flex-1">
+            <h3 className="truncate font-serif text-xl font-bold text-primary">{name}</h3>
+            <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+              <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
+              <span className="font-medium text-foreground">{formatReaderRating(reader.readerRating)}</span>
+              <span>•</span>
+              <span>{reader.followersCount} подписчиков</span>
+            </div>
+          </div>
+        </div>
+
+        <p className="line-clamp-3 min-h-[3.75rem] text-sm leading-5 text-muted-foreground">
+          {reader.bio || "Чтец VoxLibris. Ведёт живые чтения и собирает слушателей вокруг книг."}
+        </p>
+
+        <div className="mt-auto grid grid-cols-2 gap-3 rounded-lg bg-muted/40 p-3 text-xs text-muted-foreground">
+          <span className="inline-flex items-center gap-1.5">
+            <Radio className="h-3.5 w-3.5" />
+            {reader.totalReadingSessions} эфиров
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <Users className="h-3.5 w-3.5" />
+            {reader.totalListeners} слушателей
+          </span>
+        </div>
+
+        <Button variant="outline" className="w-full" asChild>
+          <Link href={`/profile/${reader.userId}`}>Профиль чтеца</Link>
+        </Button>
+      </CardContent>
+    </Card>
   );
 }

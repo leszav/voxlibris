@@ -15,6 +15,15 @@ export interface StudioStreamStatusPayload {
   streamUrl: string | null;
 }
 
+interface StudioStreamViewer {
+  userId: string;
+  role?: string | null;
+}
+
+function isElevatedViewer(viewer: StudioStreamViewer): boolean {
+  return viewer.role === 'admin' || viewer.role === 'moderator';
+}
+
 export async function resolveStudioStreamSessionForReader(
   sessionId: string,
   userId: string,
@@ -64,7 +73,7 @@ export async function resolveStudioStreamSessionForReader(
   };
 }
 
-export async function buildStudioStreamStatus(sessionId: string): Promise<{
+export async function buildStudioStreamStatus(sessionId: string, viewer: StudioStreamViewer): Promise<{
   ok: boolean;
   status: number;
   error?: string;
@@ -87,6 +96,20 @@ export async function buildStudioStreamStatus(sessionId: string): Promise<{
       ok: false,
       status: 404,
       error: 'Session not found',
+    };
+  }
+
+  const isReader = session.readerId === viewer.userId;
+  const isElevated = isElevatedViewer(viewer);
+  const hasClubAccess = session.clubId
+    ? Boolean(await storage.getUserClubMembership(session.clubId, viewer.userId).then((membership) => membership?.isActive).catch(() => false))
+    : false;
+
+  if (!isReader && !isElevated && !hasClubAccess) {
+    return {
+      ok: false,
+      status: 403,
+      error: 'Only active club members can access this stream',
     };
   }
 

@@ -28,6 +28,7 @@
 - [Архитектура](02-architecture/README.md)
   - [Общая архитектура](02-architecture/overview.md)
   - [Архитектура приложения](02-architecture/application-architecture.md)
+  - [Система клубов чтецов](02-architecture/reader-clubs-system.md)
   - [Система уведомлений и почты](02-architecture/notification-system.md)
   - [Аналитика](02-architecture/analytics-system.md)
 - [Конфигурация](03-configuration/README.md)

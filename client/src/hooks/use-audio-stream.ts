@@ -297,6 +297,7 @@ export function useAudioStream(options: AudioStreamOptions): AudioStreamState & 
           mimeType,
           body: readable,
           signal: controller.signal,
+          publicationRequested: enableRecording,
         });
 
         const startErrorMessage = await getStudioStreamStartErrorMessage(response);
@@ -372,7 +373,7 @@ export function useAudioStream(options: AudioStreamOptions): AudioStreamState & 
       cleanup();
       throw new Error(readinessErrorMessage);
     }
-  }, [cleanup, reportMicError, reportStreamError, sessionId, updateStatus, waitForStudioStreamReady]);
+  }, [cleanup, enableRecording, reportMicError, reportStreamError, sessionId, updateStatus, waitForStudioStreamReady]);
 
   // --- Запуск ---
 

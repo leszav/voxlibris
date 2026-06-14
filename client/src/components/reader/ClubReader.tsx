@@ -15,7 +15,7 @@ import { LoadingIndicator, ChapterLoadingIndicator, ContentLoadingSkeleton } fro
 import { useKeyboardShortcuts, readerShortcuts } from "./useKeyboardShortcuts";
 import { KeyboardHelp } from "./KeyboardHelp";
 import { Button } from "../ui/button";
-import { List, Settings, ArrowLeft, HelpCircle } from "lucide-react";
+import { AlertCircle, List, Settings, ArrowLeft, HelpCircle } from "lucide-react";
 import type { Bookmark as BookmarkType } from "@shared/schema";
 import {
   createReaderProgressPayload,
@@ -83,6 +83,10 @@ interface PendingScrollRestore {
   positionRaw: string;
 }
 
+function normalizeReaderChapter(chapter: number | null | undefined): number {
+  return typeof chapter === "number" && Number.isFinite(chapter) && chapter > 0 ? chapter : 1;
+}
+
 function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
   const studioEligibility = useStudioDeviceEligibility();
   const isMobile = useIsMobile();
@@ -91,7 +95,6 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [bookmarksOpen, setBookmarksOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
-  const [tabletOverrideGranted, setTabletOverrideGranted] = useState(false);
   const [pendingScrollRestore, setPendingScrollRestore] = useState<PendingScrollRestore | null>(null);
   const chapterScrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const manualRestoreCleanupRef = useRef<(() => void) | null>(null);
@@ -113,26 +116,22 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
   const helpPanelRef = useRef<HTMLDivElement | null>(null);
 
   const applyReaderPosition = useCallback((chapter: number, positionRaw: string | null | undefined) => {
+    const safeChapter = normalizeReaderChapter(chapter);
+
     if (!positionRaw) {
-      setCurrentChapter(chapter);
+      setCurrentChapter(safeChapter);
       return;
     }
 
-    lastReaderPositionRef.current = { chapter, positionRaw };
-    setPendingScrollRestore({ chapter, positionRaw });
-    setCurrentChapter(chapter);
+    lastReaderPositionRef.current = { chapter: safeChapter, positionRaw };
+    setPendingScrollRestore({ chapter: safeChapter, positionRaw });
+    setCurrentChapter(safeChapter);
   }, []);
 
   // ── Режим студии ─────────────────────────────────────────────────
   const [studioOpen, setStudioOpen] = useState(false);
-  const studioAccessAllowed = studioEligibility.mode === "allowed"
-    || (studioEligibility.mode === "override" && tabletOverrideGranted);
-
-  useEffect(() => {
-    if (studioEligibility.mode !== "override") {
-      setTabletOverrideGranted(false);
-    }
-  }, [studioEligibility.mode]);
+  const studioAccessAllowed = studioEligibility.mode === "allowed";
+  const readerBlockedByStudioDevice = studioEligibility.mode === "blocked";
 
   useEffect(() => {
     if (!studioAccessAllowed && studioOpen) {
@@ -141,14 +140,16 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
   }, [studioAccessAllowed, studioOpen]);
 
   const handlePositionUpdate = useCallback((update: { chapter: number; positionRaw: string }) => {
+    const safeChapter = normalizeReaderChapter(update.chapter);
+
     // Сохраняем последнюю позицию чтеца
-    lastReaderPositionRef.current = { chapter: update.chapter, positionRaw: update.positionRaw };
+    lastReaderPositionRef.current = { chapter: safeChapter, positionRaw: update.positionRaw };
     // Синхронизируем позицию ридера с чтецом
-    if (update.chapter !== currentChapter) {
-      setCurrentChapter(update.chapter);
+    if (safeChapter !== currentChapter) {
+      setCurrentChapter(safeChapter);
     }
     setPendingScrollRestore({
-      chapter: update.chapter,
+      chapter: safeChapter,
       positionRaw: update.positionRaw,
     });
   }, [currentChapter]);
@@ -200,6 +201,18 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
     bookAuthor: (bookData as { author?: string }).author,
     coverUrl: (bookData as { coverUrl?: string }).coverUrl,
   });
+
+  useEffect(() => {
+    if (readerBlockedByStudioDevice) {
+      setTocOpen(false);
+      setSettingsOpen(false);
+      setBookmarksOpen(false);
+      setHelpOpen(false);
+      setLiveModalOpen(false);
+      stopListening();
+    }
+  }, [readerBlockedByStudioDevice, stopListening]);
+
   const { readers, hasSnapshot, flashCount, announceLiveStart, announceLiveStop, broadcastPosition } = useLiveReaders({
     clubId,
     bookId,
@@ -418,6 +431,8 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
   // Сохранение позиции локально и на сервере при размонтировании (keepalive)
   useEffect(() => {
     return () => {
+      if (readerBlockedByStudioDevice) return;
+
       const container = scrollContainerRef.current;
       if (!container || currentChapter === null || totalChapters === 0) return;
 
@@ -445,7 +460,7 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
         keepalive: true,
       });
     };
-  }, [scrollContainerRef, currentChapter, totalChapters, clubId, bookId]);
+  }, [scrollContainerRef, currentChapter, totalChapters, clubId, bookId, readerBlockedByStudioDevice]);
 
   const scrollElementRef = scrollContainerRef as RefObject<HTMLElement | null>;
 
@@ -453,29 +468,39 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
   useKeyboardShortcuts([
     {
       key: readerShortcuts.toggleToc.key,
-      action: () => setTocOpen(!tocOpen),
+      action: () => {
+        if (!readerBlockedByStudioDevice) setTocOpen(!tocOpen);
+      },
       description: readerShortcuts.toggleToc.description,
     },
     {
       key: readerShortcuts.toggleBookmarks.key,
-      action: () => setBookmarksOpen(!bookmarksOpen),
+      action: () => {
+        if (!readerBlockedByStudioDevice) setBookmarksOpen(!bookmarksOpen);
+      },
       description: readerShortcuts.toggleBookmarks.description,
     },
     {
       key: readerShortcuts.toggleSettings.key,
-      action: () => setSettingsOpen(!settingsOpen),
+      action: () => {
+        if (!readerBlockedByStudioDevice) setSettingsOpen(!settingsOpen);
+      },
       description: readerShortcuts.toggleSettings.description,
     },
     {
       key: readerShortcuts.prevChapter.key,
-      action: () => changeChapter(Math.max(1, (currentChapter || 1) - 1)),
+      action: () => {
+        if (!readerBlockedByStudioDevice) changeChapter(Math.max(1, (currentChapter || 1) - 1));
+      },
       description: readerShortcuts.prevChapter.description,
       requireAtTop: true,
       scrollContainerRef: scrollElementRef,
     },
     {
       key: readerShortcuts.nextChapter.key,
-      action: () => changeChapter(Math.min(bookData.totalChapters, (currentChapter || 1) + 1)),
+      action: () => {
+        if (!readerBlockedByStudioDevice) changeChapter(Math.min(bookData.totalChapters, (currentChapter || 1) + 1));
+      },
       description: readerShortcuts.nextChapter.description,
       requireAtBottom: true,
       scrollContainerRef: scrollElementRef,
@@ -483,18 +508,24 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
     {
       key: readerShortcuts.fontSizeIncrease.key,
       ctrlKey: readerShortcuts.fontSizeIncrease.ctrlKey,
-      action: increaseFontSize,
+      action: () => {
+        if (!readerBlockedByStudioDevice) increaseFontSize();
+      },
       description: readerShortcuts.fontSizeIncrease.description,
     },
     {
       key: readerShortcuts.fontSizeDecrease.key,
       ctrlKey: readerShortcuts.fontSizeDecrease.ctrlKey,
-      action: decreaseFontSize,
+      action: () => {
+        if (!readerBlockedByStudioDevice) decreaseFontSize();
+      },
       description: readerShortcuts.fontSizeDecrease.description,
     },
     {
       key: readerShortcuts.fullscreen.key,
-      action: toggleFullscreen,
+      action: () => {
+        if (!readerBlockedByStudioDevice) toggleFullscreen();
+      },
       description: readerShortcuts.fullscreen.description,
     },
     {
@@ -557,7 +588,7 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
   // Восстановление сохраненной позиции
   useEffect(() => {
     if (!progressLoading && currentChapter === null) {
-      const savedChapter = userProgress?.currentChapter ?? 1;
+      const savedChapter = normalizeReaderChapter(userProgress?.currentChapter);
       setCurrentChapter(savedChapter);
     }
   }, [progressLoading, currentChapter, userProgress?.currentChapter]);
@@ -607,11 +638,12 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
     }
 
     dismissSuggestion();
+    const safeChapter = normalizeReaderChapter(suggestedProgress.currentChapter);
     setPendingScrollRestore({
-      chapter: suggestedProgress.currentChapter,
+      chapter: safeChapter,
       positionRaw: suggestedProgress.currentPosition,
     });
-    setCurrentChapter(suggestedProgress.currentChapter);
+    setCurrentChapter(safeChapter);
   };
 
   const mainContent = useMemo(() => {
@@ -699,8 +731,12 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
           currentChapter={currentChapter}
           remoteChapter={streamEndedSuggestion.chapter}
           onOpenLatest={() => {
-            setPendingScrollRestore(streamEndedSuggestion);
-            setCurrentChapter(streamEndedSuggestion.chapter);
+            const safeChapter = normalizeReaderChapter(streamEndedSuggestion.chapter);
+            setPendingScrollRestore({
+              chapter: safeChapter,
+              positionRaw: streamEndedSuggestion.positionRaw,
+            });
+            setCurrentChapter(safeChapter);
             setStreamEndedSuggestion(null);
           }}
           onDismiss={() => setStreamEndedSuggestion(null)}
@@ -708,7 +744,7 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
       )}
 
       {/* Верхняя панель */}
-      <section className="border-b bg-background relative z-50 p-2 sm:p-4 shrink-0">
+      <section className={cn("border-b bg-background relative z-50 p-2 sm:p-4 shrink-0 transition-[filter,opacity] duration-300", readerBlockedByStudioDevice && "pointer-events-none select-none blur-sm opacity-60")}>
         <div className="flex items-center justify-between gap-2 min-w-0">
           <div className="flex items-center gap-2 min-w-0">
             <Button variant="outline" size="sm" onClick={() => globalThis.history.back()}>
@@ -724,6 +760,7 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
             <Button
               variant="outline"
               size="sm"
+              disabled={readerBlockedByStudioDevice}
               onClick={() => {
                 const nextOpen = !tocOpen;
                 closeAllPanels();
@@ -737,6 +774,7 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
             <Button
               variant="outline"
               size="sm"
+              disabled={readerBlockedByStudioDevice}
               onClick={() => {
                 const nextOpen = !settingsOpen;
                 closeAllPanels();
@@ -763,6 +801,7 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
             <Button
               variant="outline"
               size="sm"
+              disabled={readerBlockedByStudioDevice}
               onClick={() => setHelpOpen(true)}
               title="Горячие клавиши"
               className="w-8 h-8 sm:w-10 sm:h-10 p-0 hidden"
@@ -889,12 +928,18 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
         micBars={studio.micBars}
         sessionConnected={studio.session.isConnected}
         recentReactions={studio.recentReactions}
+        reactionCount={studio.reactionCount}
+        sessionQuestions={studio.sessionQuestions}
+        unansweredQuestionCount={studio.unansweredQuestionCount}
+        onQuestionAnswered={studio.markQuestionAnswered}
         streamStartError={studio.streamStartError}
         micCheckPassed={studio.micCheckPassed}
         showMicCheck={studio.showMicCheck}
         microphoneAvailable={studio.microphoneAvailable}
         microphoneLoading={studio.microphoneLoading}
         microphoneError={studio.microphoneError}
+        publicationRecordingEnabled={studio.publicationRecordingEnabled}
+        onPublicationRecordingChange={studio.setPublicationRecordingEnabled}
         runtimeMicrophoneWarning={embeddedStudioView.runtimeMicrophoneWarning}
         prepStatusText={embeddedPrepView.prepStatusText}
         compactStartButtonLabel={embeddedPrepView.compactStartButtonLabel}
@@ -932,12 +977,19 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
         {/* Основная область с боковыми панелями */}
         <div className="flex-1 min-h-0 flex relative overflow-hidden">
           {/* Основной контент */}
-          <main className={cn("flex-1 min-h-0 flex flex-col relative transition-[filter] duration-300", listeningReader && "blur-sm pointer-events-none select-none")}>
+          <main className={cn(
+            "flex-1 min-h-0 flex flex-col relative transition-[filter,opacity] duration-300",
+            listeningReader && "blur-sm pointer-events-none select-none",
+            readerBlockedByStudioDevice && "blur-sm pointer-events-none select-none opacity-60",
+          )}>
             <div
               ref={scrollContainerRef}
               className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain"
-              onScroll={() => {
-                if (isProgrammaticScroll()) {
+                onScroll={() => {
+                  if (readerBlockedByStudioDevice) {
+                    return;
+                  }
+                  if (isProgrammaticScroll()) {
                   return;
                 }
                 if (!hasLocalReadingActivity) {
@@ -975,6 +1027,20 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
               </div>
             </div>
           </main>
+          {readerBlockedByStudioDevice && studioEligibility.reason ? (
+            <div className="absolute inset-0 z-20 flex items-center justify-center bg-background/45 p-4 backdrop-blur-[1px]">
+              <div className="max-w-md rounded-2xl border bg-card/95 p-5 text-center text-card-foreground shadow-xl">
+                <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-amber-500/10 text-amber-600">
+                  <AlertCircle className="h-5 w-5" />
+                </div>
+                <h2 className="text-base font-semibold">Ридер и Studio недоступны на этом устройстве</h2>
+                <p className="mt-2 text-sm leading-6 text-muted-foreground">{studioEligibility.reason}</p>
+                <Button className="mt-4" onClick={() => globalThis.location.assign(`/clubs/${clubId}`)}>
+                  Вернуться в клуб
+                </Button>
+              </div>
+            </div>
+          ) : null}
         </div>
       </EmbeddedClubStudioShell>
 
@@ -982,7 +1048,7 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
       <KeyboardHelp isOpen={helpOpen} onClose={() => setHelpOpen(false)} />
 
       {/* Пузыри над чатом: живые чтецы + кнопка читать вслух */}
-      {!studioOpen && (
+      {!studioOpen && !readerBlockedByStudioDevice && (
         <>
           <div className={cn(
             "fixed z-30 transition-transform duration-300 ease-out",
@@ -1009,30 +1075,20 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
                 : "bottom-20 right-0 translate-x-[calc(100%-4rem)] pr-4 hover:translate-x-0 focus-within:translate-x-0",
             )}>
               <ReadNowBubble
-                onClick={() => {
-                  if (studioEligibility.mode === "override" && !tabletOverrideGranted) {
-                    setTabletOverrideGranted(true);
-                  }
-
-                  setStudioOpen(true);
-                }}
-                title={
-                  studioEligibility.mode === "override" && !tabletOverrideGranted
-                    ? "Открыть Studio с подтверждением для планшета"
-                    : undefined
-                }
+                onClick={() => setStudioOpen(true)}
                 compact={isMobile}
               />
             </div>
           )}
+
         </>
       )}
 
       {/* Чат клуба */}
-      <ChatWidget clubId={clubId} mobileTopOffsetPx={72} />
+      {!readerBlockedByStudioDevice ? <ChatWidget clubId={clubId} mobileTopOffsetPx={72} /> : null}
 
       {/* Модалка активных чтецов */}
-      <ActiveReadersModal
+      {!readerBlockedByStudioDevice ? <ActiveReadersModal
         open={liveModalOpen}
         onClose={() => setLiveModalOpen(false)}
         readers={readers}
@@ -1044,14 +1100,15 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
             return;
           }
 
-          if (activeListening.reader.chapter !== currentChapter) {
-            setCurrentChapter(activeListening.reader.chapter);
+          const safeChapter = normalizeReaderChapter(activeListening.reader.chapter);
+          if (safeChapter !== currentChapter) {
+            setCurrentChapter(safeChapter);
           }
         }}
         onStop={async () => {
           stopListening();
         }}
-      />
+      /> : null}
 
       {/* Оверлей плеера слушателя */}
       {listeningState && (

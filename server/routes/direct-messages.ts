@@ -4,13 +4,44 @@ import { logger } from '../lib/logger.js';
 import { getIO } from '../lib/socket-registry.js';
 import { gamificationService } from '../services/gamification-service.js';
 import { db } from '../db.js';
-import { directMessages, dmReports } from '../../shared/schema.js';
-import { eq } from 'drizzle-orm';
+import { clubMembers, directMessages, dmReports } from '../../shared/schema.js';
+import { and, eq } from 'drizzle-orm';
 import { requireAdmin } from '../jwt-middleware.js';
 
 const router = Router();
 const MIN_RETENTION_DAYS = 10;
 const MAX_RETENTION_DAYS = 365;
+
+function parseReaderJoinRequestsEnabled(settings: string | null | undefined): boolean {
+  if (!settings) return true;
+
+  try {
+    const parsed = JSON.parse(settings) as { readerJoinRequestsEnabled?: unknown };
+    return parsed.readerJoinRequestsEnabled !== false;
+  } catch {
+    return true;
+  }
+}
+
+function buildReaderClubJoinRequestMessage(params: {
+  clubId: string;
+  clubTitle: string;
+  applicantUsername: string;
+  applicantEmail: string | null | undefined;
+}): string {
+  const clubUrl = `/clubs/${params.clubId}`;
+  const emailLine = params.applicantEmail ? `Email: ${params.applicantEmail}` : 'Email: не указан';
+
+  return [
+    `Заявка на вступление в клуб чтецов «${params.clubTitle}»`,
+    '',
+    `Пользователь: ${params.applicantUsername}`,
+    emailLine,
+    '',
+    `Перейдите в клуб, чтобы просмотреть заявки: ${clubUrl}`,
+    'Рассмотрите заявку в блоке участников и примите или отклоните её.',
+  ].join('\n');
+}
 
 function normalizeRetentionDays(value: unknown): number | null {
   const num = typeof value === 'number' ? value : Number(value);
@@ -64,6 +95,183 @@ router.post('/conversations', async (req: Request, res: Response) => {
   } catch (err) {
     logger.error({ err }, '[dm] getOrCreateConversation error');
     res.status(500).json({ error: 'Failed to open conversation' });
+  }
+});
+
+/**
+ * POST /api/dm/reader-clubs/:clubId/join-request
+ * Отправить владельцу reader-led клуба заявку на вступление через ЛС.
+ */
+router.post('/reader-clubs/:clubId/join-request', async (req: Request, res: Response) => {
+  const userId = req.user?.id;
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+
+  const { clubId } = req.params;
+  if (!clubId) return res.status(400).json({ error: 'clubId required' });
+
+  try {
+    const club = await repositories.clubs.getClub(clubId);
+    if (!club || club.type !== 'reader-led') {
+      return res.status(404).json({ error: 'Reader club not found' });
+    }
+
+    if (club.ownerId === userId) {
+      return res.status(400).json({ error: 'Owner cannot request to join own club' });
+    }
+
+    if (!parseReaderJoinRequestsEnabled(club.settings)) {
+      return res.status(403).json({ error: 'Join requests are disabled for this club' });
+    }
+
+    const existingMembership = await repositories.clubs.getUserClubMembership(clubId, userId);
+    if (existingMembership?.isActive) {
+      return res.status(409).json({ error: 'User is already a club member' });
+    }
+
+    if (existingMembership && !existingMembership.isActive) {
+      return res.status(409).json({ error: 'Join request is already pending' });
+    }
+
+    if (!existingMembership) {
+      await db.insert(clubMembers).values({
+        clubId,
+        userId,
+        role: 'member',
+        joinedAt: new Date(),
+        isActive: false,
+      });
+    }
+
+    const conv = await repositories.dm.getOrCreateConversation(userId, club.ownerId);
+    const message = buildReaderClubJoinRequestMessage({
+      clubId: club.id,
+      clubTitle: club.title,
+      applicantUsername: req.user?.username ?? userId,
+      applicantEmail: null,
+    });
+    const msg = await repositories.dm.sendMessage(conv.id, userId, message);
+
+    try {
+      const io = getIO();
+      io.to(`dm:${club.ownerId}`).emit('dm:new_message', {
+        conversationId: conv.id,
+        message: msg,
+      });
+      const totalUnread = await repositories.dm.getTotalUnread(club.ownerId);
+      io.to(`dm:${club.ownerId}`).emit('dm:unread_count', { count: totalUnread });
+    } catch (socketErr) {
+      logger.warn({ socketErr }, '[dm] reader club join request socket emit failed (non-fatal)');
+    }
+
+    res.status(201).json({ success: true, conversationId: conv.id, messageId: msg.id });
+  } catch (err) {
+    logger.error({ err, clubId, userId }, '[dm] reader club join request error');
+    res.status(500).json({ error: 'Failed to send join request' });
+  }
+});
+
+/**
+ * POST /api/dm/reader-clubs/:clubId/join-requests/:userId/approve
+ * Одобрить pending-заявку слушателя в reader-led клуб.
+ */
+router.post('/reader-clubs/:clubId/join-requests/:userId/approve', async (req: Request, res: Response) => {
+  const ownerId = req.user?.id;
+  if (!ownerId) return res.status(401).json({ error: 'Unauthorized' });
+
+  const { clubId, userId } = req.params;
+
+  try {
+    const club = await repositories.clubs.getClub(clubId);
+    if (!club || club.type !== 'reader-led') {
+      return res.status(404).json({ error: 'Reader club not found' });
+    }
+
+    if (club.ownerId !== ownerId) {
+      return res.status(403).json({ error: 'Only reader club owner can approve requests' });
+    }
+
+    const pendingMembership = await repositories.clubs.getUserClubMembership(clubId, userId);
+    if (!pendingMembership || pendingMembership.isActive) {
+      return res.status(404).json({ error: 'Pending join request not found' });
+    }
+
+    await db
+      .update(clubMembers)
+      .set({ isActive: true })
+      .where(and(eq(clubMembers.clubId, clubId), eq(clubMembers.userId, userId)));
+
+    const conv = await repositories.dm.getOrCreateConversation(ownerId, userId);
+    const msg = await repositories.dm.sendMessage(
+      conv.id,
+      ownerId,
+      `Ваша заявка на вступление в клуб чтецов «${club.title}» одобрена. Теперь вы участник клуба.`,
+    );
+
+    try {
+      const io = getIO();
+      io.to(`dm:${userId}`).emit('dm:new_message', { conversationId: conv.id, message: msg });
+      const totalUnread = await repositories.dm.getTotalUnread(userId);
+      io.to(`dm:${userId}`).emit('dm:unread_count', { count: totalUnread });
+    } catch (socketErr) {
+      logger.warn({ socketErr }, '[dm] reader club approve socket emit failed (non-fatal)');
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    logger.error({ err, clubId, userId, ownerId }, '[dm] reader club approve request error');
+    res.status(500).json({ error: 'Failed to approve join request' });
+  }
+});
+
+/**
+ * POST /api/dm/reader-clubs/:clubId/join-requests/:userId/reject
+ * Отклонить pending-заявку слушателя в reader-led клуб.
+ */
+router.post('/reader-clubs/:clubId/join-requests/:userId/reject', async (req: Request, res: Response) => {
+  const ownerId = req.user?.id;
+  if (!ownerId) return res.status(401).json({ error: 'Unauthorized' });
+
+  const { clubId, userId } = req.params;
+
+  try {
+    const club = await repositories.clubs.getClub(clubId);
+    if (!club || club.type !== 'reader-led') {
+      return res.status(404).json({ error: 'Reader club not found' });
+    }
+
+    if (club.ownerId !== ownerId) {
+      return res.status(403).json({ error: 'Only reader club owner can reject requests' });
+    }
+
+    const pendingMembership = await repositories.clubs.getUserClubMembership(clubId, userId);
+    if (!pendingMembership || pendingMembership.isActive) {
+      return res.status(404).json({ error: 'Pending join request not found' });
+    }
+
+    await db
+      .delete(clubMembers)
+      .where(and(eq(clubMembers.clubId, clubId), eq(clubMembers.userId, userId)));
+
+    const conv = await repositories.dm.getOrCreateConversation(ownerId, userId);
+    const msg = await repositories.dm.sendMessage(
+      conv.id,
+      ownerId,
+      `Ваша заявка на вступление в клуб чтецов «${club.title}» отклонена.`,
+    );
+
+    try {
+      const io = getIO();
+      io.to(`dm:${userId}`).emit('dm:new_message', { conversationId: conv.id, message: msg });
+      const totalUnread = await repositories.dm.getTotalUnread(userId);
+      io.to(`dm:${userId}`).emit('dm:unread_count', { count: totalUnread });
+    } catch (socketErr) {
+      logger.warn({ socketErr }, '[dm] reader club reject socket emit failed (non-fatal)');
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    logger.error({ err, clubId, userId, ownerId }, '[dm] reader club reject request error');
+    res.status(500).json({ error: 'Failed to reject join request' });
   }
 });
 

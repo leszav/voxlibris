@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { useLocation, useRoute, Link } from 'wouter';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -33,31 +33,16 @@ export default function InviteAccept() {
     }, delayMs);
   };
 
-  useEffect(() => {
-    return () => {
-      if (redirectTimeoutRef.current) {
-        clearTimeout(redirectTimeoutRef.current);
-      }
-    };
-  }, []);
+  const handleGuestAccept = () => {
+    if (!invitation) return;
 
-  useEffect(() => {
-    // Если пользователь не авторизован, перенаправляем на регистрацию с параметрами приглашения
-    if (!isLoading && invitation && !isAuthenticated) {
-      const inviteEmail = invitation.email;
-      // Сохраняем информацию о приглашении в sessionStorage для использования после регистрации
-      sessionStorage.setItem('pendingInvitation', JSON.stringify({
-        token,
-        clubId: invitation.club?.id,
-      }));
-      // Перенаправляем на регистрацию с email
-      toast({
-        title: "Необходима регистрация",
-        description: "Создайте аккаунт, чтобы принять приглашение",
-      });
-      setLocation(`/auth/register?email=${encodeURIComponent(inviteEmail || '')}&invite=${token}`);
-    }
-  }, [isLoading, invitation, isAuthenticated, token, setLocation, toast]);
+    const inviteEmail = invitation.email || '';
+    sessionStorage.setItem('pendingInvitation', JSON.stringify({
+      token,
+      clubId: invitation.club?.id,
+    }));
+    setLocation(`/auth/register?email=${encodeURIComponent(inviteEmail)}&invite=${encodeURIComponent(token)}`);
+  };
 
   const handleAccept = async () => {
     if (!invitation || !isAuthenticated) return;
@@ -253,18 +238,22 @@ export default function InviteAccept() {
               </div>
             )}
 
-            {!isExpired && !alreadyResponded && isAuthenticated && (
+            {!isExpired && !alreadyResponded && (
               <>
                 <div className="space-y-2 text-sm text-muted-foreground">
-                  <p>Вы приглашены присоединиться к книжному клубу <strong>{invitation.clubName}</strong></p>
-                  {user?.email && (
-                    <p className="text-xs">Приглашение для: {user.email}</p>
+                  <p>Вы приглашены присоединиться к книжному клубу <strong>{invitation.clubName}</strong>.</p>
+                  <p>
+                    Чтобы стать участником клуба, примите приглашение и зарегистрируйтесь с email,
+                    на который оно пришло.
+                  </p>
+                  {(isAuthenticated ? user?.email : invitation.email) && (
+                    <p className="text-xs">Приглашение для: {isAuthenticated ? user?.email : invitation.email}</p>
                   )}
                 </div>
 
                 <div className="flex gap-3">
                   <Button
-                    onClick={handleAccept}
+                    onClick={isAuthenticated ? handleAccept : handleGuestAccept}
                     disabled={acceptInvitation.isPending}
                     className="flex-1"
                   >
@@ -276,7 +265,7 @@ export default function InviteAccept() {
                     ) : (
                       <>
                         <CheckCircle className="h-4 w-4 mr-2" />
-                        Принять
+                        {isAuthenticated ? 'Принять' : 'Принять и зарегистрироваться'}
                       </>
                     )}
                   </Button>
@@ -300,13 +289,6 @@ export default function InviteAccept() {
                   </Button>
                 </div>
               </>
-            )}
-
-            {!isAuthenticated && (
-              <div className="text-center text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin mx-auto mb-2" />
-                Перенаправление на регистрацию...
-              </div>
             )}
           </CardContent>
         </Card>

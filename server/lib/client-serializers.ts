@@ -8,6 +8,7 @@ type AuthUserBaseInput = Pick<
 type AuthUserInput = AuthUserBaseInput & {
   avatar?: string | null;
   displayName?: string | null;
+  canCreateReaderLedClubs?: boolean;
 };
 
 export interface ClientClubOwner {
@@ -30,6 +31,7 @@ export interface ClientClubMember {
   }>;
   role: ClubMemberRole;
   joinedAt: Date;
+  isActive?: boolean;
 }
 
 export interface ClientPublicCatalogClub {
@@ -46,6 +48,18 @@ export interface ClientPublicCatalogClub {
   memberCount: number;
   maxMembers: number;
   tags: string[];
+  readerJoinRequestsEnabled?: boolean;
+}
+
+function parseReaderJoinRequestsEnabled(settings: string | null | undefined): boolean {
+  if (!settings) return true;
+
+  try {
+    const parsed = JSON.parse(settings) as { readerJoinRequestsEnabled?: unknown };
+    return parsed.readerJoinRequestsEnabled !== false;
+  } catch {
+    return true;
+  }
 }
 
 export type ClientAuthUser = {
@@ -59,6 +73,7 @@ export type ClientAuthUser = {
   emailConfirmed: boolean;
   createdAt: Date;
   lastActivityAt: Date | null;
+  canCreateReaderLedClubs?: boolean;
 };
 
 export type ClientClubBook = Omit<ClubBook, "fileHash" | "storagePath" | "encryptedContentKey">;
@@ -81,6 +96,7 @@ export function serializeAuthUser(user: AuthUserInput): ClientAuthUser {
     emailConfirmed: user.emailConfirmed,
     createdAt: user.createdAt,
     lastActivityAt: user.lastActivityAt ?? null,
+    canCreateReaderLedClubs: user.canCreateReaderLedClubs,
   };
 }
 
@@ -150,6 +166,7 @@ export function serializePublicCatalogClubList(clubs: ClubWithDetails[]): Client
     memberCount: club.memberCount ?? 0,
     maxMembers: club.maxMembers,
     tags: club.tags ?? [],
+    readerJoinRequestsEnabled: club.type === 'reader-led' ? parseReaderJoinRequestsEnabled(club.settings) : undefined,
   }));
 }
 
@@ -163,6 +180,7 @@ export function serializeClubMember(member: ClientClubMember): ClientClubMember 
     achievements: member.achievements ?? [],
     role: member.role,
     joinedAt: member.joinedAt,
+    isActive: member.isActive ?? true,
   };
 }
 

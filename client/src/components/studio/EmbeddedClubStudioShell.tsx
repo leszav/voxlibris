@@ -10,7 +10,7 @@ import {
   resolveStudioMicCheckModalOpen,
 } from "@/lib/studio-prep-view";
 import type { StudioSessionPhase } from "@/lib/studio-session-phase";
-import type { LiveSessionReaction } from "@/hooks/use-audio-session";
+import type { LiveSessionQuestion, LiveSessionReaction } from "@/hooks/use-audio-session";
 
 interface EmbeddedClubStudioShellProps {
   isOpen: boolean;
@@ -26,12 +26,18 @@ interface EmbeddedClubStudioShellProps {
   micBars: ReadonlyArray<number>;
   sessionConnected: boolean;
   recentReactions: LiveSessionReaction[];
+  reactionCount: number;
+  sessionQuestions: LiveSessionQuestion[];
+  unansweredQuestionCount: number;
+  onQuestionAnswered: (questionId: string) => Promise<void>;
   streamStartError: string | null;
   micCheckPassed: boolean;
   showMicCheck: boolean;
   microphoneAvailable: boolean;
   microphoneLoading: boolean;
   microphoneError: string | null;
+  publicationRecordingEnabled: boolean;
+  onPublicationRecordingChange: (enabled: boolean) => void;
   runtimeMicrophoneWarning: string | null;
   prepStatusText: string;
   compactStartButtonLabel: string;
@@ -69,12 +75,18 @@ export function EmbeddedClubStudioShell({
   micBars,
   sessionConnected,
   recentReactions,
+  reactionCount,
+  sessionQuestions,
+  unansweredQuestionCount,
+  onQuestionAnswered,
   streamStartError,
   micCheckPassed,
   showMicCheck,
   microphoneAvailable,
   microphoneLoading,
   microphoneError,
+  publicationRecordingEnabled,
+  onPublicationRecordingChange,
   runtimeMicrophoneWarning,
   prepStatusText,
   compactStartButtonLabel,
@@ -143,6 +155,8 @@ export function EmbeddedClubStudioShell({
             streamStartError={streamStartError}
             microphoneAvailable={microphoneAvailable}
             microphoneLoading={microphoneLoading}
+            publicationRecordingEnabled={publicationRecordingEnabled}
+            onPublicationRecordingChange={onPublicationRecordingChange}
             onStart={onStartBroadcast}
             onOpenMicCheck={onOpenMicCheck}
             onRetryDetection={onRetryDetection}
@@ -163,6 +177,10 @@ export function EmbeddedClubStudioShell({
               elapsedTime={elapsedTime}
               listenerCount={listenerCount}
               recentReactions={recentReactions}
+              reactionCount={reactionCount}
+              sessionQuestions={sessionQuestions}
+              unansweredQuestionCount={unansweredQuestionCount}
+              onQuestionAnswered={onQuestionAnswered}
               sessionId={sessionId}
               micLevel={micLevel}
               micBars={micBars}

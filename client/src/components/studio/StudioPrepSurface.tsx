@@ -11,6 +11,8 @@ interface StudioPrepSurfaceProps {
   streamStartError: string | null;
   microphoneAvailable: boolean;
   microphoneLoading: boolean;
+  publicationRecordingEnabled?: boolean;
+  onPublicationRecordingChange?: (enabled: boolean) => void;
   onStart: () => void;
   onOpenMicCheck: () => void;
   onRetryDetection: () => void;
@@ -61,6 +63,47 @@ function PrepStatus({
   );
 }
 
+function PublicationRecordingToggle({
+  enabled,
+  onChange,
+  compact,
+}: Readonly<{
+  enabled: boolean;
+  onChange: (enabled: boolean) => void;
+  compact?: boolean;
+}>) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={enabled}
+      onClick={() => onChange(!enabled)}
+      className={cn(
+        "group flex items-center gap-3 rounded-xl border bg-background/80 text-left transition-colors hover:border-amber-300 hover:bg-amber-50/60 dark:hover:border-amber-700 dark:hover:bg-amber-950/30",
+        compact ? "max-w-md px-3 py-2" : "w-full px-3 py-3",
+        enabled ? "border-amber-300 dark:border-amber-700" : "border-border",
+      )}
+    >
+      <span
+        className={cn(
+          "relative inline-flex h-6 w-11 shrink-0 rounded-full transition-colors",
+          enabled ? "bg-amber-500" : "bg-muted-foreground/30",
+        )}
+      >
+        <span
+          className={cn(
+            "absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform",
+            enabled ? "translate-x-5" : "translate-x-0.5",
+          )}
+        />
+      </span>
+      <span className={cn("font-medium text-foreground", compact ? "text-xs" : "text-sm")}>
+        Передать запись на модерацию и сделать доступной для будущей публикации.
+      </span>
+    </button>
+  );
+}
+
 export function StudioPrepSurface({
   variant,
   open = true,
@@ -70,6 +113,8 @@ export function StudioPrepSurface({
   streamStartError,
   microphoneAvailable,
   microphoneLoading,
+  publicationRecordingEnabled = true,
+  onPublicationRecordingChange,
   onStart,
   onOpenMicCheck,
   onRetryDetection,
@@ -93,6 +138,13 @@ export function StudioPrepSurface({
             compact
           />
           </div>
+          {onPublicationRecordingChange ? (
+            <PublicationRecordingToggle
+              enabled={publicationRecordingEnabled}
+              onChange={onPublicationRecordingChange}
+              compact
+            />
+          ) : null}
           <div className="flex flex-wrap items-center gap-2 sm:justify-end">
             <Button
               size="sm"
@@ -154,6 +206,12 @@ export function StudioPrepSurface({
           />
         </div>
         <div className="space-y-3">
+          {onPublicationRecordingChange ? (
+            <PublicationRecordingToggle
+              enabled={publicationRecordingEnabled}
+              onChange={onPublicationRecordingChange}
+            />
+          ) : null}
           <Button
             size="lg"
             className="w-full bg-amber-500 hover:bg-amber-600 text-white border-none h-12 text-lg"

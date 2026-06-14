@@ -221,6 +221,7 @@ export async function apiRequest<T = unknown>(
     },
     body: options?.body,
     credentials: "include",
+    cache: options?.cache,
   });
 
   if (res.status === 401) {

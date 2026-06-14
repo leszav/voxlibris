@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { repositories, storage } from '../repositories/index.js';
 import { logger } from '../lib/logger.js';
 import { getIO } from '../lib/socket-registry.js';
+import { sessionAnalyticsService } from '../services/session-analytics-service.js';
 
 const router = Router();
 
@@ -93,6 +94,7 @@ router.post('/', async (req: Request, res: Response) => {
       audioTimestampMs,
       chapterNumber,
     });
+    await sessionAnalyticsService.trackReaction(sessionId, type === 'positive');
 
     try {
       getIO().of('/reading-sessions').to(`session:${sessionId}`).emit('reading-session:reaction', {

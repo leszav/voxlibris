@@ -18,6 +18,47 @@ import { syncBookReadingStatus } from './lib/sync-reading-status.js';
 
 const router = express.Router();
 
+const READER_LED_BOOK_ACCESS_DENIED = 'Reader-led club book is available only to the club reader';
+
+function canAccessReaderLedBook(
+  club: { type: string; ownerId: string },
+  member: { role: string },
+  userId: string,
+): boolean {
+  if (club.type !== 'reader-led') {
+    return true;
+  }
+
+  return club.ownerId === userId || member.role === 'owner';
+}
+
+async function getClubBookAccessContext(clubId: string, userId: string) {
+  const [club] = await db
+    .select({ id: clubs.id, type: clubs.type, ownerId: clubs.ownerId })
+    .from(clubs)
+    .where(eq(clubs.id, clubId))
+    .limit(1);
+
+  if (!club) {
+    return { club: null, member: null };
+  }
+
+  const [member] = await db
+    .select({ id: clubMembers.id, role: clubMembers.role, isActive: clubMembers.isActive })
+    .from(clubMembers)
+    .where(and(eq(clubMembers.clubId, clubId), eq(clubMembers.userId, userId), eq(clubMembers.isActive, true)))
+    .limit(1);
+
+  return { club, member: member ?? null };
+}
+
+function sendReaderLedBookAccessDenied(res: express.Response) {
+  return res.status(403).json({
+    message: READER_LED_BOOK_ACCESS_DENIED,
+    code: 'READER_LED_BOOK_ACCESS_DENIED',
+  });
+}
+
 /** Возвращает активную книгу клуба через clubs.bookId (детерминированный запрос) */
 async function findClubActiveBook(clubId: string) {
   const [club] = await db
@@ -54,14 +95,18 @@ router.get('/:clubId/progress', jwtAuth, async (req, res) => {
       return res.status(401).json({ message: 'Unauthorized' });
     }
 
-    const [member] = await db
-      .select()
-      .from(clubMembers)
-      .where(and(eq(clubMembers.clubId, clubId), eq(clubMembers.userId, userId)))
-      .limit(1);
+    const { club, member } = await getClubBookAccessContext(clubId, userId);
+
+    if (!club) {
+      return res.status(404).json({ message: 'Club not found' });
+    }
 
     if (!member) {
       return res.status(403).json({ message: 'Not a member of this club' });
+    }
+
+    if (!canAccessReaderLedBook(club, member, userId)) {
+      return sendReaderLedBookAccessDenied(res);
     }
 
     const clubBook = await findClubActiveBook(clubId);
@@ -127,14 +172,18 @@ router.put('/:clubId/progress', jwtAuth, async (req, res) => {
       return res.status(401).json({ message: 'Unauthorized' });
     }
 
-    const [member] = await db
-      .select()
-      .from(clubMembers)
-      .where(and(eq(clubMembers.clubId, clubId), eq(clubMembers.userId, userId)))
-      .limit(1);
+    const { club, member } = await getClubBookAccessContext(clubId, userId);
+
+    if (!club) {
+      return res.status(404).json({ message: 'Club not found' });
+    }
 
     if (!member) {
       return res.status(403).json({ message: 'Not a member of this club' });
+    }
+
+    if (!canAccessReaderLedBook(club, member, userId)) {
+      return sendReaderLedBookAccessDenied(res);
     }
 
     const clubBook = await findClubActiveBook(clubId);
@@ -224,15 +273,21 @@ router.get('/:clubId/books/:bookId/content', jwtAuth, async (req, res) => {
       return res.status(401).json({ error: "Unauthorized" });
     }
 
-    // Проверяем членство в клубе
-    const [member] = await db
-      .select()
-      .from(clubMembers)
-      .where(and(eq(clubMembers.clubId, clubId), eq(clubMembers.userId, userId)))
-      .limit(1);
+    const { club, member } = await getClubBookAccessContext(clubId, userId);
+
+    if (!club) {
+      return res.status(404).json({ error: 'Club not found' });
+    }
 
     if (!member) {
       return res.status(403).json({ error: "Not a member of this club" });
+    }
+
+    if (!canAccessReaderLedBook(club, member, userId)) {
+      return res.status(403).json({
+        error: READER_LED_BOOK_ACCESS_DENIED,
+        code: 'READER_LED_BOOK_ACCESS_DENIED',
+      });
     }
 
     // Получаем клубную книгу
@@ -323,14 +378,18 @@ router.get('/:clubId/reading-plan', jwtAuth, async (req, res) => {
       return res.status(401).json({ message: 'Unauthorized' });
     }
 
-    const [member] = await db
-      .select()
-      .from(clubMembers)
-      .where(and(eq(clubMembers.clubId, clubId), eq(clubMembers.userId, userId)))
-      .limit(1);
+    const { club, member } = await getClubBookAccessContext(clubId, userId);
+
+    if (!club) {
+      return res.status(404).json({ message: 'Club not found' });
+    }
 
     if (!member) {
       return res.status(403).json({ message: 'Not a member of this club' });
+    }
+
+    if (!canAccessReaderLedBook(club, member, userId)) {
+      return sendReaderLedBookAccessDenied(res);
     }
 
     const clubBook = await findClubActiveBook(clubId);
@@ -598,15 +657,18 @@ router.patch('/:clubId/reading-plan/:planId/status', jwtAuth, async (req, res) =
       return res.status(400).json({ message: 'Invalid status value' });
     }
 
-    // Проверяем что пользователь - участник клуба
-    const [member] = await db
-      .select()
-      .from(clubMembers)
-      .where(and(eq(clubMembers.clubId, clubId), eq(clubMembers.userId, userId)))
-      .limit(1);
+    const { club, member } = await getClubBookAccessContext(clubId, userId);
+
+    if (!club) {
+      return res.status(404).json({ message: 'Club not found' });
+    }
 
     if (!member) {
       return res.status(403).json({ message: 'Not a member of this club' });
+    }
+
+    if (!canAccessReaderLedBook(club, member, userId)) {
+      return sendReaderLedBookAccessDenied(res);
     }
 
     // Проверяем что план существует и принадлежит этому клубу
@@ -728,14 +790,18 @@ router.get('/:clubId/members-progress', jwtAuth, async (req, res) => {
       return res.status(401).json({ message: 'Unauthorized' });
     }
 
-    const [member] = await db
-      .select()
-      .from(clubMembers)
-      .where(and(eq(clubMembers.clubId, clubId), eq(clubMembers.userId, userId)))
-      .limit(1);
+    const { club, member } = await getClubBookAccessContext(clubId, userId);
+
+    if (!club) {
+      return res.status(404).json({ message: 'Club not found' });
+    }
 
     if (!member) {
       return res.status(403).json({ message: 'Not a member of this club' });
+    }
+
+    if (!canAccessReaderLedBook(club, member, userId)) {
+      return sendReaderLedBookAccessDenied(res);
     }
 
     const clubBook = await findClubActiveBook(clubId);

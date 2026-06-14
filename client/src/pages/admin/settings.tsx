@@ -1072,7 +1072,47 @@ function FeatureFlagsSettings() {
     },
   });
 
+  const updateLandingReaderClubsMutation = useMutation({
+    mutationFn: async (enabled: boolean) => {
+      return apiRequest('/api/v1/admin/features/landing-reader-clubs', {
+        method: 'PUT',
+        body: JSON.stringify({ enabled }),
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin-features'] });
+    },
+    onError: (error: Error) => {
+      void modalAlert({
+        title: "Ошибка сохранения",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const updateLandingTopReadersMutation = useMutation({
+    mutationFn: async (enabled: boolean) => {
+      return apiRequest('/api/v1/admin/features/landing-top-readers', {
+        method: 'PUT',
+        body: JSON.stringify({ enabled }),
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin-features'] });
+    },
+    onError: (error: Error) => {
+      void modalAlert({
+        title: "Ошибка сохранения",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
   const guestEnabled = data?.features?.['guest.access.enabled'] ?? false;
+  const landingReaderClubsEnabled = data?.features?.['landing.readerClubs.enabled'] ?? false;
+  const landingTopReadersEnabled = data?.features?.['landing.topReaders.enabled'] ?? false;
 
   if (isLoading) {
     return (
@@ -1145,6 +1185,100 @@ function FeatureFlagsSettings() {
               </div>
               <p className="text-sm text-gray-500 mt-2">
                 Для включения переключите тоггл выше. Изменение применяется мгновенно.
+              </p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Users className="h-5 w-5" />
+            Лендинг: клубы чтецов
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+            <div className="space-y-1">
+              <Label htmlFor="landing_reader_clubs_enabled">Показывать блок клубов чтецов</Label>
+              <p className="text-sm text-gray-500">
+                Включайте, когда накопится достаточно опубликованных клубов чтецов для аккуратной витрины.
+              </p>
+            </div>
+            <Switch
+              id="landing_reader_clubs_enabled"
+              checked={landingReaderClubsEnabled}
+              onCheckedChange={(checked) => updateLandingReaderClubsMutation.mutate(checked)}
+              disabled={updateLandingReaderClubsMutation.isPending}
+            />
+          </div>
+
+          {landingReaderClubsEnabled ? (
+            <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
+              <div className="flex items-center gap-2 text-green-800">
+                <Settings className="h-4 w-4" />
+                <span className="text-sm font-medium">Блок клубов чтецов включён</span>
+              </div>
+              <p className="text-sm text-green-700 mt-2">
+                На главной странице будет показано до 6 популярных клубов чтецов.
+              </p>
+            </div>
+          ) : (
+            <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg">
+              <div className="flex items-center gap-2 text-gray-600">
+                <AlertTriangle className="h-4 w-4" />
+                <span className="text-sm font-medium">Блок клубов чтецов скрыт</span>
+              </div>
+              <p className="text-sm text-gray-500 mt-2">
+                Лендинг не показывает пустую или неполную витрину, пока функция не включена вручную.
+              </p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Users className="h-5 w-5" />
+            Лендинг: рейтинг чтецов
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+            <div className="space-y-1">
+              <Label htmlFor="landing_top_readers_enabled">Показывать рейтинг лучших чтецов</Label>
+              <p className="text-sm text-gray-500">
+                Включайте, когда в рейтинге достаточно профилей со статусом чтеца для аккуратного блока на главной.
+              </p>
+            </div>
+            <Switch
+              id="landing_top_readers_enabled"
+              checked={landingTopReadersEnabled}
+              onCheckedChange={(checked) => updateLandingTopReadersMutation.mutate(checked)}
+              disabled={updateLandingTopReadersMutation.isPending}
+            />
+          </div>
+
+          {landingTopReadersEnabled ? (
+            <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
+              <div className="flex items-center gap-2 text-green-800">
+                <Settings className="h-4 w-4" />
+                <span className="text-sm font-medium">Рейтинг чтецов включён</span>
+              </div>
+              <p className="text-sm text-green-700 mt-2">
+                На главной странице будет показано до 6 лучших чтецов VoxLibris.
+              </p>
+            </div>
+          ) : (
+            <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg">
+              <div className="flex items-center gap-2 text-gray-600">
+                <AlertTriangle className="h-4 w-4" />
+                <span className="text-sm font-medium">Рейтинг чтецов скрыт</span>
+              </div>
+              <p className="text-sm text-gray-500 mt-2">
+                Лендинг не показывает пустой или слишком короткий рейтинг, пока функция не включена вручную.
               </p>
             </div>
           )}
