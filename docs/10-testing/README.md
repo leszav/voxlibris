@@ -1,7 +1,7 @@
 # Тестирование
 
 **Статус:** Current  
-**Дата обновления:** 2026-05-29  
+**Дата обновления:** 2026-06-15  
 **Источник правды:** `package.json`, `server/__tests__/`.
 
 ## Текущий baseline
@@ -14,6 +14,7 @@
 pnpm test           # node --test --experimental-strip-types server/__tests__/**/*.test.ts
 pnpm test:watch     # node --test --watch server/__tests__/**/*.test.ts
 pnpm test:coverage  # node --test --experimental-test-coverage server/__tests__/**/*.test.ts
+pnpm run test:integration # HTTP integration tests against a running API server
 pnpm run check      # TypeScript check
 pnpm run lint:eslint
 pnpm run build
@@ -24,13 +25,20 @@ pnpm run quality:gate
 
 ```text
 server/__tests__/
+├── helpers/
+│   └── api-client.ts
+├── integration/
+│   ├── auth-and-access.integration.test.ts
+│   └── public-api.integration.test.ts
 ├── book-parser.test.ts
 ├── client-serializers.test.ts
 ├── security-upload.test.ts
 └── validation.test.ts
 ```
 
-Текущий набор покрывает серверные утилиты, сериализацию, безопасность upload flow и валидацию. Клиентские component/e2e тесты в текущем baseline не настроены.
+Текущий набор покрывает серверные утилиты, сериализацию, безопасность upload flow, валидацию и отдельный слой HTTP integration tests для публичных API, auth/access boundaries, feedback и guest restore.
+
+Подробная матрица интеграционного покрытия: [`api-integration-coverage.md`](./api-integration-coverage.md).
 
 ## Как запускать перед изменениями
 
@@ -44,7 +52,20 @@ pnpm run check
 
 ```bash
 pnpm test
+pnpm run test:integration
 pnpm run check
+```
+
+Интеграционные тесты ожидают поднятый API server. По умолчанию используется `http://127.0.0.1:5000`; переопределить адрес можно через `TEST_API_BASE_URL`:
+
+```bash
+TEST_API_BASE_URL=http://127.0.0.1:5000 pnpm run test:integration
+```
+
+Чтобы локальный rate limiting не мешал smoke-набору, helper делает паузу между запросами. Дефолт — `800ms`, переопределение:
+
+```bash
+TEST_API_REQUEST_DELAY_MS=1200 pnpm run test:integration
 ```
 
 Для изменений, затрагивающих сборку, shared-типы, Vite или server entrypoint:
@@ -55,7 +76,9 @@ pnpm run quality:gate
 
 ## Практика написания новых тестов
 
-Новые тесты добавляйте в `server/__tests__/` с расширением `.test.ts` и используйте API `node:test` и `node:assert/strict`.
+Новые unit/smoke тесты добавляйте в `server/__tests__/` с расширением `.test.ts` и используйте API `node:test` и `node:assert/strict`.
+
+Новые HTTP integration tests добавляйте в `server/__tests__/integration/` с расширением `.integration.test.ts`. Для запросов используйте helper `server/__tests__/helpers/api-client.ts`, чтобы сохранять единый формат `TEST_API_BASE_URL`, JSON parsing и проверки статусов.
 
 Пример:
 
@@ -85,8 +108,8 @@ test("пример бизнес-правила", () => {
 
 - Нет настроенного e2e набора для критических пользовательских сценариев.
 - Нет отдельного клиентского unit/component testing setup.
-- API-тесты через HTTP-клиент не оформлены как отдельный слой.
-- Покрытие ограничено текущими файлами в `server/__tests__/`.
+- Интеграционные API-тесты пока покрывают smoke/access/error boundaries, но не полный happy path с фикстурами тестовой БД.
+- Не покрыты WebSocket сценарии и большинство admin/gamification/recommendations endpoints.
 
 ## Roadmap
 

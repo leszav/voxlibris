@@ -24,6 +24,7 @@
     "test": "node --test --experimental-strip-types server/__tests__/**/*.test.ts",
     "test:watch": "node --test --watch server/__tests__/**/*.test.ts",
     "test:coverage": "node --test --experimental-test-coverage server/__tests__/**/*.test.ts",
+    "test:integration": "node --test --test-concurrency=1 --experimental-strip-types server/__tests__/integration/**/*.integration.test.ts",
     "stage12:reader-clubs": "tsx script/stage12-reader-clubs-smoke.ts",
     "deps:cruise": "depcruise --config .dependency-cruiser.cjs \"client/src/**/*.{ts,tsx}\" \"server/**/*.ts\" \"shared/**/*.ts\"",
     "deps:graph": "depcruise --config .dependency-cruiser.cjs --output-type json --output-to /tmp/voxlibris-dependency-cruiser.json \"client/src/**/*.{ts,tsx}\" \"server/**/*.ts\" \"shared/**/*.ts\" && node --import tsx script/render-dependency-visualizations.ts /tmp/voxlibris-dependency-cruiser.json",

@@ -129,10 +129,12 @@ pnpm run db:push
 pnpm test
 pnpm test:watch
 pnpm test:coverage
+pnpm run test:integration
 pnpm run quality:gate
 ```
 
 Тесты находятся в `server/__tests__/` и запускаются через `node --test --experimental-strip-types`.
+Интеграционные HTTP-тесты лежат в `server/__tests__/integration/` и запускаются против поднятого API server (`TEST_API_BASE_URL`, по умолчанию `http://127.0.0.1:5000`). Подробности: [docs/10-testing/api-integration-coverage.md](./docs/10-testing/api-integration-coverage.md).
 
 ## Лицензия
 
