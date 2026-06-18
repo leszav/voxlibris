@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CreditCard, KeyRound, Loader2, Save } from "lucide-react";
+import { CreditCard, KeyRound, Loader2, Save, Edit2 } from "lucide-react";
 import { AdminLayout } from "@/components/layout/AdminLayout";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 
 type ProviderCode = "yookassa";
@@ -30,7 +31,7 @@ interface ProviderFormState {
 
 const defaultForm: ProviderFormState = {
   code: "yookassa",
-  name: "ЮKassa test",
+  name: "ЮKassa",
   status: "active",
   priority: 10,
   shopId: "",
@@ -45,13 +46,16 @@ const defaultForm: ProviderFormState = {
 
 const PROVIDERS_QUERY_KEY = ["/api/commerce/admin/providers"] as const;
 
-function buildCredentials(form: ProviderFormState) {
+function buildCredentials(form: ProviderFormState, isApiKeyProvided: boolean) {
   const credentials: Record<string, string> = {
     returnUrl: form.returnUrl,
   };
   if (form.code === "yookassa") {
     credentials.shopId = form.shopId;
-    credentials.apiKey = form.apiKey;
+    // Отправляем API-key только если он был введён в форму
+    if (isApiKeyProvided) {
+      credentials.apiKey = form.apiKey;
+    }
     credentials.receiptEnabled = form.receiptEnabled;
     credentials.vatCode = form.vatCode;
     credentials.paymentSubject = form.paymentSubject;
@@ -61,25 +65,31 @@ function buildCredentials(form: ProviderFormState) {
   return credentials;
 }
 
-function validateForm(form: ProviderFormState) {
+function validateForm(form: ProviderFormState, isConfigured: boolean, apiKeyEditing: boolean) {
   if (!form.name.trim()) return "Укажите название провайдера";
   if (!form.shopId.trim()) return "Укажите ID магазина ЮKassa";
-  if (!form.apiKey.trim()) return "Укажите API-key ЮKassa";
+  // API-key обязателен только при первом сохранении или при явном редактировании
+  if ((!isConfigured || apiKeyEditing) && !form.apiKey.trim()) return "Укажите API-key ЮKassa";
   if (!form.returnUrl.trim()) return "Укажите returnUrl";
   return null;
 }
 
 export default function AdminPaymentProvidersPage() {
   const queryClient = useQueryClient();
+  const { toast } = useToast();
   const [form, setForm] = useState<ProviderFormState>(defaultForm);
-  const [error, setError] = useState<string | null>(null);
+  const [apiKeyEditing, setApiKeyEditing] = useState(false);
   const { data: providers = [] } = useQuery<Array<{ status: ProviderStatus }>>({ queryKey: PROVIDERS_QUERY_KEY });
   const isConfigured = providers.length > 0;
 
   const saveProvider = useMutation({
     mutationFn: async () => {
-      const validationError = validateForm(form);
+      const validationError = validateForm(form, isConfigured, apiKeyEditing);
       if (validationError) throw new Error(validationError);
+      
+      // Определяем, был ли введён новый API-key
+      const isApiKeyProvided = apiKeyEditing && form.apiKey.trim().length > 0;
+      
       return apiRequest("/api/commerce/admin/providers", {
         method: "POST",
         body: JSON.stringify({
@@ -87,21 +97,41 @@ export default function AdminPaymentProvidersPage() {
           name: form.name.trim(),
           status: form.status,
           priority: form.priority,
-          credentials: buildCredentials(form),
+          credentials: buildCredentials(form, isApiKeyProvided),
         }),
       });
     },
     onSuccess: async () => {
-      setError(null);
+      toast({
+        title: "Настройки сохранены",
+        description: "Конфигурация ЮKassa успешно обновлена.",
+      });
+      // Блокируем поле API-key и очищаем его значение в памяти
       setForm((current) => ({ ...current, apiKey: "" }));
+      setApiKeyEditing(false);
       await queryClient.invalidateQueries({ queryKey: PROVIDERS_QUERY_KEY });
     },
-    onError: (mutationError) => setError(mutationError instanceof Error ? mutationError.message : "Не удалось сохранить провайдера"),
+    onError: (mutationError) => {
+      const errorMessage = mutationError instanceof Error ? mutationError.message : "Не удалось сохранить провайдера";
+      toast({
+        variant: "destructive",
+        title: "Ошибка сохранения",
+        description: errorMessage,
+      });
+    },
   });
 
   function updateForm<K extends keyof ProviderFormState>(key: K, value: ProviderFormState[K]) {
     setForm((current) => ({ ...current, [key]: value }));
   }
+
+  function handleEditApiKey() {
+    setApiKeyEditing(true);
+    setForm((current) => ({ ...current, apiKey: "" }));
+  }
+
+  const apiKeyFieldDisabled = isConfigured && !apiKeyEditing;
+  const apiKeyPlaceholder = apiKeyFieldDisabled ? "••••••••• (ключ сохранён)" : "Введите API-ключ ЮKassa";
 
   return (
     <AdminLayout>
@@ -118,7 +148,8 @@ export default function AdminPaymentProvidersPage() {
           <KeyRound className="h-4 w-4" />
           <AlertTitle>Безопасность ключей</AlertTitle>
           <AlertDescription>
-            Введите тестовый или рабочий API-ключ ЮKassa. После сохранения поле ключа очищается, а сервер хранит платёжные настройки только в зашифрованном виде.
+            API-ключ ЮKassa шифруется перед сохранением в базе данных. После успешного сохранения поле блокируется.
+            Для изменения ключа используйте кнопку «Изменить API-ключ».
           </AlertDescription>
         </Alert>
 
@@ -128,12 +159,10 @@ export default function AdminPaymentProvidersPage() {
               <CardTitle>Подключение магазина</CardTitle>
               <CardDescription>
                 Для ЮKassa используйте ID магазина и API-ключ из тестового или рабочего кабинета.
-                {isConfigured ? " Текущая конфигурация уже сохранена; при замене API-ключ нужно ввести заново." : " ЮKassa ещё не настроена."}
+                {isConfigured ? " Текущая конфигурация сохранена." : " ЮKassa ещё не настроена."}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              {error && <Alert variant="destructive"><AlertDescription>{error}</AlertDescription></Alert>}
-
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label>Провайдер</Label>
@@ -157,8 +186,30 @@ export default function AdminPaymentProvidersPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="provider-secret">API-key</Label>
-                <Input id="provider-secret" type="password" value={form.apiKey} onChange={(event) => updateForm("apiKey", event.target.value)} autoComplete="new-password" />
+                <Label htmlFor="provider-secret">API-ключ</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="provider-secret"
+                    type="password"
+                    value={form.apiKey}
+                    onChange={(event) => updateForm("apiKey", event.target.value)}
+                    disabled={apiKeyFieldDisabled}
+                    placeholder={apiKeyPlaceholder}
+                    autoComplete="new-password"
+                    className="flex-1"
+                  />
+                  {apiKeyFieldDisabled && (
+                    <Button type="button" variant="outline" onClick={handleEditApiKey} className="gap-2">
+                      <Edit2 className="h-4 w-4" />
+                      Изменить
+                    </Button>
+                  )}
+                </div>
+                {apiKeyEditing && (
+                  <p className="text-xs text-amber-600">
+                    Внимание: после сохранения новый API-ключ заменит текущий.
+                  </p>
+                )}
               </div>
 
               <div className="space-y-2">

@@ -144,6 +144,34 @@ const strategies = [yookassaProvider];
 export class PaymentGatewayService {
   async listProviders() { return db.select().from(paymentProviders).orderBy(paymentProviders.priority); }
   async saveProvider(input: { code: PaymentProviderCode; name: string; credentials: Credentials; status?: 'active' | 'inactive'; priority?: number }) {
+    // Проверяем, существует ли уже провайдер с таким кодом
+    const [existing] = await db.select().from(paymentProviders).where(eq(paymentProviders.code, input.code)).limit(1);
+    
+    if (existing) {
+      // UPDATE: merge credentials с существующими, если API-key не передан
+      let finalCredentials = input.credentials;
+      if (!input.credentials.apiKey && !input.credentials.secretKey) {
+        const existingCredentials = decryptCredentials(existing.encryptedCredentials);
+        finalCredentials = { ...input.credentials, ...Object.fromEntries(Object.entries(existingCredentials).filter(([key]) => key === 'apiKey' || key === 'secretKey')) };
+      }
+      
+      if (input.status === 'active' && existing.status !== 'active') {
+        await db.update(paymentProviders).set({ status: 'inactive' }).where(eq(paymentProviders.status, 'active'));
+      }
+      
+      return db.update(paymentProviders)
+        .set({
+          name: input.name,
+          encryptedCredentials: encryptCredentials(finalCredentials),
+          status: input.status ?? existing.status,
+          priority: input.priority ?? existing.priority,
+          updatedAt: new Date(),
+        })
+        .where(eq(paymentProviders.id, existing.id))
+        .returning();
+    }
+    
+    // INSERT: новый провайдер
     if (input.status === 'active') await db.update(paymentProviders).set({ status: 'inactive' }).where(eq(paymentProviders.status, 'active'));
     return db.insert(paymentProviders).values({ ...input, encryptedCredentials: encryptCredentials(input.credentials) }).returning();
   }
