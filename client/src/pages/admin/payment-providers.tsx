@@ -21,7 +21,6 @@ interface ProviderFormState {
   priority: number;
   shopId: string;
   apiKey: string;
-  returnUrl: string;
   receiptEnabled: "true" | "false";
   taxSystemCode: string;
   vatCode: string;
@@ -36,7 +35,6 @@ const defaultForm: ProviderFormState = {
   priority: 10,
   shopId: "",
   apiKey: "",
-  returnUrl: "https://voxlibris.ru/pricing",
   receiptEnabled: "false",
   taxSystemCode: "",
   vatCode: "1",
@@ -47,9 +45,7 @@ const defaultForm: ProviderFormState = {
 const PROVIDERS_QUERY_KEY = ["/api/commerce/admin/providers"] as const;
 
 function buildCredentials(form: ProviderFormState, isApiKeyProvided: boolean) {
-  const credentials: Record<string, string> = {
-    returnUrl: form.returnUrl,
-  };
+  const credentials: Record<string, string> = {};
   if (form.code === "yookassa") {
     credentials.shopId = form.shopId;
     // Отправляем API-key только если он был введён в форму
@@ -70,7 +66,6 @@ function validateForm(form: ProviderFormState, isConfigured: boolean, apiKeyEdit
   if (!form.shopId.trim()) return "Укажите ID магазина ЮKassa";
   // API-key обязателен только при первом сохранении или при явном редактировании
   if ((!isConfigured || apiKeyEditing) && !form.apiKey.trim()) return "Укажите API-key ЮKassa";
-  if (!form.returnUrl.trim()) return "Укажите returnUrl";
   return null;
 }
 
@@ -210,11 +205,6 @@ export default function AdminPaymentProvidersPage() {
                     Внимание: после сохранения новый API-ключ заменит текущий.
                   </p>
                 )}
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="provider-return-url">Адрес возврата после оплаты</Label>
-                <Input id="provider-return-url" value={form.returnUrl} onChange={(event) => updateForm("returnUrl", event.target.value)} />
               </div>
 
               <div className="rounded-lg border p-4 space-y-4">

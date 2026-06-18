@@ -3,6 +3,7 @@ import { and, asc, desc, eq, isNull, or, sql } from 'drizzle-orm';
 import type { NextFunction, Request, Response } from 'express';
 import { db } from '../db.js';
 import { logger } from '../lib/logger.js';
+import { getPublicBaseUrl } from '../lib/public-base-url.js';
 import {
   commerceEntitlements,
   commerceOrders,
@@ -30,12 +31,6 @@ export interface PaymentProvider {
   createCheckout(input: CheckoutInput, credentials: Credentials): Promise<CheckoutResult>;
   verifyNotification(rawBody: string, headers: Request['headers'], credentials: Credentials, body: unknown): Promise<boolean>;
   parseNotification(body: unknown): PaymentNotificationResult;
-}
-
-function publicBaseUrl(req?: Request) {
-  if (process.env.PUBLIC_BASE_URL) return process.env.PUBLIC_BASE_URL.replace(/\/$/, '');
-  if (!req) return 'http://localhost:3000';
-  return `${req.protocol}://${req.get('host')}`;
 }
 
 function encryptCredentials(credentials: Credentials) {
@@ -244,10 +239,11 @@ export class CommerceService {
     const [order] = await db.insert(commerceOrders).values({ userId, productId: product.id, priceId: price.id, amountRub: price.amountRub }).returning();
     const [payment] = await db.insert(commercePayments).values({ orderId: order.id, amountRub: price.amountRub }).returning();
     const [user] = await db.select({ email: users.email }).from(users).where(eq(users.id, userId)).limit(1);
+    const returnUrl = await getPublicBaseUrl();
 
     for (const provider of providers) {
       try {
-        const credentials = { ...gateway.credentials(provider), returnUrl: publicBaseUrl(req) };
+        const credentials = { ...gateway.credentials(provider), returnUrl };
         const result = await gateway.strategy(provider.code).createCheckout({ userId, product, price, orderId: order.id, paymentId: payment.id, userEmail: user?.email }, credentials);
         await db.update(commercePayments).set({ providerId: provider.id, providerPaymentId: result.providerPaymentId }).where(eq(commercePayments.id, payment.id));
         return result;
