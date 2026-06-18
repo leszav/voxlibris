@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CreditCard, KeyRound, Loader2, Save, Edit2 } from "lucide-react";
 import { AdminLayout } from "@/components/layout/AdminLayout";
@@ -13,6 +13,13 @@ import { apiRequest } from "@/lib/queryClient";
 
 type ProviderCode = "yookassa";
 type ProviderStatus = "active" | "inactive";
+
+interface ProviderListItem {
+  name: string;
+  status: ProviderStatus;
+  priority: number;
+  credentials?: Partial<Record<"shopId" | "receiptEnabled" | "taxSystemCode" | "vatCode" | "paymentSubject" | "paymentMode", string>>;
+}
 
 interface ProviderFormState {
   code: ProviderCode;
@@ -74,8 +81,27 @@ export default function AdminPaymentProvidersPage() {
   const { toast } = useToast();
   const [form, setForm] = useState<ProviderFormState>(defaultForm);
   const [apiKeyEditing, setApiKeyEditing] = useState(false);
-  const { data: providers = [] } = useQuery<Array<{ status: ProviderStatus }>>({ queryKey: PROVIDERS_QUERY_KEY });
+  const { data: providers = [] } = useQuery<ProviderListItem[]>({ queryKey: PROVIDERS_QUERY_KEY });
   const isConfigured = providers.length > 0;
+
+  useEffect(() => {
+    const [provider] = providers;
+    if (!provider || apiKeyEditing) return;
+
+    setForm((current) => ({
+      ...current,
+      name: provider.name,
+      status: provider.status,
+      priority: provider.priority,
+      shopId: provider.credentials?.shopId ?? "",
+      receiptEnabled: provider.credentials?.receiptEnabled === "true" ? "true" : "false",
+      taxSystemCode: provider.credentials?.taxSystemCode ?? "",
+      vatCode: provider.credentials?.vatCode ?? "1",
+      paymentSubject: provider.credentials?.paymentSubject ?? "service",
+      paymentMode: provider.credentials?.paymentMode ?? "full_payment",
+      apiKey: "",
+    }));
+  }, [apiKeyEditing, providers]);
 
   const saveProvider = useMutation({
     mutationFn: async () => {

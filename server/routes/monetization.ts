@@ -55,7 +55,7 @@ router.get('/products', async (req, res) => {
 router.post('/checkout', jwtAuth, async (req, res, next) => {
   try {
     const { productId, priceId } = z.object({ productId: z.string().min(1), priceId: z.string().min(1).optional() }).parse(req.body);
-    res.json(await new CommerceService().createCheckout(req.user!.userId, productId, priceId, req));
+    res.json(await new CommerceService().createCheckout(req.user!.userId, productId, priceId));
   } catch (error) { next(error); }
 });
 
@@ -87,8 +87,9 @@ router.patch('/admin/plans/:id', jwtAuth, requireAdmin, async (req, res) => {
 });
 
 router.get('/admin/providers', jwtAuth, requireAdmin, async (_req, res) => {
-  const items = await new PaymentGatewayService().listProviders();
-  res.json(items.map(({ encryptedCredentials: _hidden, ...item }) => item));
+  const gateway = new PaymentGatewayService();
+  const items = await gateway.listProviders();
+  res.json(items.map(({ encryptedCredentials: _hidden, ...item }) => ({ ...item, credentials: gateway.safeCredentials({ ...item, encryptedCredentials: _hidden }) })));
 });
 
 router.post('/admin/providers', jwtAuth, requireAdmin, async (req, res) => {

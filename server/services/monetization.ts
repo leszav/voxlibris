@@ -138,6 +138,11 @@ const strategies = [yookassaProvider];
 
 export class PaymentGatewayService {
   async listProviders() { return db.select().from(paymentProviders).orderBy(paymentProviders.priority); }
+  safeCredentials(provider: PaymentProviderConfig) {
+    const credentials = decryptCredentials(provider.encryptedCredentials);
+    const { apiKey: _apiKey, secretKey: _secretKey, ...safeCredentials } = credentials;
+    return safeCredentials;
+  }
   async saveProvider(input: { code: PaymentProviderCode; name: string; credentials: Credentials; status?: 'active' | 'inactive'; priority?: number }) {
     // Проверяем, существует ли уже провайдер с таким кодом
     const [existing] = await db.select().from(paymentProviders).where(eq(paymentProviders.code, input.code)).limit(1);
@@ -227,7 +232,7 @@ export class CommerceService {
     return Boolean(row);
   }
 
-  async createCheckout(userId: string, productId: string, priceId: string | undefined, req: Request) {
+  async createCheckout(userId: string, productId: string, priceId?: string) {
     const [product] = await db.select().from(commerceProducts).where(and(eq(commerceProducts.id, productId), eq(commerceProducts.status, 'active'))).limit(1);
     if (!product) throw new Error('Продукт не найден');
     const [price] = await db.select().from(commercePrices).where(and(eq(commercePrices.productId, product.id), priceId ? eq(commercePrices.id, priceId) : eq(commercePrices.isDefault, true), eq(commercePrices.status, 'active'))).limit(1);
