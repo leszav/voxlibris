@@ -53,6 +53,7 @@ import recommendationsRoutes from "./routes/recommendations.js";
 import pushRoutes from "./routes/push.js";
 import gamificationAdminRoutes from "./routes/gamification-admin.js";
 import gamificationRoutes from "./routes/gamification.js";
+import monetizationRoutes from "./routes/monetization.js";
 import { logger } from "./lib/logger.js";
 import { loadFeatureFlags } from "./lib/feature-flags.js";
 import { responseCompression } from "./lib/response-compression.js";
@@ -953,6 +954,10 @@ try {
 
 	// Gamification user read API (email confirmed required)
 	app.use("/api/gamification", jwtAuth, requireActiveUser, gamificationRoutes);
+
+	app.use("/api/commerce", monetizationRoutes);
+	// Backward-compatible alias for the first monetization UI layer.
+	app.use("/api/monetization", monetizationRoutes);
 
 	// Start scheduler for notifications (only in production or if enabled)
 	if (process.env.NODE_ENV === 'production' || process.env.ENABLE_SCHEDULER === 'true') {

@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, boolean, timestamp, foreignKey, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, boolean, timestamp, foreignKey, jsonb, uniqueIndex } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -1570,6 +1570,7 @@ export type MonetizationType = typeof monetizationTypes[number];
 export const paymentStatuses = ["pending", "completed", "failed", "refunded", "cancelled"] as const;
 export type PaymentStatus = typeof paymentStatuses[number];
 
+// Legacy monetization tables. Do not use for new RF commerce features.
 // Настройки монетизации для клуба
 export const clubMonetization = pgTable("club_monetization", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -2653,3 +2654,166 @@ export type InsertUserActivityCounters = typeof userActivityCounters.$inferInser
 
 export type UserStreak = typeof userStreaks.$inferSelect;
 export type InsertUserStreak = typeof userStreaks.$inferInsert;
+
+export type PaymentProviderCode = 'yookassa';
+export type PaymentProviderStatus = 'active' | 'inactive';
+export type CommerceProductType = 'platform_subscription' | 'club_subscription' | 'reader_club_subscription' | 'ticket' | 'recording_access' | 'donation';
+export type CommerceScopeType = 'platform' | 'club' | 'session' | 'recording' | 'reader';
+export type CommerceProductStatus = 'draft' | 'active' | 'archived';
+export type CommerceProductVisibility = 'public' | 'private';
+export type CommercePricePeriod = 'one_time' | 'month' | 'year';
+export type CommercePriceStatus = 'active' | 'archived';
+export type CommerceOrderStatus = 'pending' | 'paid' | 'cancelled' | 'expired' | 'failed';
+export type CommercePaymentStatus = 'pending' | 'succeeded' | 'failed' | 'cancelled' | 'refunded';
+export type CommercePaymentEventStatus = 'received' | 'processed' | 'failed';
+export type CommerceSubscriptionStatus = 'pending' | 'active' | 'grace' | 'past_due' | 'cancelled' | 'expired';
+export type CommerceEntitlementSourceType = 'payment' | 'subscription' | 'promo' | 'admin_grant' | 'migration';
+export type CommerceEntitlementStatus = 'active' | 'revoked' | 'expired';
+
+export const paymentProviders = pgTable('payment_providers', {
+  id: varchar('id').primaryKey().default(sql`gen_random_uuid()`),
+  code: varchar('code', { length: 40 }).notNull().$type<PaymentProviderCode>(),
+  name: varchar('name', { length: 120 }).notNull(),
+  encryptedCredentials: text('encrypted_credentials').notNull(),
+  status: varchar('status', { length: 20 }).notNull().default('inactive').$type<PaymentProviderStatus>(),
+  priority: integer('priority').notNull().default(100),
+  createdAt: timestamp('created_at').notNull().default(sql`now()`),
+  updatedAt: timestamp('updated_at').notNull().default(sql`now()`),
+}, (table) => ({
+  oneActiveProvider: uniqueIndex('payment_providers_one_active_idx').on(table.status),
+}));
+
+export const commerceProducts = pgTable('commerce_products', {
+  id: varchar('id').primaryKey().default(sql`gen_random_uuid()`),
+  type: varchar('type', { length: 40 }).notNull().$type<CommerceProductType>(),
+  scopeType: varchar('scope_type', { length: 30 }).notNull().$type<CommerceScopeType>(),
+  scopeId: varchar('scope_id'),
+  code: varchar('code', { length: 100 }).notNull().unique(),
+  title: varchar('title', { length: 180 }).notNull(),
+  description: text('description'),
+  status: varchar('status', { length: 20 }).notNull().default('draft').$type<CommerceProductStatus>(),
+  visibility: varchar('visibility', { length: 20 }).notNull().default('private').$type<CommerceProductVisibility>(),
+  sortOrder: integer('sort_order').notNull().default(0),
+  metadata: jsonb('metadata').notNull().default(sql`'{}'::jsonb`),
+  createdAt: timestamp('created_at').notNull().default(sql`now()`),
+  updatedAt: timestamp('updated_at').notNull().default(sql`now()`),
+});
+
+export const commercePrices = pgTable('commerce_prices', {
+  id: varchar('id').primaryKey().default(sql`gen_random_uuid()`),
+  productId: varchar('product_id').notNull().references(() => commerceProducts.id, { onDelete: 'cascade' }),
+  amountRub: integer('amount_rub').notNull(),
+  period: varchar('period', { length: 20 }).notNull().$type<CommercePricePeriod>(),
+  status: varchar('status', { length: 20 }).notNull().default('active').$type<CommercePriceStatus>(),
+  isDefault: boolean('is_default').notNull().default(false),
+  createdAt: timestamp('created_at').notNull().default(sql`now()`),
+  updatedAt: timestamp('updated_at').notNull().default(sql`now()`),
+});
+
+export const commerceProductFeatures = pgTable('commerce_product_features', {
+  id: varchar('id').primaryKey().default(sql`gen_random_uuid()`),
+  productId: varchar('product_id').notNull().references(() => commerceProducts.id, { onDelete: 'cascade' }),
+  label: text('label').notNull(),
+  featureKey: varchar('feature_key', { length: 120 }).notNull(),
+  sortOrder: integer('sort_order').notNull().default(0),
+  isHighlighted: boolean('is_highlighted').notNull().default(false),
+  createdAt: timestamp('created_at').notNull().default(sql`now()`),
+  updatedAt: timestamp('updated_at').notNull().default(sql`now()`),
+});
+
+export const commerceOrders = pgTable('commerce_orders', {
+  id: varchar('id').primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  productId: varchar('product_id').notNull().references(() => commerceProducts.id),
+  priceId: varchar('price_id').notNull().references(() => commercePrices.id),
+  status: varchar('status', { length: 20 }).notNull().default('pending').$type<CommerceOrderStatus>(),
+  amountRub: integer('amount_rub').notNull(),
+  metadata: jsonb('metadata').notNull().default(sql`'{}'::jsonb`),
+  createdAt: timestamp('created_at').notNull().default(sql`now()`),
+  updatedAt: timestamp('updated_at').notNull().default(sql`now()`),
+});
+
+export const commercePayments = pgTable('commerce_payments', {
+  id: varchar('id').primaryKey().default(sql`gen_random_uuid()`),
+  orderId: varchar('order_id').notNull().references(() => commerceOrders.id, { onDelete: 'cascade' }),
+  providerId: varchar('provider_id').references(() => paymentProviders.id, { onDelete: 'set null' }),
+  providerPaymentId: varchar('provider_payment_id', { length: 180 }),
+  status: varchar('status', { length: 30 }).notNull().default('pending').$type<CommercePaymentStatus>(),
+  amountRub: integer('amount_rub').notNull(),
+  paymentMethodToken: text('payment_method_token'),
+  fiscalReceiptId: varchar('fiscal_receipt_id', { length: 180 }),
+  fiscalReceiptUrl: text('fiscal_receipt_url'),
+  metadata: jsonb('metadata').notNull().default(sql`'{}'::jsonb`),
+  createdAt: timestamp('created_at').notNull().default(sql`now()`),
+  updatedAt: timestamp('updated_at').notNull().default(sql`now()`),
+}, (table) => ({
+  providerPaymentUnique: uniqueIndex('commerce_payments_provider_payment_idx').on(table.providerId, table.providerPaymentId),
+}));
+
+export const commercePaymentEvents = pgTable('commerce_payment_events', {
+  id: varchar('id').primaryKey().default(sql`gen_random_uuid()`),
+  providerCode: varchar('provider_code', { length: 40 }).notNull().$type<PaymentProviderCode>(),
+  providerEventId: varchar('provider_event_id', { length: 180 }).notNull(),
+  providerPaymentId: varchar('provider_payment_id', { length: 180 }),
+  eventType: varchar('event_type', { length: 100 }).notNull(),
+  payloadHash: varchar('payload_hash', { length: 64 }).notNull(),
+  status: varchar('status', { length: 30 }).notNull().default('received').$type<CommercePaymentEventStatus>(),
+  receivedAt: timestamp('received_at').notNull().default(sql`now()`),
+  processedAt: timestamp('processed_at'),
+  errorMessage: text('error_message'),
+}, (table) => ({
+  providerEventUnique: uniqueIndex('commerce_payment_events_provider_event_idx').on(table.providerCode, table.providerEventId),
+}));
+
+export const commerceSubscriptions = pgTable('commerce_subscriptions', {
+  id: varchar('id').primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  productId: varchar('product_id').notNull().references(() => commerceProducts.id),
+  priceId: varchar('price_id').notNull().references(() => commercePrices.id),
+  providerId: varchar('provider_id').references(() => paymentProviders.id, { onDelete: 'set null' }),
+  providerSubscriptionId: varchar('provider_subscription_id', { length: 180 }),
+  paymentMethodToken: text('payment_method_token'),
+  status: varchar('status', { length: 20 }).notNull().default('pending').$type<CommerceSubscriptionStatus>(),
+  currentPeriodStart: timestamp('current_period_start'),
+  currentPeriodEnd: timestamp('current_period_end'),
+  graceUntil: timestamp('grace_until'),
+  retryCount: integer('retry_count').notNull().default(0),
+  cancelledAt: timestamp('cancelled_at'),
+  createdAt: timestamp('created_at').notNull().default(sql`now()`),
+  updatedAt: timestamp('updated_at').notNull().default(sql`now()`),
+});
+
+export const commerceEntitlements = pgTable('commerce_entitlements', {
+  id: varchar('id').primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  scopeType: varchar('scope_type', { length: 30 }).notNull().$type<CommerceScopeType>(),
+  scopeId: varchar('scope_id'),
+  featureKey: varchar('feature_key', { length: 120 }).notNull(),
+  sourceType: varchar('source_type', { length: 30 }).notNull().$type<CommerceEntitlementSourceType>(),
+  sourceId: varchar('source_id'),
+  status: varchar('status', { length: 20 }).notNull().default('active').$type<CommerceEntitlementStatus>(),
+  startsAt: timestamp('starts_at').notNull().default(sql`now()`),
+  endsAt: timestamp('ends_at'),
+  createdBy: varchar('created_by').references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at').notNull().default(sql`now()`),
+  updatedAt: timestamp('updated_at').notNull().default(sql`now()`),
+});
+
+export type PaymentProviderConfig = typeof paymentProviders.$inferSelect;
+export type InsertPaymentProviderConfig = typeof paymentProviders.$inferInsert;
+export type CommerceProduct = typeof commerceProducts.$inferSelect;
+export type InsertCommerceProduct = typeof commerceProducts.$inferInsert;
+export type CommercePrice = typeof commercePrices.$inferSelect;
+export type InsertCommercePrice = typeof commercePrices.$inferInsert;
+export type CommerceProductFeature = typeof commerceProductFeatures.$inferSelect;
+export type InsertCommerceProductFeature = typeof commerceProductFeatures.$inferInsert;
+export type CommerceOrder = typeof commerceOrders.$inferSelect;
+export type InsertCommerceOrder = typeof commerceOrders.$inferInsert;
+export type CommercePayment = typeof commercePayments.$inferSelect;
+export type InsertCommercePayment = typeof commercePayments.$inferInsert;
+export type CommercePaymentEvent = typeof commercePaymentEvents.$inferSelect;
+export type InsertCommercePaymentEvent = typeof commercePaymentEvents.$inferInsert;
+export type CommerceSubscription = typeof commerceSubscriptions.$inferSelect;
+export type InsertCommerceSubscription = typeof commerceSubscriptions.$inferInsert;
+export type CommerceEntitlement = typeof commerceEntitlements.$inferSelect;
+export type InsertCommerceEntitlement = typeof commerceEntitlements.$inferInsert;
