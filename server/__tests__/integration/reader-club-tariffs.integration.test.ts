@@ -183,4 +183,19 @@ describe("Integration: reader club tariff API", () => {
       assert.ok(product.features.some((feature) => feature.featureKey === "reader_club_access"));
     }
   });
+
+  it("paid reader-led fixture доступен в публичном API", async (t) => {
+    if (skipIfApiUnavailable(t) || !paidReaderProductId || !paidReaderClubId) return;
+
+    const products = await apiRequest<Array<{ id: string; scopeId: string | null; prices: Array<{ amountRub: number; period: string; isDefault: boolean }>; features: Array<{ featureKey: string }> }>>(
+      `/api/commerce/products?type=reader_club_subscription&scopeType=reader_club&scopeId=${encodeURIComponent(paidReaderClubId)}`,
+    );
+
+    expectStatus(products.response, 200);
+    const product = products.body.find((item) => item.id === paidReaderProductId);
+    assert.ok(product, "paid reader-led fixture product must be public");
+    assert.equal(product.scopeId, paidReaderClubId);
+    assert.ok(product.prices.some((price) => price.amountRub > 0 && price.period === "month" && price.isDefault));
+    assert.ok(product.features.some((feature) => feature.featureKey === "reader_club_access"));
+  });
 });
