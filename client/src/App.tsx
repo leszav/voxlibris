@@ -48,6 +48,7 @@ const PublicProfilePage = lazy(() => import("@/pages/PublicProfilePage"));
 const DiscoverPage = lazy(() => import("@/pages/DiscoverPage"));
 const FeedPage = lazy(() => import("@/pages/FeedPage"));
 const BookDetailsPage = lazy(() => import("@/pages/BookDetailsPage"));
+const PaymentSuccessPage = lazy(() => import("@/pages/payment-success"));
 const NotFound = lazy(() => import("@/pages/not-found"));
 const ReaderWorkspacePage = lazy(async () => ({
   default: (await import("@/components/reader/ReaderWorkspace")).ReaderWorkspace,
@@ -147,6 +148,7 @@ function Router() {
       <Route path="/library" component={Library} />
       <Route path="/pricing" component={Pricing} />
       <Route path="/become-reader" component={BecomeReader} />
+      <Route path="/payment/success" component={PaymentSuccessPage} />
 
       {/* Profile Page */}
       <Route path="/profile" component={ProfilePage} />

@@ -294,7 +294,10 @@ export class CommerceService {
     const [order] = await db.insert(commerceOrders).values({ userId, productId: product.id, priceId: price.id, amountRub: price.amountRub }).returning();
     const [payment] = await db.insert(commercePayments).values({ orderId: order.id, amountRub: price.amountRub }).returning();
     const [user] = await db.select({ email: users.email }).from(users).where(eq(users.id, userId)).limit(1);
-    const returnUrl = await getPublicBaseUrl();
+    const baseUrl = await getPublicBaseUrl();
+    const returnUrl = product.scopeType === 'reader_club' && product.scopeId
+      ? `${baseUrl}/payment/success?clubId=${encodeURIComponent(product.scopeId)}`
+      : `${baseUrl}/payment/success`;
 
     for (const provider of providers) {
       try {

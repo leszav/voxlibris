@@ -5,7 +5,7 @@ import { ClubCard } from "@/components/ui/club-card";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Card, CardContent } from "@/components/ui/card";
-import { ArrowRight, Sparkles, Loader2, Mic2, Star, Users, Radio } from "lucide-react";
+import { ArrowRight, ArrowUp, Sparkles, Loader2, Mic2, Star, Users, Radio } from "lucide-react";
 import { ReadingDreamIllustration } from "@/components/illustrations/reading-dream";
 import { Link } from "wouter";
 import { useQuery } from "@tanstack/react-query";
@@ -51,6 +51,7 @@ function formatReaderRating(value: number): string {
 }
 
 export default function Home() {
+  const [showScrollTop, setShowScrollTop] = React.useState(false);
   // Главная: grid md:grid-cols-2 lg:grid-cols-3 → breakpoints md=768, lg=1024
   const cols = useGridColumns({ sm: 768, lg: 1024 });
   // Показываем 2 строки, кратно cols
@@ -70,6 +71,25 @@ export default function Home() {
   });
 
   const featuredClubs = clubs || [];
+
+  React.useEffect(() => {
+    const updateScrollTopVisibility = () => {
+      const scrollBottom = window.scrollY + window.innerHeight;
+      const triggerPoint = document.documentElement.scrollHeight - window.innerHeight * 0.75;
+      setShowScrollTop(scrollBottom >= triggerPoint);
+    };
+
+    updateScrollTopVisibility();
+    window.addEventListener("scroll", updateScrollTopVisibility, { passive: true });
+    window.addEventListener("resize", updateScrollTopVisibility);
+
+    return () => {
+      window.removeEventListener("scroll", updateScrollTopVisibility);
+      window.removeEventListener("resize", updateScrollTopVisibility);
+    };
+  }, []);
+
+  const scrollToTop = () => window.scrollTo({ top: 0, behavior: "smooth" });
 
   return (
     <MainLayout>
@@ -332,6 +352,17 @@ export default function Home() {
           </div>
         </div>
       </section>
+      {showScrollTop && (
+        <Button
+          type="button"
+          size="icon"
+          className="fixed bottom-6 right-6 z-50 rounded-full shadow-lg"
+          onClick={scrollToTop}
+          aria-label="Наверх"
+        >
+          <ArrowUp className="h-5 w-5" />
+        </Button>
+      )}
     </MainLayout>
   );
 }
