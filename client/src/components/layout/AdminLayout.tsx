@@ -16,7 +16,8 @@ import {
   Eye,
   Headphones,
   Trophy,
-  CreditCard
+  CreditCard,
+  Receipt
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
@@ -47,6 +48,7 @@ const navigation = [
   { name: "Геймификация", href: "/admin/gamification", icon: Trophy },
   { name: "Записи эфиров", href: "/admin/recordings", icon: Headphones },
   { name: "Платежи", href: "/admin/payment-providers", icon: CreditCard },
+  { name: "Тарифы чтецов", href: "/admin/reader-club-tariffs", icon: Receipt },
   { name: "Настройки", href: "/admin/settings", icon: Settings },
 ];
 

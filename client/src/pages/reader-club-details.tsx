@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
-import { ArrowLeft, BookOpen, Calendar, Check, Headphones, Loader2, Lock, Mic2, Play, Radio, UploadCloud, Users, X } from "lucide-react";
+import { ArrowLeft, BookOpen, Calendar, Check, Clock, Headphones, Loader2, Lock, Mic2, MoreHorizontal, Play, Radio, Trash2, UserCheck, UserX, Users, Volume2, VolumeX, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getClubCoverUrl } from "@/lib/club-cover";
 import { apiRequest } from "@/lib/queryClient";
@@ -10,6 +10,11 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { ChatWidget } from "@/components/chat/ChatWidget";
 import { ActiveReadersModal, LiveReadersBubble } from "@/components/studio/LiveReadersBubble";
 import { ListenerOverlay } from "@/components/studio/ListenerOverlay";
@@ -17,16 +22,32 @@ import { VoxLibrisUpload } from "@/components/ui/voxlibris-upload";
 import { ClubSettingsModal } from "@/components/club/club-settings-modal";
 import { InvitationsList } from "@/components/club/invitations-list";
 import { InviteMemberModal } from "@/components/club/invite-member-modal";
+import { ClubContentTabs } from "@/pages/club-details";
 import { useAuth } from "@/hooks/use-auth";
-import { useClub, useClubMembers, type ClubDetailsResponse } from "@/hooks/use-clubs";
+import { useClub, useClubMembers, useModerateClubMember, useRemoveMember, type ClubDetailsResponse, type ClubMemberWithUser } from "@/hooks/use-clubs";
 import { useLiveReaders } from "@/hooks/use-live-readers";
 import { useClubLiveListening } from "@/hooks/use-club-live-listening";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { useToast } from "@/hooks/use-toast";
+import { modalConfirm, useToast } from "@/hooks/use-toast";
 
 interface ReaderClubDetailsProps {
   clubId: string;
   initialClub?: ClubDetailsResponse;
+}
+
+interface ScheduleItem {
+  id: string;
+  title: string;
+  date: string;
+  time: string;
+  description?: string;
+}
+
+interface ClubSettings {
+  welcomeTitle?: string;
+  welcomeHtml?: string;
+  rulesHtml?: string;
+  shortDescription?: string;
 }
 
 type ClubRecordingModerationStatus = "pending" | "approved" | "rejected";
@@ -113,13 +134,37 @@ function formatRecordingDate(value?: string | null): string {
   return new Date(value).toLocaleDateString("ru-RU", { day: "2-digit", month: "long", year: "numeric" });
 }
 
+function getRestrictionInfo(until?: Date | string | null, reason?: string | null): string {
+  const untilText = until ? `до ${new Date(until).toLocaleString()}` : "бессрочно";
+  return reason ? `${untilText}. Причина: ${reason}` : untilText;
+}
+
+function openNativePicker(input: HTMLInputElement | null): void {
+  input?.showPicker?.();
+  input?.focus();
+}
+
 function formatMetricValue(value: number): string {
   return new Intl.NumberFormat("ru-RU").format(value);
 }
 
-function formatShortDate(value?: string | null): string {
-  if (!value) return "Дата не указана";
-  return new Date(value).toLocaleDateString("ru-RU", { day: "2-digit", month: "short" });
+function parseClubSettings(value?: string | null): ClubSettings {
+  if (!value) return {};
+  try {
+    return JSON.parse(value) as ClubSettings;
+  } catch {
+    return {};
+  }
+}
+
+function parseSchedule(value?: string | null): ScheduleItem[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return Array.isArray(parsed) ? parsed as ScheduleItem[] : [];
+  } catch {
+    return [];
+  }
 }
 
 function ReaderClubLoading() {
@@ -156,6 +201,14 @@ export default function ReaderClubDetails({ clubId, initialClub }: ReaderClubDet
   const isOwner = viewerMembershipRole === "owner" || club?.ownerId === user?.id;
   const canLoadMembers = !!clubId && isAuthenticated && (isMember || isOwner);
   const { data: members = [], isLoading: membersLoading } = useClubMembers(clubId, canLoadMembers);
+  const moderateMember = useModerateClubMember();
+  const removeMember = useRemoveMember();
+  const [moderationTarget, setModerationTarget] = useState<{ member: ClubMemberWithUser; action: "mute" | "deactivate" } | null>(null);
+  const [moderationDate, setModerationDate] = useState("");
+  const [moderationTime, setModerationTime] = useState("");
+  const [moderationReason, setModerationReason] = useState("");
+  const moderationDateRef = useRef<HTMLInputElement>(null);
+  const moderationTimeRef = useRef<HTMLInputElement>(null);
   const [liveModalOpen, setLiveModalOpen] = useState(false);
   const [playingRecording, setPlayingRecording] = useState<{ id: string; url: string } | null>(null);
   const activeBookId = club?.bookId ?? "";
@@ -244,6 +297,34 @@ export default function ReaderClubDetails({ clubId, initialClub }: ReaderClubDet
     coverUrl: club?.book?.coverUrl ?? null,
   });
 
+  const submitModeration = () => {
+    if (!moderationTarget) return;
+    const until = moderationDate && moderationTime ? new Date(`${moderationDate}T${moderationTime}`).toISOString() : null;
+    moderateMember.mutate({
+      clubId,
+      userId: moderationTarget.member.id,
+      action: moderationTarget.action,
+      until,
+      reason: moderationReason.trim() || null,
+    });
+    setModerationTarget(null);
+    setModerationDate("");
+    setModerationTime("");
+    setModerationReason("");
+  };
+
+  const handleRemoveMember = async (member: ClubMemberWithUser) => {
+    const memberName = member.displayName || member.username;
+    const confirmed = await modalConfirm({
+      title: "Исключить из клуба?",
+      description: `Исключить участника «${memberName}» из клуба чтецов?`,
+      confirmLabel: "Исключить",
+      cancelLabel: "Отмена",
+    });
+    if (!confirmed) return;
+    removeMember.mutate({ clubId, userId: member.id });
+  };
+
   if (authLoading || isLoading) {
     return <ReaderClubLoading />;
   }
@@ -254,6 +335,87 @@ export default function ReaderClubDetails({ clubId, initialClub }: ReaderClubDet
 
   const hasLiveReaders = readers.length > 0;
   const canListen = isMember && !isOwner && activeBookId && hasLiveReaders;
+  const settings = parseClubSettings(club.settings);
+  const scheduleItems = parseSchedule(club.schedule);
+  const extraTabs = [
+    ...(isMember ? [{
+      value: "recordings",
+      label: "Записи эфиров",
+      content: (
+        <div className="space-y-4 text-sm text-muted-foreground">
+          {recordingsLoading ? (
+            <div className="flex items-center gap-2">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Загружаем записи...
+            </div>
+          ) : clubRecordings.length > 0 ? (
+            clubRecordings.map((recording) => {
+              const canPublish = recording.status === "ready" && recording.moderationStatus === "approved" && !recording.isPublished;
+              const canUnpublish = recording.status === "ready" && recording.moderationStatus === "approved" && Boolean(recording.isPublished);
+              const isUpdatingPublication = publicationRecordingMutation.isPending && publicationRecordingMutation.variables?.recording.id === recording.id;
+              const canListenRecording = recording.status === "ready" && recording.moderationStatus === "approved" && Boolean(recording.isPublished && recording.allowStreaming);
+              const isLoadingStream = streamRecordingMutation.isPending && streamRecordingMutation.variables?.id === recording.id;
+              const isPlayingThis = playingRecording?.id === recording.id;
+
+              return (
+                <div key={recording.id} className="rounded-lg border bg-muted/20 p-4">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0 space-y-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="font-medium text-foreground">{recording.publicTitle || recording.title || "Запись эфира"}</p>
+                        <Badge variant={getRecordingBadgeVariant(recording)}>{getRecordingStatusLabel(recording)}</Badge>
+                      </div>
+                      <p className="text-xs text-muted-foreground">Создана {formatRecordingDate(recording.createdAt)}</p>
+                      {recording.moderationNotes ? <p className="text-xs text-muted-foreground">Комментарий модерации: {recording.moderationNotes}</p> : null}
+                      {isPlayingThis ? <audio controls src={playingRecording.url} className="mt-2 w-full max-w-md" /> : null}
+                    </div>
+                    <div className="flex shrink-0 flex-wrap gap-2">
+                      {!isOwner && canListenRecording ? (
+                        <Button type="button" size="sm" onClick={() => streamRecordingMutation.mutate(recording)} disabled={isLoadingStream}>
+                          {isLoadingStream ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
+                          {isPlayingThis ? "Обновить плеер" : "Слушать запись"}
+                        </Button>
+                      ) : null}
+                      {isOwner && (canPublish || canUnpublish) ? (
+                        <Button type="button" variant={canUnpublish ? "outline" : "default"} size="sm" onClick={() => publicationRecordingMutation.mutate({ recording, isPublished: canPublish })} disabled={isUpdatingPublication}>
+                          {isUpdatingPublication ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                          {canUnpublish ? "Снять с публикации" : "Опубликовать"}
+                        </Button>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          ) : (
+            <p>{isOwner ? "Здесь появятся записи эфиров после завершения Studio и административной модерации." : "Опубликованные записи эфиров появятся здесь после модерации и публикации чтецом."}</p>
+          )}
+        </div>
+      ),
+    }] : []),
+    ...(isOwner ? [{
+      value: "analytics",
+      label: "Аналитика",
+      content: (
+        <div className="space-y-4 text-sm text-muted-foreground">
+          {analyticsLoading ? (
+            <div className="flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" />Загружаем статистику...</div>
+          ) : analyticsSummary && analyticsSummary.totalSessions > 0 ? (
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="rounded-lg border bg-muted/20 p-4"><p className="text-xs uppercase tracking-wide text-muted-foreground">Эфиры</p><p className="mt-1 text-2xl font-semibold text-foreground">{formatMetricValue(analyticsSummary.totalSessions)}</p></div>
+              <div className="rounded-lg border bg-muted/20 p-4"><p className="text-xs uppercase tracking-wide text-muted-foreground">Слушатели</p><p className="mt-1 text-2xl font-semibold text-foreground">{formatMetricValue(analyticsSummary.totalListeners)}</p></div>
+              <div className="rounded-lg border bg-muted/20 p-4"><p className="text-xs uppercase tracking-wide text-muted-foreground">Среднее</p><p className="mt-1 text-2xl font-semibold text-foreground">{formatMetricValue(analyticsSummary.averageListeners)}</p></div>
+              <div className="rounded-lg border bg-muted/20 p-4"><p className="text-xs uppercase tracking-wide text-muted-foreground">Реакции</p><p className="mt-1 text-2xl font-semibold text-foreground">{formatMetricValue(analyticsSummary.totalReactions)}</p></div>
+              <div className="rounded-lg border bg-muted/20 p-4"><p className="text-xs uppercase tracking-wide text-muted-foreground">Вопросы</p><p className="mt-1 text-2xl font-semibold text-foreground">{formatMetricValue(analyticsSummary.totalQuestions)}</p></div>
+              <div className="rounded-lg border bg-muted/20 p-4"><p className="text-xs uppercase tracking-wide text-muted-foreground">Качество</p><p className="mt-1 text-2xl font-semibold text-foreground">{formatMetricValue(analyticsSummary.averageQuality)}%</p></div>
+            </div>
+          ) : <p>Статистика появится после завершения первого эфира.</p>}
+          {analyticsRatings.length > 0 ? <p className="text-xs">Оценок слушателей: {analyticsRatings.length}</p> : null}
+          {analyticsQuestions.length > 0 ? <p className="text-xs">Вопросов и комментариев: {analyticsQuestions.length}</p> : null}
+        </div>
+      ),
+    }] : []),
+  ];
 
   const handleJoinRequestDecision = async (memberId: string, action: "approve" | "reject") => {
     try {
@@ -424,7 +586,12 @@ export default function ReaderClubDetails({ clubId, initialClub }: ReaderClubDet
                     Загружаем участников...
                   </div>
                 ) : members.length > 0 ? (
-                  members.slice(0, 8).map((member) => (
+                  members.slice(0, 8).map((member) => {
+                    const isMuted = member.mutedUntil ? new Date(member.mutedUntil).getTime() > Date.now() : false;
+                    const isDeactivated = member.isActive === false || (member.deactivatedUntil ? new Date(member.deactivatedUntil).getTime() > Date.now() : false);
+                    const canModerateMember = isOwner && member.role !== "owner";
+
+                    return (
                     <div key={member.id} className="flex items-center gap-3">
                       <Link href={`/profile/${member.id}`} aria-label={`Открыть профиль ${member.displayName || member.username}`}>
                         <Avatar className="h-8 w-8 cursor-pointer transition-opacity hover:opacity-80">
@@ -436,9 +603,11 @@ export default function ReaderClubDetails({ clubId, initialClub }: ReaderClubDet
                         <p className="truncate text-sm font-medium">{member.displayName || member.username}</p>
                         <p className="text-xs text-muted-foreground">{member.role === "owner" ? "Чтец" : "Слушатель"}</p>
                       </div>
-                      <Badge variant={member.isActive === false ? "outline" : "secondary"} className="shrink-0 text-[10px]">
-                        {member.isActive === false ? "Ожидает" : "Участник"}
+                      <Badge variant={member.role === "owner" ? "default" : member.isActive === false ? "outline" : "secondary"} className="shrink-0 text-[10px]">
+                        {member.role === "owner" ? "Чтец" : member.isActive === false ? "Ожидает" : "Слушатель"}
                       </Badge>
+                      {isMuted ? <Badge variant="secondary" className="shrink-0 text-[10px]" title={getRestrictionInfo(member.mutedUntil, member.restrictionReason)}>Без права писать</Badge> : null}
+                      {isDeactivated ? <Badge variant="destructive" className="shrink-0 text-[10px]" title={getRestrictionInfo(member.deactivatedUntil, member.restrictionReason)}>Доступ ограничен</Badge> : null}
                       {isOwner && member.isActive === false ? (
                         <div className="flex shrink-0 items-center gap-1">
                           <Button
@@ -465,8 +634,44 @@ export default function ReaderClubDetails({ clubId, initialClub }: ReaderClubDet
                           </Button>
                         </div>
                       ) : null}
+                      {canModerateMember ? (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button type="button" variant="ghost" size="icon" className="h-7 w-7">
+                              <MoreHorizontal className="h-3.5 w-3.5" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem
+                              className="justify-center"
+                              title={isMuted ? "Разрешить писать" : "Запретить писать"}
+                              aria-label={isMuted ? "Разрешить писать" : "Запретить писать"}
+                              onClick={() => isMuted ? moderateMember.mutate({ clubId, userId: member.id, action: "unmute" }) : setModerationTarget({ member, action: "mute" })}
+                            >
+                              {isMuted ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              className="justify-center"
+                              title={isDeactivated ? "Вернуть доступ" : "Ограничить доступ"}
+                              aria-label={isDeactivated ? "Вернуть доступ" : "Ограничить доступ"}
+                              onClick={() => isDeactivated ? moderateMember.mutate({ clubId, userId: member.id, action: "reactivate" }) : setModerationTarget({ member, action: "deactivate" })}
+                            >
+                              {isDeactivated ? <UserCheck className="h-4 w-4" /> : <UserX className="h-4 w-4" />}
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              className="justify-center text-destructive"
+                              title="Исключить из клуба"
+                              aria-label="Исключить из клуба"
+                              onClick={() => handleRemoveMember(member)}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      ) : null}
                     </div>
-                  ))
+                    );
+                  })
                 ) : (
                   <p className="text-sm text-muted-foreground">
                     Список слушателей доступен участникам клуба.
@@ -479,256 +684,18 @@ export default function ReaderClubDetails({ clubId, initialClub }: ReaderClubDet
           </aside>
 
           <section className="order-2 space-y-6 lg:col-span-2">
-            <Card>
-              <CardHeader>
-                <CardTitle>Как устроен клуб чтецов</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3 text-sm leading-6 text-muted-foreground">
-                <p>
-                  В клубе чтецов текст книги доступен только владельцу-чтецу. Слушатели подключаются к live-эфиру и не получают доступ к файлу, главам, заметкам или прогрессу чтения.
-                </p>
-                <p>
-                  Когда эфир начнётся, здесь появится возможность подключиться к слушательскому плееру.
-                </p>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Radio className="h-5 w-5 text-primary" />
-                  Эфир клуба
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4 text-sm text-muted-foreground">
-                <p>
-                  {hasLiveReaders
-                    ? "Чтец сейчас в эфире. Слушатели клуба могут подключиться к трансляции."
-                    : "Сейчас эфир не идёт. Когда чтец начнёт чтение, кнопка подключения станет активной."}
-                </p>
-                {!isOwner ? (
-                  <Button disabled={!canListen} onClick={() => setLiveModalOpen(true)}>
-                    <Play className="mr-2 h-4 w-4" />
-                    {hasLiveReaders ? "Слушать эфир" : "Эфир пока не идёт"}
-                  </Button>
-                ) : null}
-              </CardContent>
-            </Card>
-
-            {isMember ? (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <UploadCloud className="h-5 w-5 text-primary" />
-                    Записи эфиров
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4 text-sm text-muted-foreground">
-                  {recordingsLoading ? (
-                    <div className="flex items-center gap-2">
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      Загружаем записи...
-                    </div>
-                  ) : clubRecordings.length > 0 ? (
-                    clubRecordings.map((recording) => {
-                      const canPublish = recording.status === "ready" && recording.moderationStatus === "approved" && !recording.isPublished;
-                      const canUnpublish = recording.status === "ready" && recording.moderationStatus === "approved" && Boolean(recording.isPublished);
-                      const isUpdatingPublication = publicationRecordingMutation.isPending && publicationRecordingMutation.variables?.recording.id === recording.id;
-                      const canListenRecording = recording.status === "ready" && recording.moderationStatus === "approved" && Boolean(recording.isPublished && recording.allowStreaming);
-                      const isLoadingStream = streamRecordingMutation.isPending && streamRecordingMutation.variables?.id === recording.id;
-                      const isPlayingThis = playingRecording?.id === recording.id;
-
-                      return (
-                        <div key={recording.id} className="rounded-lg border bg-muted/20 p-4">
-                          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                            <div className="min-w-0 space-y-2">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <p className="font-medium text-foreground">
-                                  {recording.publicTitle || recording.title || "Запись эфира"}
-                                </p>
-                                <Badge variant={getRecordingBadgeVariant(recording)}>
-                                  {getRecordingStatusLabel(recording)}
-                                </Badge>
-                              </div>
-                              <p className="text-xs text-muted-foreground">
-                                Создана {formatRecordingDate(recording.createdAt)}
-                              </p>
-                              {recording.moderationNotes ? (
-                                <p className="text-xs text-muted-foreground">Комментарий модерации: {recording.moderationNotes}</p>
-                              ) : null}
-                              {recording.isPublished ? (
-                                <p className="text-xs text-muted-foreground">
-                                  Прослушивание включено, скачивание выключено. Тарифные ограничения будут применяться отдельным слоем.
-                                </p>
-                              ) : null}
-                              {isPlayingThis ? (
-                                <audio controls src={playingRecording.url} className="mt-2 w-full max-w-md" />
-                              ) : null}
-                            </div>
-                            <div className="flex shrink-0 flex-wrap gap-2">
-                              {!isOwner && canListenRecording ? (
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  onClick={() => streamRecordingMutation.mutate(recording)}
-                                  disabled={isLoadingStream}
-                                >
-                                  {isLoadingStream ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
-                                  {isPlayingThis ? "Обновить плеер" : "Слушать запись"}
-                                </Button>
-                              ) : null}
-                              {isOwner && (canPublish || canUnpublish) ? (
-                                <Button
-                                  type="button"
-                                  variant={canUnpublish ? "outline" : "default"}
-                                  size="sm"
-                                  onClick={() => publicationRecordingMutation.mutate({ recording, isPublished: canPublish })}
-                                  disabled={isUpdatingPublication}
-                                >
-                                  {isUpdatingPublication ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                                  {canUnpublish ? "Снять с публикации" : "Опубликовать"}
-                                </Button>
-                              ) : null}
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })
-                  ) : (
-                    <p>
-                      {isOwner
-                        ? "Здесь появятся записи эфиров после завершения Studio и административной модерации. Слушателям они не откроются без вашей явной публикации."
-                        : "Опубликованные записи эфиров появятся здесь после модерации и публикации чтецом."}
-                    </p>
-                  )}
-                </CardContent>
-              </Card>
-            ) : null}
-
-            {isOwner ? (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Users className="h-5 w-5 text-primary" />
-                    Пост-аналитика эфиров
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4 text-sm text-muted-foreground">
-                  {analyticsLoading ? (
-                    <div className="flex items-center gap-2">
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      Загружаем статистику...
-                    </div>
-                  ) : analyticsSummary && analyticsSummary.totalSessions > 0 ? (
-                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                      <div className="rounded-lg border bg-muted/20 p-4">
-                        <p className="text-xs uppercase tracking-wide text-muted-foreground">Эфиры</p>
-                        <p className="mt-1 text-2xl font-semibold text-foreground">{formatMetricValue(analyticsSummary.totalSessions)}</p>
-                      </div>
-                      <div className="rounded-lg border bg-muted/20 p-4">
-                        <p className="text-xs uppercase tracking-wide text-muted-foreground">Слушатели</p>
-                        <p className="mt-1 text-2xl font-semibold text-foreground">{formatMetricValue(analyticsSummary.totalListeners)}</p>
-                      </div>
-                      <div className="rounded-lg border bg-muted/20 p-4">
-                        <p className="text-xs uppercase tracking-wide text-muted-foreground">Среднее</p>
-                        <p className="mt-1 text-2xl font-semibold text-foreground">{formatMetricValue(analyticsSummary.averageListeners)}</p>
-                      </div>
-                      <div className="rounded-lg border bg-muted/20 p-4">
-                        <p className="text-xs uppercase tracking-wide text-muted-foreground">Реакции</p>
-                        <p className="mt-1 text-2xl font-semibold text-foreground">{formatMetricValue(analyticsSummary.totalReactions)}</p>
-                      </div>
-                      <div className="rounded-lg border bg-muted/20 p-4">
-                        <p className="text-xs uppercase tracking-wide text-muted-foreground">Вопросы</p>
-                        <p className="mt-1 text-2xl font-semibold text-foreground">{formatMetricValue(analyticsSummary.totalQuestions)}</p>
-                      </div>
-                      <div className="rounded-lg border bg-muted/20 p-4">
-                        <p className="text-xs uppercase tracking-wide text-muted-foreground">Качество</p>
-                        <p className="mt-1 text-2xl font-semibold text-foreground">{formatMetricValue(analyticsSummary.averageQuality)}%</p>
-                      </div>
-                    </div>
-                  ) : (
-                    <p>
-                      Статистика появится после завершения первого эфира. Этот блок видит только владелец клуба.
-                    </p>
-                  )}
-                  {analyticsRatings.length > 0 ? (
-                    <div className="space-y-2">
-                      <p className="font-medium text-foreground">Оценки слушателей</p>
-                      <div className="space-y-2">
-                        {analyticsRatings.map((rating) => (
-                          <div key={rating.id} className="rounded-lg border bg-muted/20 p-3">
-                            <div className="flex flex-wrap items-center justify-between gap-2">
-                              <p className="font-medium text-foreground">
-                                {"★".repeat(Math.max(0, Math.min(5, rating.rating)))}
-                                <span className="ml-2 text-xs font-normal text-muted-foreground">
-                                  {rating.rater?.username || "Слушатель"} · {formatShortDate(rating.createdAt)}
-                                </span>
-                              </p>
-                              <Badge variant="outline">{rating.sessionTitle}</Badge>
-                            </div>
-                            {rating.feedback ? (
-                              <p className="mt-2 leading-6">{rating.feedback}</p>
-                            ) : (
-                              <p className="mt-2 text-xs">Без текстового отзыва</p>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ) : (
-                    <p className="text-xs">Оценки слушателей появятся здесь после первых отзывов за эфиры.</p>
-                  )}
-
-                  {analyticsQuestions.length > 0 ? (
-                    <div className="space-y-2">
-                      <p className="font-medium text-foreground">Комментарии и вопросы за эфир</p>
-                      <div className="space-y-2">
-                        {analyticsQuestions.map((question) => (
-                          <div key={question.id} className="rounded-lg border bg-muted/20 p-3">
-                            <div className="flex flex-wrap items-center justify-between gap-2">
-                              <p className="font-medium text-foreground">
-                                {question.user?.username || "Слушатель"}
-                                <span className="ml-2 text-xs font-normal text-muted-foreground">{formatShortDate(question.createdAt)}</span>
-                              </p>
-                              <Badge variant={question.isAnswered ? "secondary" : "outline"}>
-                                {question.isAnswered ? "Есть ответ" : "Без ответа"}
-                              </Badge>
-                            </div>
-                            <p className="mt-2 leading-6">{question.question}</p>
-                            {question.answer ? (
-                              <p className="mt-2 rounded-md bg-background p-2 text-xs leading-5 text-muted-foreground">
-                                Ответ: {question.answer}
-                              </p>
-                            ) : null}
-                            <p className="mt-2 text-xs text-muted-foreground">Эфир: {question.sessionTitle}</p>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ) : (
-                    <p className="text-xs">Комментарии и вопросы слушателей появятся здесь после активности в эфире.</p>
-                  )}
-
-                  <p className="text-xs">
-                    Сводка собирается по live-сессиям: слушатели, реакции, вопросы, оценки и техническая оценка качества. Блок доступен только владельцу клуба.
-                  </p>
-                </CardContent>
-              </Card>
-            ) : null}
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Calendar className="h-5 w-5 text-primary" />
-                  Расписание и обсуждения
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3 text-sm leading-6 text-muted-foreground">
-                <p>
-                  Полноценные настройки расписания, заявок и записей эфиров будут развиваться в отдельном слое клуба чтецов. Базовая компоновка уже совпадает с обычными клубами: контекст слева, рабочие разделы справа.
-                </p>
-              </CardContent>
-            </Card>
+            <ClubContentTabs
+              clubId={clubId}
+              isMember={isMember}
+              isOwner={isOwner}
+              currentUserId={user?.id || ""}
+              settings={settings}
+              scheduleItems={scheduleItems}
+              activeBookId={club.bookId}
+              setLocation={setLocation}
+              showLibrary={isOwner}
+              extraTabs={extraTabs}
+            />
 
             {isAuthenticated && isMember ? (
               <ChatWidget clubId={club.id} mobileBottomOffsetPx={88} mobileTopOffsetPx={76} />
@@ -779,6 +746,47 @@ export default function ReaderClubDetails({ clubId, initialClub }: ReaderClubDet
           onStreamEnded={() => stopListening({ stopPlayback: false })}
         />
       ) : null}
+
+      <Dialog open={!!moderationTarget} onOpenChange={(open) => !open && setModerationTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{moderationTarget?.action === "mute" ? "Запретить участнику писать" : "Ограничить доступ участника"}</DialogTitle>
+            <DialogDescription>
+              {moderationTarget?.member.displayName || moderationTarget?.member.username}. Дату можно не указывать — ограничение будет бессрочным до ручной отмены.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="reader-moderation-date">Дата окончания</Label>
+                <div className="flex gap-2">
+                  <Input ref={moderationDateRef} id="reader-moderation-date" type="date" value={moderationDate} onChange={(event) => setModerationDate(event.target.value)} />
+                  <Button type="button" variant="outline" size="icon" aria-label="Открыть календарь" onClick={() => openNativePicker(moderationDateRef.current)}>
+                    <Calendar className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="reader-moderation-time">Время окончания</Label>
+                <div className="flex gap-2">
+                  <Input ref={moderationTimeRef} id="reader-moderation-time" type="time" value={moderationTime} onChange={(event) => setModerationTime(event.target.value)} />
+                  <Button type="button" variant="outline" size="icon" aria-label="Открыть выбор времени" onClick={() => openNativePicker(moderationTimeRef.current)}>
+                    <Clock className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="reader-moderation-reason">Причина</Label>
+              <Textarea id="reader-moderation-reason" value={moderationReason} onChange={(event) => setModerationReason(event.target.value)} maxLength={500} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setModerationTarget(null)}>Отмена</Button>
+            <Button onClick={submitModeration}>Применить</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </MainLayout>
   );
 }

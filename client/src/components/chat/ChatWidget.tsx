@@ -611,6 +611,12 @@ export function ChatWidget({ // NOSONAR
             </div>
           </div>
 
+          {error ? (
+            <div className="border-b border-destructive/20 bg-destructive/10 px-3 py-2 text-xs text-destructive" role="alert">
+              {error.message}
+            </div>
+          ) : null}
+
           <ScrollArea ref={scrollAreaRef} className="flex-1 px-3 py-2">
             <div className="space-y-3 text-sm px-1">
               {loadingHistory && (

@@ -1,5 +1,5 @@
 import type { ClubMemberRole, ClubWithDetails } from "@shared/schema";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   ArrowLeft,
   BookOpen,
@@ -15,6 +15,10 @@ import {
   Share2,
   Star,
   Trash2,
+  UserCheck,
+  UserX,
+  Volume2,
+  VolumeX,
   Users,
   Layers,
 } from "lucide-react";
@@ -59,7 +63,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { VoxLibrisUpload } from "@/components/ui/voxlibris-upload";
 import { useAuth } from "@/hooks/use-auth";
 import { useClubBooks, useDeleteClubBook, useSetActiveBook, type ClubBook } from "@/hooks/use-books-v2";
-import { useClub, useClubMembers, useRemoveMember, type ClubDetailsResponse, type ClubMemberWithUser } from "@/hooks/use-clubs";
+import { useClub, useClubMembers, useModerateClubMember, useRemoveMember, type ClubDetailsResponse, type ClubMemberWithUser } from "@/hooks/use-clubs";
 import { modalConfirm, useToast } from "@/hooks/use-toast";
 import type { AuthUserClient } from "@/lib/auth";
 import { getAccessToken } from "@/lib/token-store";
@@ -81,6 +85,16 @@ interface ClubSettings {
   welcomeHtml?: string;
   rulesHtml?: string;
   shortDescription?: string;
+}
+
+function getRestrictionInfo(until?: Date | string | null, reason?: string | null): string {
+  const untilText = until ? `до ${new Date(until).toLocaleString()}` : "бессрочно";
+  return reason ? `${untilText}. Причина: ${reason}` : untilText;
+}
+
+function openNativePicker(input: HTMLInputElement | null): void {
+  input?.showPicker?.();
+  input?.focus();
 }
 
 type ClubWithOptionalBook = ClubDetailsResponse & { book?: ClubDetailsResponse["book"] | null };
@@ -716,6 +730,13 @@ interface MembersListCardProps {
 }
 
 function MembersListCard({ clubId, clubTitle, members, memberCount, membersLoading, canViewMembers, isOwner, isModerator, canRemove, handleRemoveMember }: MembersListCardProps) {
+  const moderateMember = useModerateClubMember();
+  const [moderationTarget, setModerationTarget] = useState<{ member: ClubMemberWithUser; action: "mute" | "deactivate" } | null>(null);
+  const [moderationDate, setModerationDate] = useState("");
+  const [moderationTime, setModerationTime] = useState("");
+  const [moderationReason, setModerationReason] = useState("");
+  const moderationDateRef = useRef<HTMLInputElement>(null);
+  const moderationTimeRef = useRef<HTMLInputElement>(null);
   const { data: presenceData } = useQuery<{ onlineUserIds: string[] }>({
     queryKey: ["/api/presence/club", clubId],
     queryFn: () => authFetch(`/api/presence/club/${clubId}`).then(r => r.json()) as Promise<{ onlineUserIds: string[] }>,
@@ -723,6 +744,23 @@ function MembersListCard({ clubId, clubTitle, members, memberCount, membersLoadi
     staleTime: 0,
   });
   const onlineSet = new Set(presenceData?.onlineUserIds ?? []);
+
+  const submitModeration = () => {
+    if (!moderationTarget) return;
+    const until = moderationDate && moderationTime ? new Date(`${moderationDate}T${moderationTime}`).toISOString() : null;
+    moderateMember.mutate({
+      clubId,
+      userId: moderationTarget.member.id,
+      action: moderationTarget.action,
+      until,
+      reason: moderationReason.trim() || null,
+    });
+    setModerationTarget(null);
+    setModerationDate("");
+    setModerationTime("");
+    setModerationReason("");
+  };
+
   return (
     <div className="rounded-xl border bg-card p-4 shadow-sm sm:p-6">
       <h3 className="mb-4 flex flex-col gap-3 font-serif text-lg font-bold sm:flex-row sm:items-center sm:justify-between sm:text-xl">
@@ -750,6 +788,8 @@ function MembersListCard({ clubId, clubTitle, members, memberCount, membersLoadi
               {members.map((member) => {
                 const memberRating = (member.readerRating ?? 0) / 100;
                 const compactAchievements = (member.achievements ?? []).slice(0, 3);
+                const isMuted = member.mutedUntil ? new Date(member.mutedUntil).getTime() > Date.now() : false;
+                const isDeactivated = member.isActive === false || (member.deactivatedUntil ? new Date(member.deactivatedUntil).getTime() > Date.now() : false);
 
                 return (
                 <div key={member.id} className="grid gap-3 rounded-xl border border-border/60 p-3 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-center xl:border-0 xl:p-0">
@@ -803,9 +843,11 @@ function MembersListCard({ clubId, clubTitle, members, memberCount, membersLoadi
                   <div className="flex min-w-0 flex-wrap items-center gap-2 xl:justify-end">
                     <Badge variant={getMemberRoleBadgeVariant(member.role)} className="shrink-0">
                       {member.role === "owner" && "Владелец"}
-                      {member.role === "moderator" && "Модератор"}
-                      {member.role === "member" && "Участник"}
+                        {member.role === "moderator" && "Модератор"}
+                        {member.role === "member" && "Участник"}
                     </Badge>
+                    {isMuted && <Badge variant="secondary" title={getRestrictionInfo(member.mutedUntil, member.restrictionReason)}>Без права писать</Badge>}
+                    {isDeactivated && <Badge variant="destructive" title={getRestrictionInfo(member.deactivatedUntil, member.restrictionReason)}>Доступ ограничен</Badge>}
                     {(isOwner || isModerator) && canRemove(member.role, member.id) && (
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
@@ -815,10 +857,40 @@ function MembersListCard({ clubId, clubTitle, members, memberCount, membersLoadi
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
                           <DropdownMenuItem
-                            className="text-destructive"
+                            className="justify-center"
+                            title={isMuted ? "Разрешить писать" : "Запретить писать"}
+                            aria-label={isMuted ? "Разрешить писать" : "Запретить писать"}
+                            onClick={() => {
+                              if (isMuted) {
+                                moderateMember.mutate({ clubId, userId: member.id, action: "unmute" });
+                              } else {
+                                setModerationTarget({ member, action: "mute" });
+                              }
+                            }}
+                          >
+                            {isMuted ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            className="justify-center"
+                            title={isDeactivated ? "Вернуть доступ" : "Ограничить доступ"}
+                            aria-label={isDeactivated ? "Вернуть доступ" : "Ограничить доступ"}
+                            onClick={() => {
+                              if (isDeactivated) {
+                                moderateMember.mutate({ clubId, userId: member.id, action: "reactivate" });
+                              } else {
+                                setModerationTarget({ member, action: "deactivate" });
+                              }
+                            }}
+                          >
+                            {isDeactivated ? <UserCheck className="h-4 w-4" /> : <UserX className="h-4 w-4" />}
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            className="justify-center text-destructive"
+                            title="Исключить из клуба"
+                            aria-label="Исключить из клуба"
                             onClick={() => handleRemoveMember(member.id, member.username)}
                           >
-                            <Trash2 className="h-4 w-4 mr-2" /> Удалить из клуба
+                            <Trash2 className="h-4 w-4" />
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
@@ -835,6 +907,46 @@ function MembersListCard({ clubId, clubTitle, members, memberCount, membersLoadi
           Список участников доступен только участникам клуба и модераторам.
         </div>
       )}
+      <Dialog open={!!moderationTarget} onOpenChange={(open) => !open && setModerationTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{moderationTarget?.action === "mute" ? "Запретить участнику писать" : "Ограничить доступ участника"}</DialogTitle>
+            <DialogDescription>
+              {moderationTarget?.member.displayName || moderationTarget?.member.username}. Дату можно не указывать — ограничение будет бессрочным до ручной отмены.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="moderation-date">Дата окончания</Label>
+                <div className="flex gap-2">
+                  <Input ref={moderationDateRef} id="moderation-date" type="date" value={moderationDate} onChange={(event) => setModerationDate(event.target.value)} />
+                  <Button type="button" variant="outline" size="icon" aria-label="Открыть календарь" onClick={() => openNativePicker(moderationDateRef.current)}>
+                    <Calendar className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="moderation-time">Время окончания</Label>
+                <div className="flex gap-2">
+                  <Input ref={moderationTimeRef} id="moderation-time" type="time" value={moderationTime} onChange={(event) => setModerationTime(event.target.value)} />
+                  <Button type="button" variant="outline" size="icon" aria-label="Открыть выбор времени" onClick={() => openNativePicker(moderationTimeRef.current)}>
+                    <Clock className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="moderation-reason">Причина</Label>
+              <Textarea id="moderation-reason" value={moderationReason} onChange={(event) => setModerationReason(event.target.value)} maxLength={500} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setModerationTarget(null)}>Отмена</Button>
+            <Button onClick={submitModeration}>Применить</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -1266,9 +1378,11 @@ interface ClubContentTabsProps {
   readonly scheduleItems: ScheduleItem[];
   readonly activeBookId: string | null | undefined;
   readonly setLocation: (path: string) => void;
+  readonly showLibrary?: boolean;
+  readonly extraTabs?: Array<{ value: string; label: string; content: React.ReactNode }>;
 }
 
-function ClubContentTabs({ clubId, isMember, isOwner, currentUserId, settings, scheduleItems, activeBookId, setLocation }: ClubContentTabsProps) {
+export function ClubContentTabs({ clubId, isMember, isOwner, currentUserId, settings, scheduleItems, activeBookId, setLocation, showLibrary = isMember, extraTabs = [] }: ClubContentTabsProps) {
   const isMobile = useIsMobile();
   const initialTabFromQuery = new URLSearchParams(globalThis.location.search).get('tab');
   const [activeTab, setActiveTab] = useState(initialTabFromQuery === 'discussion' ? 'discussion' : 'about');
@@ -1277,8 +1391,11 @@ function ClubContentTabs({ clubId, isMember, isOwner, currentUserId, settings, s
     { value: "reading-plan", label: "План чтения" },
     { value: "discussion", label: "Обсуждение" },
     { value: "schedule", label: "Расписание" },
-    ...(isMember ? [{ value: "library", label: "Библиотека" }] : []),
+    ...extraTabs.map(({ value, label }) => ({ value, label })),
+    ...(showLibrary ? [{ value: "library", label: "Библиотека" }] : []),
   ];
+
+  const triggerClassName = "rounded-none border-b-2 border-transparent data-[state=active]:border-accent data-[state=active]:bg-transparent data-[state=active]:shadow-none py-3 px-1 font-medium";
 
   return (
     <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
@@ -1300,38 +1417,11 @@ function ClubContentTabs({ clubId, isMember, isOwner, currentUserId, settings, s
       ) : null}
 
       <TabsList className="hidden h-auto w-full justify-start gap-6 overflow-x-auto whitespace-nowrap border-b rounded-none bg-transparent px-0 py-0 sm:flex">
-        <TabsTrigger
-          value="about"
-          className="rounded-none border-b-2 border-transparent data-[state=active]:border-accent data-[state=active]:bg-transparent data-[state=active]:shadow-none py-3 px-1 font-medium"
-        >
-          О клубе
-        </TabsTrigger>
-        <TabsTrigger
-          value="reading-plan"
-          className="rounded-none border-b-2 border-transparent data-[state=active]:border-accent data-[state=active]:bg-transparent data-[state=active]:shadow-none py-3 px-1 font-medium"
-        >
-          План чтения
-        </TabsTrigger>
-        <TabsTrigger
-          value="discussion"
-          className="rounded-none border-b-2 border-transparent data-[state=active]:border-accent data-[state=active]:bg-transparent data-[state=active]:shadow-none py-3 px-1 font-medium"
-        >
-          Обсуждение
-        </TabsTrigger>
-        <TabsTrigger
-          value="schedule"
-          className="rounded-none border-b-2 border-transparent data-[state=active]:border-accent data-[state=active]:bg-transparent data-[state=active]:shadow-none py-3 px-1 font-medium"
-        >
-          Расписание
-        </TabsTrigger>
-        {isMember && (
-          <TabsTrigger
-            value="library"
-            className="rounded-none border-b-2 border-transparent data-[state=active]:border-accent data-[state=active]:bg-transparent data-[state=active]:shadow-none py-3 px-1 font-medium"
-          >
-            Библиотека
+        {tabOptions.map((tab) => (
+          <TabsTrigger key={tab.value} value={tab.value} className={triggerClassName}>
+            {tab.label}
           </TabsTrigger>
-        )}
+        ))}
       </TabsList>
 
       <TabsContent value="reading-plan" className="pt-6 animate-in slide-in-from-bottom-2">
@@ -1457,15 +1547,23 @@ function ClubContentTabs({ clubId, isMember, isOwner, currentUserId, settings, s
         </div>
       </TabsContent>
 
-      <TabsContent value="library" className="pt-6 animate-in slide-in-from-bottom-2">
-        <ClubLibraryTab
-          clubId={clubId}
-          activeBookId={activeBookId}
-          isOwner={isOwner}
-          isMember={isMember}
-          setLocation={setLocation}
-        />
-      </TabsContent>
+      {showLibrary ? (
+        <TabsContent value="library" className="pt-6 animate-in slide-in-from-bottom-2">
+          <ClubLibraryTab
+            clubId={clubId}
+            activeBookId={activeBookId}
+            isOwner={isOwner}
+            isMember={isMember}
+            setLocation={setLocation}
+          />
+        </TabsContent>
+      ) : null}
+
+      {extraTabs.map((tab) => (
+        <TabsContent key={tab.value} value={tab.value} className="pt-6 animate-in slide-in-from-bottom-2">
+          {tab.content}
+        </TabsContent>
+      ))}
     </Tabs>
   );
 }

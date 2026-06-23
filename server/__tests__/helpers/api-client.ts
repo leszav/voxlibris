@@ -7,7 +7,7 @@ export type ApiResponse<T = unknown> = {
   body: T;
 };
 
-const REQUEST_DELAY_MS = Number.parseInt(process.env.TEST_API_REQUEST_DELAY_MS ?? "800", 10);
+const REQUEST_DELAY_MS = Number.parseInt(process.env.TEST_API_REQUEST_DELAY_MS ?? "1200", 10);
 let lastRequestAt = 0;
 
 async function throttleApiRequests(): Promise<void> {
@@ -58,6 +58,10 @@ export async function apiRequest<T = unknown>(path: string, init?: RequestInit):
     : await response.text() as T;
 
   return { response, body };
+}
+
+export function bearerAuth(token: string): HeadersInit {
+  return { Authorization: `Bearer ${token}` };
 }
 
 export function expectStatus(response: Response, expectedStatus: number): void {

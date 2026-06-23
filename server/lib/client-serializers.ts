@@ -32,6 +32,9 @@ export interface ClientClubMember {
   role: ClubMemberRole;
   joinedAt: Date;
   isActive?: boolean;
+  mutedUntil?: Date | null;
+  deactivatedUntil?: Date | null;
+  restrictionReason?: string | null;
 }
 
 export interface ClientPublicCatalogClub {
@@ -171,6 +174,12 @@ export function serializePublicCatalogClubList(clubs: ClubWithDetails[]): Client
 }
 
 export function serializeClubMember(member: ClientClubMember): ClientClubMember {
+  const now = Date.now();
+  const mutedUntil = member.mutedUntil ?? null;
+  const deactivatedUntil = member.deactivatedUntil ?? null;
+  const muted = mutedUntil ? new Date(mutedUntil).getTime() > now : false;
+  const deactivated = deactivatedUntil ? new Date(deactivatedUntil).getTime() > now : false;
+
   return {
     id: member.id,
     username: member.username,
@@ -180,7 +189,10 @@ export function serializeClubMember(member: ClientClubMember): ClientClubMember 
     achievements: member.achievements ?? [],
     role: member.role,
     joinedAt: member.joinedAt,
-    isActive: member.isActive ?? true,
+    isActive: !deactivated,
+    mutedUntil: muted ? member.mutedUntil ?? null : null,
+    deactivatedUntil: deactivated ? member.deactivatedUntil ?? null : null,
+    restrictionReason: muted || deactivated ? member.restrictionReason ?? null : null,
   };
 }
 

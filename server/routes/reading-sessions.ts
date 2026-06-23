@@ -7,6 +7,7 @@ import { activityService } from '../services/activity-service.js';
 import { gamificationService } from '../services/gamification-service.js';
 import { emotionalMapService } from '../services/emotional-map-service.js';
 import { isReaderLedClub } from '../lib/reader-club-access.js';
+import { CommerceService } from '../services/monetization.js';
 
 const router = Router();
 const readingSessionStatuses = ['active', 'paused', 'completed', 'cancelled'] as const;
@@ -14,6 +15,12 @@ type ReadingSessionStatus = typeof readingSessionStatuses[number];
 
 function isReadingSessionStatus(value: string): value is ReadingSessionStatus {
   return readingSessionStatuses.includes(value as ReadingSessionStatus);
+}
+
+async function canListenReaderClub(clubId: string, userId: string) {
+  const club = await storage.getClub(clubId);
+  if (!club || !isReaderLedClub(club) || club.ownerId === userId) return true;
+  return new CommerceService().hasEntitlement(userId, 'reader_club', club.id, 'reader_club_access');
 }
 
 /**
@@ -489,6 +496,15 @@ router.post('/:sessionId/join', async (req: Request, res: Response) => {
       return res.status(403).json({
         success: false,
         error: 'You are not a member of this club',
+      });
+    }
+
+    if (!await canListenReaderClub(session.clubId, userId)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Reader club access required',
+        code: 'READER_CLUB_ACCESS_REQUIRED',
+        feature: 'reader_club_access',
       });
     }
 

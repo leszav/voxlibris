@@ -15,6 +15,7 @@ import {
 } from "../shared/schema.js";
 import { logger } from "./lib/logger.js";
 import { presenceService } from "./services/presence-service.js";
+import { canClubMemberWrite } from "./lib/club-member-moderation.js";
 
 interface AuthenticatedUser {
   userId: string;
@@ -184,6 +185,16 @@ async function verifyClubAccess(userId: string, clubId: string): Promise<boolean
     logger.error({ error: errorMessage }, "[WS Chat] verifyClubAccess error");
     return false;
   }
+}
+
+async function verifyClubWriteAccess(userId: string, clubId: string): Promise<boolean> {
+  const [membership] = await db
+    .select()
+    .from(clubMembers)
+    .where(and(eq(clubMembers.clubId, clubId), eq(clubMembers.userId, userId)))
+    .limit(1);
+
+  return !!membership && canClubMemberWrite(membership);
 }
 
 function buildRoomName(clubId: string, channel?: string): string {
@@ -363,6 +374,12 @@ async function handleChatMessage(
     const hasAccess = await verifyClubAccess(user.userId, clubId);
     if (!hasAccess) {
       socket.emit("error", { message: "Access denied to this club" });
+      return;
+    }
+
+    const canWrite = await verifyClubWriteAccess(user.userId, clubId);
+    if (!canWrite) {
+      socket.emit("error", { message: "Ваши права на отправку сообщений в этом клубе ограничены" });
       return;
     }
 

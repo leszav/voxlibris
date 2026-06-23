@@ -1,9 +1,10 @@
 import express from 'express';
+import { z } from 'zod';
 import { jwtAuth, optionalJwtAuth, requireActiveUser } from './jwt-middleware.js';
 import { storage } from './repositories/index.js';
 import { db } from './db.js';
-import { clubs, clubTypes, readerRatings, readingSessions, sessionQuestions, users } from '../shared/schema.js';
-import { desc, eq } from 'drizzle-orm';
+import { clubs, clubMembers, clubTypes, commercePrices, commerceProductFeatures, commerceProducts, readerClubTariffAssignments, readerClubTariffRequests, readerClubTariffTemplates, readerRatings, readingSessions, sessionQuestions, users } from '../shared/schema.js';
+import { and, desc, eq } from 'drizzle-orm';
 import type { InsertClub, ClubMemberRole, InsertClubInvitation, Club, UserRole, ClubType } from '../shared/schema.js';
 import { emailService } from './services/email-service.js';
 import crypto from 'node:crypto';
@@ -18,7 +19,26 @@ import { canCreateReaderLedClubForUser, isReaderLedClub } from './lib/reader-clu
 import { getFeatureFlag } from './lib/feature-flags.js';
 import { sessionAnalyticsService } from './services/session-analytics-service.js';
 
+function isFuture(value: Date | string | null | undefined): boolean {
+  return value ? new Date(value).getTime() > Date.now() : false;
+}
+import { CommerceService } from './services/monetization.js';
+
 const router = express.Router();
+
+const tariffRequestSchema = z.object({
+  title: z.string().min(1).max(180),
+  description: z.string().optional().nullable(),
+  requestedAmountRub: z.number().int().positive(),
+  requestedPeriod: z.enum(['week', 'month', 'quarter', 'year']),
+  message: z.string().optional().nullable(),
+});
+
+const memberModerationSchema = z.object({
+  action: z.enum(['mute', 'unmute', 'deactivate', 'reactivate']),
+  until: z.string().datetime().optional().nullable(),
+  reason: z.string().max(500).optional().nullable(),
+});
 
 function normalizeClubType(value: unknown): ClubType {
   if (typeof value === 'string' && (clubTypes as readonly string[]).includes(value)) {
@@ -63,6 +83,27 @@ async function canAccessPrivateClub(
     allowed: false, 
     reason: 'Это закрытый клуб. Для доступа необходимо получить приглашение от участника клуба.' 
   };
+}
+
+async function canAccessReaderLedClub(club: Club, userId: string, userRole: UserRole) {
+  if (!isReaderLedClub(club) || userRole === 'admin' || userRole === 'moderator' || club.ownerId === userId) {
+    return true;
+  }
+
+  return new CommerceService().hasEntitlement(userId, 'reader_club', club.id, 'reader_club_access');
+}
+
+async function requireReaderClubOwner(clubId: string, userId: string) {
+  const club = await storage.getClub(clubId);
+  if (!club) return { error: { status: 404, message: 'Club not found' } };
+  if (!isReaderLedClub(club)) return { error: { status: 400, message: 'Монетизация доступна только клубам чтецов' } };
+
+  const membership = await storage.getUserClubMembership(club.id, userId);
+  if (club.ownerId !== userId && membership?.role !== 'owner') {
+    return { error: { status: 403, message: 'Only club owner can manage monetization' } };
+  }
+
+  return { club };
 }
 
 // Helper: robust lookup of invitation by token with small fallbacks
@@ -275,8 +316,8 @@ router.get('/:id', optionalJwtAuth, async (req, res) => {
     if (!req.user) {
       if (club.isPrivate) {
         return res.status(403).json({
-          message: 'Это закрытый клуб. Для доступа необходимо получить приглашение от участника клуба.',
-          code: 'PRIVATE_CLUB_ACCESS_DENIED',
+          message: isReaderLedClub(club) ? 'Для доступа к клубу чтеца нужна активная подписка.' : 'Это закрытый клуб. Для доступа необходимо получить приглашение от участника клуба.',
+          code: isReaderLedClub(club) ? 'READER_CLUB_ACCESS_REQUIRED' : 'PRIVATE_CLUB_ACCESS_DENIED',
           isPrivate: true,
         });
       }
@@ -291,6 +332,14 @@ router.get('/:id', optionalJwtAuth, async (req, res) => {
         message: access.reason,
         code: 'PRIVATE_CLUB_ACCESS_DENIED',
         isPrivate: true
+      });
+    }
+
+    if (!await canAccessReaderLedClub(club, req.user.userId, req.user.role as UserRole)) {
+      return res.status(403).json({
+        message: 'Для доступа к клубу чтеца нужна активная подписка.',
+        code: 'READER_CLUB_ACCESS_REQUIRED',
+        feature: 'reader_club_access',
       });
     }
 
@@ -363,6 +412,87 @@ router.put('/:id', jwtAuth, async (req, res) => {
   }
 });
 
+router.get('/:id/monetization', jwtAuth, async (req, res) => {
+  try {
+    const access = await requireReaderClubOwner(req.params.id, req.user!.userId);
+    if (access.error) return res.status(access.error.status).json({ message: access.error.message });
+
+    const [assignment] = await db.select().from(readerClubTariffAssignments)
+      .where(and(eq(readerClubTariffAssignments.clubId, req.params.id), eq(readerClubTariffAssignments.status, 'active')))
+      .limit(1);
+    const templates = await db.select().from(readerClubTariffTemplates)
+      .where(and(eq(readerClubTariffTemplates.status, 'active'), eq(readerClubTariffTemplates.visibility, 'public')))
+      .orderBy(readerClubTariffTemplates.sortOrder, readerClubTariffTemplates.createdAt);
+    const requests = await db.select().from(readerClubTariffRequests)
+      .where(eq(readerClubTariffRequests.clubId, req.params.id))
+      .orderBy(desc(readerClubTariffRequests.createdAt));
+
+    res.json({ assignment: assignment ?? null, templates, requests });
+  } catch (error) {
+    console.error('Error getting club monetization:', error);
+    res.status(500).json({ message: 'Failed to get club monetization' });
+  }
+});
+
+router.post('/:id/monetization/select-template', jwtAuth, async (req, res) => {
+  try {
+    const access = await requireReaderClubOwner(req.params.id, req.user!.userId);
+    if (access.error) return res.status(access.error.status).json({ message: access.error.message });
+
+    const { templateId } = z.object({ templateId: z.string().min(1) }).parse(req.body);
+    const [template] = await db.select().from(readerClubTariffTemplates)
+      .where(and(eq(readerClubTariffTemplates.id, templateId), eq(readerClubTariffTemplates.status, 'active'), eq(readerClubTariffTemplates.visibility, 'public')))
+      .limit(1);
+    if (!template) return res.status(404).json({ message: 'Tariff template not found' });
+
+    const [assignment] = await db.transaction(async (tx) => {
+      await tx.update(readerClubTariffAssignments)
+        .set({ status: 'inactive', updatedAt: new Date() })
+        .where(and(eq(readerClubTariffAssignments.clubId, req.params.id), eq(readerClubTariffAssignments.status, 'active')));
+
+      const [product] = await tx.insert(commerceProducts).values({
+        type: 'reader_club_subscription',
+        scopeType: 'reader_club',
+        scopeId: req.params.id,
+        code: `reader_club_${req.params.id}_${Date.now()}`,
+        title: template.title,
+        description: template.description,
+        status: 'active',
+        visibility: 'public',
+        metadata: { tariffTemplateId: template.id },
+      }).returning();
+      await tx.insert(commercePrices).values({ productId: product.id, amountRub: template.amountRub, period: template.period, isDefault: true });
+      await tx.insert(commerceProductFeatures).values({ productId: product.id, label: 'Доступ к клубу чтеца', featureKey: 'reader_club_access', isHighlighted: true });
+      return tx.insert(readerClubTariffAssignments).values({
+        clubId: req.params.id,
+        templateId: template.id,
+        productId: product.id,
+        selectedBy: req.user!.userId,
+        readerShareBps: template.readerShareBps,
+        acquiringFeeBps: template.acquiringFeeBps,
+      }).returning();
+    });
+
+    res.status(201).json(assignment);
+  } catch (error) {
+    console.error('Error selecting club tariff:', error);
+    res.status(500).json({ message: 'Failed to select club tariff' });
+  }
+});
+
+router.post('/:id/monetization/tariff-requests', jwtAuth, async (req, res) => {
+  try {
+    const access = await requireReaderClubOwner(req.params.id, req.user!.userId);
+    if (access.error) return res.status(access.error.status).json({ message: access.error.message });
+    const payload = tariffRequestSchema.parse(req.body);
+    const [request] = await db.insert(readerClubTariffRequests).values({ ...payload, clubId: req.params.id, requestedBy: req.user!.userId }).returning();
+    res.status(201).json(request);
+  } catch (error) {
+    console.error('Error creating tariff request:', error);
+    res.status(500).json({ message: 'Failed to create tariff request' });
+  }
+});
+
 /**
  * DELETE /api/clubs/:id
  * Удалить клуб (только владелец)
@@ -425,8 +555,14 @@ router.get('/:id/members', jwtAuth, async (req, res) => {
     const membersWithAchievements = await Promise.all(
       members.map(async (member) => {
         const awarded = await gamificationService.listAwardedAchievements(member.id);
+        const muted = isFuture(member.mutedUntil);
+        const deactivated = isFuture(member.deactivatedUntil);
         return {
           ...member,
+          isActive: !deactivated,
+          mutedUntil: muted ? member.mutedUntil : null,
+          deactivatedUntil: deactivated ? member.deactivatedUntil : null,
+          restrictionReason: muted || deactivated ? member.restrictionReason : null,
           achievements: awarded.slice(0, 3),
         };
       }),
@@ -617,6 +753,70 @@ router.delete('/:id/members/:userId', jwtAuth, async (req, res) => {
   } catch (error) {
     console.error('Error removing member:', error);
     res.status(500).json({ message: 'Failed to remove member' });
+  }
+});
+
+router.patch('/:id/members/:userId/moderation', jwtAuth, async (req, res) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ message: 'Authentication required' });
+    }
+
+    const club = await storage.getClub(req.params.id);
+    if (!club) {
+      return res.status(404).json({ message: 'Club not found' });
+    }
+
+    const requesterMembership = await storage.getUserClubMembership(club.id, req.user.userId);
+    if (!requesterMembership || !['owner', 'moderator'].includes(requesterMembership.role)) {
+      return res.status(403).json({ message: 'Only club owner or moderator can moderate members' });
+    }
+
+    const targetMembership = await storage.getUserClubMembership(club.id, req.params.userId);
+    if (!targetMembership) {
+      return res.status(404).json({ message: 'Member not found' });
+    }
+
+    if (targetMembership.role === 'owner' || (requesterMembership.role === 'moderator' && targetMembership.role === 'moderator')) {
+      return res.status(403).json({ message: 'Cannot moderate this member' });
+    }
+
+    const payload = memberModerationSchema.parse(req.body);
+    const until = payload.until ? new Date(payload.until) : null;
+    if (until && Number.isNaN(until.getTime())) {
+      return res.status(400).json({ message: 'Invalid until date' });
+    }
+
+    const base = {
+      restrictionReason: payload.reason ?? null,
+      restrictedBy: req.user.userId,
+      restrictedAt: new Date(),
+    };
+    const changes = payload.action === 'mute'
+      ? { ...base, mutedUntil: until }
+      : payload.action === 'deactivate'
+        ? { ...base, isActive: false, deactivatedUntil: until }
+        : payload.action === 'unmute'
+          ? { mutedUntil: null, restrictionReason: null, restrictedBy: null, restrictedAt: null }
+          : { isActive: true, deactivatedUntil: null, restrictionReason: null, restrictedBy: null, restrictedAt: null };
+
+    const [updated] = await db.update(clubMembers)
+      .set(changes)
+      .where(and(eq(clubMembers.clubId, club.id), eq(clubMembers.userId, req.params.userId)))
+      .returning();
+
+    res.json({
+      ...targetMembership,
+      role: updated.role,
+      joinedAt: updated.joinedAt,
+      isActive: updated.isActive,
+      mutedUntil: updated.mutedUntil,
+      deactivatedUntil: updated.deactivatedUntil,
+      restrictionReason: updated.restrictionReason,
+    });
+  } catch (error) {
+    console.error('Error moderating member:', error);
+    res.status(500).json({ message: 'Failed to moderate member' });
   }
 });
 

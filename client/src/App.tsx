@@ -37,6 +37,7 @@ const AdminGamification = lazy(() => import("@/pages/admin/gamification"));
 const AdminRecordings = lazy(() => import("@/pages/admin/recordings"));
 const AdminSettings = lazy(() => import("@/pages/admin/settings"));
 const AdminPaymentProviders = lazy(() => import("@/pages/admin/payment-providers"));
+const AdminReaderClubTariffs = lazy(() => import("@/pages/admin/reader-club-tariffs"));
 const Readers = lazy(() => import("@/pages/readers"));
 const Library = lazy(() => import("@/pages/library"));
 const Pricing = lazy(() => import("@/pages/pricing"));
@@ -138,6 +139,7 @@ function Router() {
       <Route path="/admin/gamification" component={AdminGamification} />
       <Route path="/admin/recordings" component={AdminRecordings} />
       <Route path="/admin/payment-providers" component={AdminPaymentProviders} />
+      <Route path="/admin/reader-club-tariffs" component={AdminReaderClubTariffs} />
       <Route path="/admin/settings" component={AdminSettings} />
 
       {/* Implemented Pages */}
