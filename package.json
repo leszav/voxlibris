@@ -36,7 +36,6 @@
     "images:check:static": "tsx script/check-static-images.ts",
     "images:optimize:static": "tsx script/optimize-static-images.ts",
     "seed": "tsx script/seed.ts",
-    "seed:paid-reader-club": "tsx script/seed-paid-reader-club-fixture.ts",
     "prepare": "husky"
   },
   "dependencies": {
