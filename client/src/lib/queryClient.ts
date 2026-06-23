@@ -1,6 +1,16 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
 import { getAccessToken, syncTokenFromCookie } from "./token-store";
 
+export class ApiError extends Error {
+  code?: string;
+
+  constructor(message: string, code?: string) {
+    super(message);
+    this.name = "ApiError";
+    this.code = code;
+  }
+}
+
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
     const text = (await res.text()) || res.statusText;
@@ -113,10 +123,10 @@ async function handle403Error(res: Response, text: string): Promise<never> {
     }
     
     if (errorData.code === 'PRIVATE_CLUB_ACCESS_DENIED') {
-      throw new Error(errorData.message || 'Это закрытый клуб. Для доступа необходимо получить приглашение.');
+      throw new ApiError(errorData.message || 'Это закрытый клуб. Для доступа необходимо получить приглашение.', errorData.code);
     }
     
-    throw new Error(errorData.message || text || res.statusText);
+    throw new ApiError(errorData.message || text || res.statusText, errorData.code);
   } catch (parseError) {
     if (parseError instanceof SyntaxError) {
       throw new Error(text || res.statusText);

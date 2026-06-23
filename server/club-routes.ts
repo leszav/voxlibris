@@ -313,16 +313,35 @@ router.get('/:id', optionalJwtAuth, async (req, res) => {
       return res.status(404).json({ message: 'Club not found' });
     }
 
+    const paidReaderClub = isReaderLedClub(club)
+      && (await new CommerceService().listPublicProducts({ type: 'reader_club_subscription', scopeType: 'reader_club', scopeId: club.id })).length > 0;
+
     if (!req.user) {
+      if (paidReaderClub) {
+        return res.status(403).json({
+          message: 'Для доступа к клубу чтеца нужна активная подписка.',
+          code: 'READER_CLUB_ACCESS_REQUIRED',
+          feature: 'reader_club_access',
+        });
+      }
+
       if (club.isPrivate) {
         return res.status(403).json({
-          message: isReaderLedClub(club) ? 'Для доступа к клубу чтеца нужна активная подписка.' : 'Это закрытый клуб. Для доступа необходимо получить приглашение от участника клуба.',
-          code: isReaderLedClub(club) ? 'READER_CLUB_ACCESS_REQUIRED' : 'PRIVATE_CLUB_ACCESS_DENIED',
+          message: 'Это закрытый клуб. Для доступа необходимо получить приглашение от участника клуба.',
+          code: 'PRIVATE_CLUB_ACCESS_DENIED',
           isPrivate: true,
         });
       }
 
       return res.json(serializeClub(club, null));
+    }
+
+    if (paidReaderClub && !await canAccessReaderLedClub(club, req.user.userId, req.user.role as UserRole)) {
+      return res.status(403).json({
+        message: 'Для доступа к клубу чтеца нужна активная подписка.',
+        code: 'READER_CLUB_ACCESS_REQUIRED',
+        feature: 'reader_club_access',
+      });
     }
 
     // Проверяем доступ к приватному клубу
@@ -335,7 +354,7 @@ router.get('/:id', optionalJwtAuth, async (req, res) => {
       });
     }
 
-    if (!await canAccessReaderLedClub(club, req.user.userId, req.user.role as UserRole)) {
+    if (!paidReaderClub && !await canAccessReaderLedClub(club, req.user.userId, req.user.role as UserRole)) {
       return res.status(403).json({
         message: 'Для доступа к клубу чтеца нужна активная подписка.',
         code: 'READER_CLUB_ACCESS_REQUIRED',
@@ -417,7 +436,14 @@ router.get('/:id/monetization', jwtAuth, async (req, res) => {
     const access = await requireReaderClubOwner(req.params.id, req.user!.userId);
     if (access.error) return res.status(access.error.status).json({ message: access.error.message });
 
-    const [assignment] = await db.select().from(readerClubTariffAssignments)
+    const [assignmentRow] = await db.select({
+      assignment: readerClubTariffAssignments,
+      product: commerceProducts,
+      price: commercePrices,
+    })
+      .from(readerClubTariffAssignments)
+      .leftJoin(commerceProducts, eq(commerceProducts.id, readerClubTariffAssignments.productId))
+      .leftJoin(commercePrices, and(eq(commercePrices.productId, readerClubTariffAssignments.productId), eq(commercePrices.isDefault, true), eq(commercePrices.status, 'active')))
       .where(and(eq(readerClubTariffAssignments.clubId, req.params.id), eq(readerClubTariffAssignments.status, 'active')))
       .limit(1);
     const templates = await db.select().from(readerClubTariffTemplates)
@@ -427,7 +453,17 @@ router.get('/:id/monetization', jwtAuth, async (req, res) => {
       .where(eq(readerClubTariffRequests.clubId, req.params.id))
       .orderBy(desc(readerClubTariffRequests.createdAt));
 
-    res.json({ assignment: assignment ?? null, templates, requests });
+    res.json({
+      assignment: assignmentRow ? {
+        ...assignmentRow.assignment,
+        productTitle: assignmentRow.product?.title ?? null,
+        productDescription: assignmentRow.product?.description ?? null,
+        amountRub: assignmentRow.price?.amountRub ?? null,
+        period: assignmentRow.price?.period ?? null,
+      } : null,
+      templates,
+      requests,
+    });
   } catch (error) {
     console.error('Error getting club monetization:', error);
     res.status(500).json({ message: 'Failed to get club monetization' });

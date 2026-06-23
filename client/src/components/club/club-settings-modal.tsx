@@ -51,6 +51,10 @@ interface TariffAssignment {
   templateId: string | null;
   readerShareBps: number;
   acquiringFeeBps: number;
+  productTitle?: string | null;
+  productDescription?: string | null;
+  amountRub?: number | null;
+  period?: "week" | "month" | "quarter" | "year" | null;
 }
 
 interface TariffRequest {
@@ -91,6 +95,7 @@ export function ClubSettingsModal({ club }: ClubSettingsModalProps) {
   const [isPrivate, setIsPrivate] = useState(false);
   const [readerJoinRequestsEnabled, setReaderJoinRequestsEnabled] = useState(true);
   const [tariffRequest, setTariffRequest] = useState({ title: "", amountRub: "990", period: "month", message: "" });
+  const [expandedTariff, setExpandedTariff] = useState(false);
   const [schedule, setSchedule] = useState<ScheduleItem[]>([]);
   const [newSchedule, setNewSchedule] = useState<ScheduleItem>({
     id: "",
@@ -201,6 +206,13 @@ export function ClubSettingsModal({ club }: ClubSettingsModalProps) {
     };
     reader.readAsDataURL(file);
   };
+
+  const activeTemplate = monetization?.assignment?.templateId
+    ? monetization.templates.find((template) => template.id === monetization.assignment?.templateId)
+    : undefined;
+  const activeTariffTitle = activeTemplate?.title ?? monetization?.assignment?.productTitle ?? "Активный тариф";
+  const activeTariffAmount = activeTemplate?.amountRub ?? monetization?.assignment?.amountRub ?? null;
+  const activeTariffPeriod = activeTemplate?.period ?? monetization?.assignment?.period ?? null;
 
   const handleCoverCropped = (croppedImage: string) => {
     setCoverPreview(croppedImage);
@@ -576,26 +588,44 @@ export function ClubSettingsModal({ club }: ClubSettingsModalProps) {
                 <div className="space-y-4">
                   <div>
                     <Label>Текущий платный доступ</Label>
-                    <p className="text-sm text-muted-foreground">
-                      {monetization?.assignment ? "Тариф подключён. Новый выбор заменит активный тариф." : "Тариф ещё не подключён."}
-                    </p>
+                    {monetization?.assignment ? (
+                      <div className="mt-2 rounded-lg border bg-muted/40 p-4">
+                        <button type="button" className="text-left font-medium underline-offset-4 hover:underline" onClick={() => setExpandedTariff((value) => !value)}>
+                          {activeTariffTitle}
+                        </button>
+                        <p className="mt-1 text-sm text-muted-foreground">Новый выбор заменит активный тариф.</p>
+                        {expandedTariff ? (
+                          <div className="mt-3 space-y-1 text-sm text-muted-foreground">
+                            {activeTariffAmount && activeTariffPeriod ? <div>{activeTariffAmount.toLocaleString("ru-RU")} ₽ / {periodLabels[activeTariffPeriod]}</div> : null}
+                            <div>Доля чтеца: {monetization.assignment.readerShareBps / 100}%</div>
+                            <div>Эквайринг: {monetization.assignment.acquiringFeeBps / 100}%</div>
+                            {monetization.assignment.productDescription ? <div>{monetization.assignment.productDescription}</div> : null}
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">Тариф ещё не подключён.</p>
+                    )}
                   </div>
 
                   <div className="space-y-3">
                     <Label>Доступные тарифы</Label>
-                    {monetization?.templates.map((template) => (
-                      <div key={template.id} className="flex items-center justify-between gap-3 rounded-lg border p-4">
-                        <div>
-                          <div className="font-medium">{template.title}</div>
-                          <div className="text-sm text-muted-foreground">
-                            {template.amountRub.toLocaleString("ru-RU")} ₽ / {periodLabels[template.period]}, чтецу {template.readerShareBps / 100}%
+                    {monetization?.templates.map((template) => {
+                      const selected = monetization.assignment?.templateId === template.id;
+                      return (
+                        <div key={template.id} className="flex items-center justify-between gap-3 rounded-lg border p-4">
+                          <div>
+                            <div className="font-medium">{template.title}</div>
+                            <div className="text-sm text-muted-foreground">
+                              {template.amountRub.toLocaleString("ru-RU")} ₽ / {periodLabels[template.period]}, чтецу {template.readerShareBps / 100}%
+                            </div>
                           </div>
+                          <Button size="sm" onClick={() => selectTariff.mutate(template.id)} disabled={selected || selectTariff.isPending}>
+                            {selected ? "Выбран" : "Выбрать"}
+                          </Button>
                         </div>
-                        <Button size="sm" onClick={() => selectTariff.mutate(template.id)} disabled={selectTariff.isPending}>
-                          Выбрать
-                        </Button>
-                      </div>
-                    ))}
+                      );
+                    })}
                     {monetization?.templates.length === 0 ? <p className="text-sm text-muted-foreground">Публичных тарифов пока нет.</p> : null}
                   </div>
 

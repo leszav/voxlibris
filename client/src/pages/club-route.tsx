@@ -6,7 +6,7 @@ import ReaderClubDetails from "@/pages/reader-club-details";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { useClub } from "@/hooks/use-clubs";
 import { useAuth } from "@/hooks/use-auth";
-import { apiRequest } from "@/lib/queryClient";
+import { ApiError, apiRequest } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -109,7 +109,7 @@ export default function ClubRoute() {
     return <ClubRouteLoading />;
   }
 
-  if (error instanceof Error && error.message.includes("активная подписка")) {
+  if (error instanceof ApiError && error.code === "READER_CLUB_ACCESS_REQUIRED") {
     return <ReaderClubPaywall clubId={clubId} />;
   }
 

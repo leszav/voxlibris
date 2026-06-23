@@ -61,8 +61,8 @@ const emptyForm: TariffForm = {
   period: "month",
   readerSharePercent: "70",
   acquiringFeePercent: "3.5",
-  status: "draft",
-  visibility: "private",
+  status: "active",
+  visibility: "public",
   sortOrder: "0",
 };
 
@@ -110,6 +110,7 @@ export default function AdminReaderClubTariffsPage() {
   const [review, setReview] = useState({ readerSharePercent: "70", acquiringFeePercent: "3.5", reviewComment: "" });
   const { data: templates = [], isLoading } = useQuery<TariffTemplate[]>({ queryKey: QUERY_KEY });
   const { data: requests = [] } = useQuery<TariffRequest[]>({ queryKey: REQUESTS_QUERY_KEY });
+  const visibleTemplatesCount = templates.filter((template) => template.status === "active" && template.visibility === "public").length;
 
   const saveTemplate = useMutation({
     mutationFn: () => apiRequest(form.id ? `/api/commerce/admin/reader-club-tariff-templates/${form.id}` : "/api/commerce/admin/reader-club-tariff-templates", {
@@ -159,18 +160,33 @@ export default function AdminReaderClubTariffsPage() {
           <Card>
             <CardHeader>
               <CardTitle>Шаблоны</CardTitle>
-              <CardDescription>Активные публичные шаблоны доступны владельцам клубов.</CardDescription>
+              <CardDescription>
+                Владельцам клубов доступны только шаблоны со статусом «Активен» и видимостью «Public». Сейчас доступно: {visibleTemplatesCount}.
+              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-              {isLoading ? <Loader2 className="h-6 w-6 animate-spin" /> : templates.map((template) => (
-                <button key={template.id} type="button" onClick={() => setForm(formFromTemplate(template))} className="w-full rounded-lg border p-4 text-left hover:bg-muted/50">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="font-medium">{template.title}</div>
-                    <div className="text-sm text-muted-foreground">{template.amountRub.toLocaleString("ru-RU")} ₽ / {template.period}</div>
-                  </div>
-                  <div className="mt-1 text-sm text-muted-foreground">Чтец {bpsToPercent(template.readerShareBps)}%, эквайринг {bpsToPercent(template.acquiringFeeBps)}%, {template.status}, {template.visibility}</div>
-                </button>
-              ))}
+              {isLoading ? <Loader2 className="h-6 w-6 animate-spin" /> : templates.map((template) => {
+                const unavailable = template.status !== "active" || template.visibility !== "public";
+                return (
+                  <button
+                    key={template.id}
+                    type="button"
+                    onClick={() => setForm(formFromTemplate(template))}
+                    className={`w-full rounded-lg border p-4 text-left hover:bg-muted/50 ${unavailable ? "border-red-300 bg-red-50" : ""}`}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="font-medium">{template.title}</div>
+                      <div className="text-sm text-muted-foreground">{template.amountRub.toLocaleString("ru-RU")} ₽ / {template.period}</div>
+                    </div>
+                    <div className="mt-1 text-sm text-muted-foreground">Чтец {bpsToPercent(template.readerShareBps)}%, эквайринг {bpsToPercent(template.acquiringFeeBps)}%, {template.status}, {template.visibility}</div>
+                    {unavailable ? (
+                      <div className="mt-2 rounded-md border border-red-200 bg-red-100 px-3 py-2 text-sm text-red-800">
+                        Этот тариф невозможно выбрать в клубе. Сделайте его активным и публичным.
+                      </div>
+                    ) : null}
+                  </button>
+                );
+              })}
               {!isLoading && templates.length === 0 && <div className="text-sm text-muted-foreground">Шаблонов пока нет.</div>}
             </CardContent>
           </Card>
