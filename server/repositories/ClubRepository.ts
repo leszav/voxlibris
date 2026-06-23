@@ -671,12 +671,15 @@ export class ClubRepository extends BaseRepository {
     avatar: string | null;
     readerRating: number | null;
     email: string;
-    role: ClubMemberRole;
-    joinedAt: Date;
-    isActive: boolean;
-    status: User['status'];
-    emailConfirmed: boolean;
-    createdAt: Date;
+     role: ClubMemberRole;
+     joinedAt: Date;
+     isActive: boolean;
+     mutedUntil: Date | null;
+     deactivatedUntil: Date | null;
+     restrictionReason: string | null;
+     status: User['status'];
+     emailConfirmed: boolean;
+     createdAt: Date;
   }>> {
     this.validateRequired(clubId, 'clubId');
     
@@ -691,7 +694,10 @@ export class ClubRepository extends BaseRepository {
           email: users.email,
           role: clubMembers.role,
           joinedAt: clubMembers.joinedAt,
-          isActive: clubMembers.isActive,
+          isActive: sql<boolean>`CASE WHEN ${clubMembers.deactivatedUntil} IS NOT NULL THEN (${clubMembers.deactivatedUntil} <= NOW()) ELSE ${clubMembers.isActive} END`,
+          mutedUntil: sql<Date | null>`CASE WHEN ${clubMembers.mutedUntil} > NOW() THEN ${clubMembers.mutedUntil} ELSE NULL END`,
+          deactivatedUntil: sql<Date | null>`CASE WHEN ${clubMembers.deactivatedUntil} > NOW() THEN ${clubMembers.deactivatedUntil} ELSE NULL END`,
+          restrictionReason: clubMembers.restrictionReason,
           status: users.status,
           emailConfirmed: users.emailConfirmed,
           createdAt: users.createdAt

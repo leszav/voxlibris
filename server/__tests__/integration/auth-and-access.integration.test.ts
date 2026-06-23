@@ -53,6 +53,17 @@ describe("Integration: auth and protected API boundaries", () => {
     expectStatus(response, 401);
   });
 
+  it("PATCH /api/clubs/:id/members/:userId/moderation без токена возвращает 401", async (t) => {
+    if (!apiAvailable) return t.skip(`API server is not available at ${TEST_API_BASE_URL}`);
+
+    const { response } = await apiRequest("/api/clubs/test-club/members/test-user/moderation", {
+      method: "PATCH",
+      body: JSON.stringify({ action: "mute" }),
+    });
+
+    expectStatus(response, 401);
+  });
+
   it("POST /api/auth/login без логина/email возвращает 400", async (t) => {
     if (!apiAvailable) return t.skip(`API server is not available at ${TEST_API_BASE_URL}`);
 

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,6 +12,7 @@ import { ImageCropDialog } from "@/components/ui/image-crop-dialog";
 import { Settings, Image as ImageIcon, Loader2, Check, Trash2, Calendar, Clock, Type, Upload } from "lucide-react";
 import { useUpdateClub } from "@/hooks/use-clubs";
 import { useToast } from "@/hooks/use-toast";
+import { apiRequest } from "@/lib/queryClient";
 import type { ClubWithDetails } from "@shared/schema";
 
 interface ClubSettingsModalProps {
@@ -33,11 +35,47 @@ interface ClubSettings {
   readerJoinRequestsEnabled?: boolean;
 }
 
+interface TariffTemplate {
+  id: string;
+  title: string;
+  description: string | null;
+  amountRub: number;
+  period: "week" | "month" | "quarter" | "year";
+  readerShareBps: number;
+  acquiringFeeBps: number;
+}
+
+interface TariffAssignment {
+  id: string;
+  productId: string;
+  templateId: string | null;
+  readerShareBps: number;
+  acquiringFeeBps: number;
+}
+
+interface TariffRequest {
+  id: string;
+  title: string;
+  requestedAmountRub: number;
+  requestedPeriod: "week" | "month" | "quarter" | "year";
+  status: string;
+}
+
+interface MonetizationResponse {
+  assignment: TariffAssignment | null;
+  templates: TariffTemplate[];
+  requests: TariffRequest[];
+}
+
+const periodLabels = { week: "неделя", month: "месяц", quarter: "квартал", year: "год" };
+
 export function ClubSettingsModal({ club }: ClubSettingsModalProps) {
   const [isOpen, setIsOpen] = useState(false);
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const updateClubMutation = useUpdateClub();
   const isReaderLedClub = club.type === "reader-led";
+  const monetizationKey = ["club-monetization", club.id] as const;
 
   const [coverImage, setCoverImage] = useState(club.coverImage || "");
   const [coverPreview, setCoverPreview] = useState(club.coverImage || "");
@@ -52,6 +90,7 @@ export function ClubSettingsModal({ club }: ClubSettingsModalProps) {
   const [shortDescription, setShortDescription] = useState("");
   const [isPrivate, setIsPrivate] = useState(false);
   const [readerJoinRequestsEnabled, setReaderJoinRequestsEnabled] = useState(true);
+  const [tariffRequest, setTariffRequest] = useState({ title: "", amountRub: "990", period: "month", message: "" });
   const [schedule, setSchedule] = useState<ScheduleItem[]>([]);
   const [newSchedule, setNewSchedule] = useState<ScheduleItem>({
     id: "",
@@ -64,6 +103,41 @@ export function ClubSettingsModal({ club }: ClubSettingsModalProps) {
   const welcomeEditorRef = useRef<RichTextEditorRef>(null);
   const rulesEditorRef = useRef<RichTextEditorRef>(null);
   const reloadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { data: monetization } = useQuery<MonetizationResponse>({
+    queryKey: monetizationKey,
+    queryFn: () => apiRequest<MonetizationResponse>(`/api/clubs/${club.id}/monetization`),
+    enabled: isOpen && isReaderLedClub,
+  });
+
+  const selectTariff = useMutation({
+    mutationFn: (templateId: string) => apiRequest(`/api/clubs/${club.id}/monetization/select-template`, {
+      method: "POST",
+      body: JSON.stringify({ templateId }),
+    }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: monetizationKey });
+      toast({ title: "Тариф подключён" });
+    },
+    onError: (error) => toast({ title: "Ошибка тарифа", description: error instanceof Error ? error.message : "Не удалось подключить тариф", variant: "destructive" }),
+  });
+
+  const createTariffRequest = useMutation({
+    mutationFn: () => apiRequest(`/api/clubs/${club.id}/monetization/tariff-requests`, {
+      method: "POST",
+      body: JSON.stringify({
+        title: tariffRequest.title.trim(),
+        requestedAmountRub: Number(tariffRequest.amountRub),
+        requestedPeriod: tariffRequest.period,
+        message: tariffRequest.message.trim() || null,
+      }),
+    }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: monetizationKey });
+      setTariffRequest({ title: "", amountRub: "990", period: "month", message: "" });
+      toast({ title: "Заявка отправлена" });
+    },
+    onError: (error) => toast({ title: "Ошибка заявки", description: error instanceof Error ? error.message : "Не удалось отправить заявку", variant: "destructive" }),
+  });
 
   useEffect(() => {
     if (isOpen) {
@@ -240,11 +314,12 @@ export function ClubSettingsModal({ club }: ClubSettingsModalProps) {
         </DialogHeader>
 
         <Tabs defaultValue="appearance" className="flex min-h-0 flex-1 flex-col overflow-hidden">
-          <TabsList className="grid grid-cols-2 md:grid-cols-4 w-full shrink-0 overflow-x-auto whitespace-nowrap">
+          <TabsList className="grid grid-cols-2 md:grid-cols-5 w-full shrink-0 overflow-x-auto whitespace-nowrap">
             <TabsTrigger value="appearance">Оформление</TabsTrigger>
             <TabsTrigger value="welcome">Приветствие</TabsTrigger>
             <TabsTrigger value="rules">Правила</TabsTrigger>
             <TabsTrigger value="schedule">Расписание</TabsTrigger>
+            {isReaderLedClub ? <TabsTrigger value="monetization">Монетизация</TabsTrigger> : null}
           </TabsList>
 
           <ScrollArea className="min-h-0 flex-1 -mx-4 px-4 pr-5">
@@ -495,6 +570,66 @@ export function ClubSettingsModal({ club }: ClubSettingsModalProps) {
                 )}
               </div>
             </TabsContent>
+
+            {isReaderLedClub ? (
+              <TabsContent value="monetization" className="space-y-6 mt-0">
+                <div className="space-y-4">
+                  <div>
+                    <Label>Текущий платный доступ</Label>
+                    <p className="text-sm text-muted-foreground">
+                      {monetization?.assignment ? "Тариф подключён. Новый выбор заменит активный тариф." : "Тариф ещё не подключён."}
+                    </p>
+                  </div>
+
+                  <div className="space-y-3">
+                    <Label>Доступные тарифы</Label>
+                    {monetization?.templates.map((template) => (
+                      <div key={template.id} className="flex items-center justify-between gap-3 rounded-lg border p-4">
+                        <div>
+                          <div className="font-medium">{template.title}</div>
+                          <div className="text-sm text-muted-foreground">
+                            {template.amountRub.toLocaleString("ru-RU")} ₽ / {periodLabels[template.period]}, чтецу {template.readerShareBps / 100}%
+                          </div>
+                        </div>
+                        <Button size="sm" onClick={() => selectTariff.mutate(template.id)} disabled={selectTariff.isPending}>
+                          Выбрать
+                        </Button>
+                      </div>
+                    ))}
+                    {monetization?.templates.length === 0 ? <p className="text-sm text-muted-foreground">Публичных тарифов пока нет.</p> : null}
+                  </div>
+
+                  <div className="space-y-3 rounded-lg border p-4">
+                    <Label>Запросить индивидуальный тариф</Label>
+                    <Input placeholder="Название тарифа" value={tariffRequest.title} onChange={(e) => setTariffRequest({ ...tariffRequest, title: e.target.value })} />
+                    <div className="grid grid-cols-2 gap-3">
+                      <Input type="number" min="1" value={tariffRequest.amountRub} onChange={(e) => setTariffRequest({ ...tariffRequest, amountRub: e.target.value })} />
+                      <select className="rounded-md border bg-background px-3 text-sm" value={tariffRequest.period} onChange={(e) => setTariffRequest({ ...tariffRequest, period: e.target.value })}>
+                        <option value="week">Неделя</option>
+                        <option value="month">Месяц</option>
+                        <option value="quarter">Квартал</option>
+                        <option value="year">Год</option>
+                      </select>
+                    </div>
+                    <textarea className="w-full rounded-md border bg-background p-3 text-sm" placeholder="Комментарий для администратора" value={tariffRequest.message} onChange={(e) => setTariffRequest({ ...tariffRequest, message: e.target.value })} />
+                    <Button type="button" onClick={() => createTariffRequest.mutate()} disabled={createTariffRequest.isPending || !tariffRequest.title.trim()}>
+                      Отправить заявку
+                    </Button>
+                  </div>
+
+                  {monetization?.requests.length ? (
+                    <div className="space-y-2">
+                      <Label>Мои заявки</Label>
+                      {monetization.requests.map((request) => (
+                        <div key={request.id} className="rounded border p-3 text-sm">
+                          {request.title}: {request.requestedAmountRub.toLocaleString("ru-RU")} ₽ / {periodLabels[request.requestedPeriod]} — {request.status}
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              </TabsContent>
+            ) : null}
           </ScrollArea>
         </Tabs>
 

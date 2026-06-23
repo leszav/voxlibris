@@ -4,6 +4,7 @@ import { logger } from '../lib/logger.js';
 import { authService } from '../auth-service.js';
 import { sessionAnalyticsService } from '../services/session-analytics-service.js';
 import { gamificationService } from '../services/gamification-service.js';
+import { canClubMemberWrite } from '../lib/club-member-moderation.js';
 
 interface AuthenticatedSocket extends Socket {
   userId?: string;
@@ -335,6 +336,12 @@ export function setupReadingSessionsHandlers(_io: SocketIOServer, namespace: Nam
           return;
         }
 
+        const membership = await storage.getUserClubMembership(session.clubId, userId);
+        if (!membership || !canClubMemberWrite(membership)) {
+          socket.emit('error', { message: 'Your club write permissions are restricted' });
+          return;
+        }
+
         // Добавляем реакцию
         await repositories.sessionReactions.addReaction({
           userId,
@@ -390,6 +397,11 @@ export function setupReadingSessionsHandlers(_io: SocketIOServer, namespace: Nam
         const membership = await storage.getUserClubMembership(session.clubId, userId);
         if (!membership) {
           socket.emit('error', { message: 'You are not a member of this club' });
+          return;
+        }
+
+        if (!canClubMemberWrite(membership)) {
+          socket.emit('error', { message: 'Your club write permissions are restricted' });
           return;
         }
 

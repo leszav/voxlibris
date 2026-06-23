@@ -13,6 +13,7 @@ import { logger } from "./lib/logger.js";
 import { getIcecastStreamUrl } from "./lib/icecast-public-url.js";
 import { syncBookReadingStatus } from "./lib/sync-reading-status.js";
 import { liveSessionsStore, type LiveReaderEntry } from "./lib/live-sessions-store.js";
+import { CommerceService } from "./services/monetization.js";
 
 interface AuthenticatedSocket extends Socket {
   userId: string;
@@ -289,8 +290,9 @@ export function initializeReaderWebSocket(httpServer: HttpServer) {
       try {
         const { bookId, clubId } = data;
         
-        // Проверка доступа к книге
-        const hasAccess = await verifyBookAccess(authSocket.userId, bookId, clubId);
+        // Проверка доступа к книге или paid live-доступа слушателя reader-led клуба
+        const hasAccess = await verifyBookAccess(authSocket.userId, bookId, clubId)
+          || await verifyReaderClubLiveAccess(authSocket.userId, clubId, bookId);
         if (!hasAccess) {
           socket.emit("error", { message: "Access denied to this book" });
           return;
@@ -534,6 +536,10 @@ export function initializeReaderWebSocket(httpServer: HttpServer) {
      */
     socket.on("join_club", async (data: { clubId: string }) => {
       const { clubId } = data;
+      if (!await verifyReaderClubLiveAccess(authSocket.userId, clubId)) {
+        socket.emit('error', { message: 'Reader club access required', code: 'READER_CLUB_ACCESS_REQUIRED' });
+        return;
+      }
       socket.join(`club:${clubId}`);
       logger.info(`[WS Reader] ${authSocket.username} joined club room ${clubId}`);
 
@@ -603,6 +609,33 @@ async function verifyBookAccess(userId: string, bookId: string, clubId?: string)
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     logger.error({ error: errorMessage }, '[WS Reader] Error verifying book access');
+    return false;
+  }
+}
+
+async function verifyReaderClubLiveAccess(userId: string, clubId?: string, bookId?: string): Promise<boolean> {
+  try {
+    if (!clubId) return false;
+    const [club] = await db.select({ id: clubs.id, type: clubs.type, ownerId: clubs.ownerId }).from(clubs).where(eq(clubs.id, clubId)).limit(1);
+    if (!club || club.type !== 'reader-led') return false;
+    if (bookId) {
+      const [clubBook] = await db.select({ id: clubBooks.id }).from(clubBooks)
+        .where(and(eq(clubBooks.id, bookId), eq(clubBooks.clubId, clubId), eq(clubBooks.isDeleted, false)))
+        .limit(1);
+      if (!clubBook) return false;
+    }
+    if (club.ownerId === userId) return true;
+
+    const [membership] = await db.select({ id: clubMembers.id, role: clubMembers.role }).from(clubMembers)
+      .where(and(eq(clubMembers.clubId, clubId), eq(clubMembers.userId, userId), eq(clubMembers.isActive, true)))
+      .limit(1);
+    if (!membership) return false;
+    if (membership.role === 'owner' || membership.role === 'moderator') return true;
+
+    return new CommerceService().hasEntitlement(userId, 'reader_club', clubId, 'reader_club_access');
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error({ error: errorMessage }, '[WS Reader] Error verifying reader club live access');
     return false;
   }
 }

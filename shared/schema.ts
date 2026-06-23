@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, boolean, timestamp, foreignKey, jsonb, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, boolean, timestamp, foreignKey, jsonb, uniqueIndex, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -150,6 +150,11 @@ export const clubMembers = pgTable("club_members", {
   role: text("role").notNull().default("member").$type<ClubMemberRole>(), // Роль участника в клубе
   joinedAt: timestamp("joined_at").notNull().default(sql`now()`),
   isActive: boolean("is_active").notNull().default(true),
+  mutedUntil: timestamp("muted_until"),
+  deactivatedUntil: timestamp("deactivated_until"),
+  restrictionReason: text("restriction_reason"),
+  restrictedBy: varchar("restricted_by").references(() => users.id),
+  restrictedAt: timestamp("restricted_at"),
 });
 
 // Club invitations - система приглашений участников
@@ -2658,10 +2663,10 @@ export type InsertUserStreak = typeof userStreaks.$inferInsert;
 export type PaymentProviderCode = 'yookassa';
 export type PaymentProviderStatus = 'active' | 'inactive';
 export type CommerceProductType = 'platform_subscription' | 'club_subscription' | 'reader_club_subscription' | 'ticket' | 'recording_access' | 'donation';
-export type CommerceScopeType = 'platform' | 'club' | 'session' | 'recording' | 'reader';
+export type CommerceScopeType = 'platform' | 'club' | 'reader_club' | 'session' | 'recording' | 'reader';
 export type CommerceProductStatus = 'draft' | 'active' | 'archived';
 export type CommerceProductVisibility = 'public' | 'private';
-export type CommercePricePeriod = 'one_time' | 'month' | 'year';
+export type CommercePricePeriod = 'one_time' | 'week' | 'month' | 'quarter' | 'year';
 export type CommercePriceStatus = 'active' | 'archived';
 export type CommerceOrderStatus = 'pending' | 'paid' | 'cancelled' | 'expired' | 'failed';
 export type CommercePaymentStatus = 'pending' | 'succeeded' | 'failed' | 'cancelled' | 'refunded';
@@ -2669,6 +2674,12 @@ export type CommercePaymentEventStatus = 'received' | 'processed' | 'failed';
 export type CommerceSubscriptionStatus = 'pending' | 'active' | 'grace' | 'past_due' | 'cancelled' | 'expired';
 export type CommerceEntitlementSourceType = 'payment' | 'subscription' | 'promo' | 'admin_grant' | 'migration';
 export type CommerceEntitlementStatus = 'active' | 'revoked' | 'expired';
+export type ReaderClubTariffTemplateStatus = 'draft' | 'active' | 'archived';
+export type ReaderClubTariffVisibility = 'public' | 'private';
+export type ReaderClubTariffRequestStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
+export type ReaderClubTariffAssignmentStatus = 'active' | 'inactive' | 'archived';
+export type CommerceLedgerEntryType = 'acquiring_fee' | 'reader_earning' | 'platform_fee';
+export type CommerceLedgerEntryStatus = 'pending' | 'available' | 'paid' | 'void';
 
 export const paymentProviders = pgTable('payment_providers', {
   id: varchar('id').primaryKey().default(sql`gen_random_uuid()`),
@@ -2799,6 +2810,85 @@ export const commerceEntitlements = pgTable('commerce_entitlements', {
   updatedAt: timestamp('updated_at').notNull().default(sql`now()`),
 });
 
+export const readerClubTariffTemplates = pgTable('reader_club_tariff_templates', {
+  id: varchar('id').primaryKey().default(sql`gen_random_uuid()`),
+  title: varchar('title', { length: 180 }).notNull(),
+  description: text('description'),
+  amountRub: integer('amount_rub').notNull(),
+  period: varchar('period', { length: 20 }).notNull().$type<Exclude<CommercePricePeriod, 'one_time'>>(),
+  readerShareBps: integer('reader_share_bps').notNull(),
+  acquiringFeeBps: integer('acquiring_fee_bps').notNull().default(0),
+  status: varchar('status', { length: 20 }).notNull().default('draft').$type<ReaderClubTariffTemplateStatus>(),
+  visibility: varchar('visibility', { length: 20 }).notNull().default('private').$type<ReaderClubTariffVisibility>(),
+  sortOrder: integer('sort_order').notNull().default(0),
+  createdAt: timestamp('created_at').notNull().default(sql`now()`),
+  updatedAt: timestamp('updated_at').notNull().default(sql`now()`),
+}, (table) => ({
+  statusIdx: index('reader_club_tariff_templates_status_idx').on(table.status, table.visibility, table.sortOrder),
+}));
+
+export const readerClubTariffRequests = pgTable('reader_club_tariff_requests', {
+  id: varchar('id').primaryKey().default(sql`gen_random_uuid()`),
+  clubId: varchar('club_id').notNull().references(() => clubs.id, { onDelete: 'cascade' }),
+  requestedBy: varchar('requested_by').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  title: varchar('title', { length: 180 }).notNull(),
+  description: text('description'),
+  requestedAmountRub: integer('requested_amount_rub').notNull(),
+  requestedPeriod: varchar('requested_period', { length: 20 }).notNull().$type<Exclude<CommercePricePeriod, 'one_time'>>(),
+  message: text('message'),
+  status: varchar('status', { length: 20 }).notNull().default('pending').$type<ReaderClubTariffRequestStatus>(),
+  reviewedBy: varchar('reviewed_by').references(() => users.id, { onDelete: 'set null' }),
+  reviewedAt: timestamp('reviewed_at'),
+  reviewComment: text('review_comment'),
+  createdAt: timestamp('created_at').notNull().default(sql`now()`),
+  updatedAt: timestamp('updated_at').notNull().default(sql`now()`),
+}, (table) => ({
+  clubStatusIdx: index('reader_club_tariff_requests_club_status_idx').on(table.clubId, table.status),
+}));
+
+export const readerClubTariffAssignments = pgTable('reader_club_tariff_assignments', {
+  id: varchar('id').primaryKey().default(sql`gen_random_uuid()`),
+  clubId: varchar('club_id').notNull().references(() => clubs.id, { onDelete: 'cascade' }),
+  templateId: varchar('template_id').references(() => readerClubTariffTemplates.id, { onDelete: 'set null' }),
+  productId: varchar('product_id').notNull().references(() => commerceProducts.id, { onDelete: 'cascade' }),
+  selectedBy: varchar('selected_by').references(() => users.id, { onDelete: 'set null' }),
+  readerShareBps: integer('reader_share_bps').notNull(),
+  acquiringFeeBps: integer('acquiring_fee_bps').notNull().default(0),
+  status: varchar('status', { length: 20 }).notNull().default('active').$type<ReaderClubTariffAssignmentStatus>(),
+  createdAt: timestamp('created_at').notNull().default(sql`now()`),
+  updatedAt: timestamp('updated_at').notNull().default(sql`now()`),
+}, (table) => ({
+  activeClubIdx: uniqueIndex('reader_club_tariff_assignments_active_club_idx').on(table.clubId).where(sql`${table.status} = 'active'`),
+}));
+
+export const commerceLedgerEntries = pgTable('commerce_ledger_entries', {
+  id: varchar('id').primaryKey().default(sql`gen_random_uuid()`),
+  paymentId: varchar('payment_id').notNull().references(() => commercePayments.id, { onDelete: 'cascade' }),
+  orderId: varchar('order_id').notNull().references(() => commerceOrders.id, { onDelete: 'cascade' }),
+  productId: varchar('product_id').notNull().references(() => commerceProducts.id, { onDelete: 'cascade' }),
+  clubId: varchar('club_id').references(() => clubs.id, { onDelete: 'set null' }),
+  readerUserId: varchar('reader_user_id').references(() => users.id, { onDelete: 'set null' }),
+  entryType: varchar('entry_type', { length: 30 }).notNull().$type<CommerceLedgerEntryType>(),
+  amountKopecks: integer('amount_kopecks').notNull(),
+  shareBps: integer('share_bps'),
+  status: varchar('status', { length: 20 }).notNull().default('pending').$type<CommerceLedgerEntryStatus>(),
+  createdAt: timestamp('created_at').notNull().default(sql`now()`),
+}, (table) => ({
+  paymentIdx: index('commerce_ledger_entries_payment_idx').on(table.paymentId),
+  readerStatusIdx: index('commerce_ledger_entries_reader_status_idx').on(table.readerUserId, table.status),
+}));
+
+export const commerceRenewalReminders = pgTable('commerce_renewal_reminders', {
+  id: varchar('id').primaryKey().default(sql`gen_random_uuid()`),
+  entitlementId: varchar('entitlement_id').notNull().references(() => commerceEntitlements.id, { onDelete: 'cascade' }),
+  userId: varchar('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  daysBeforeEnd: integer('days_before_end').notNull(),
+  sentAt: timestamp('sent_at').notNull().default(sql`now()`),
+}, (table) => ({
+  entitlementDayIdx: uniqueIndex('commerce_renewal_reminders_entitlement_day_idx').on(table.entitlementId, table.daysBeforeEnd),
+  userIdx: index('commerce_renewal_reminders_user_idx').on(table.userId, table.sentAt),
+}));
+
 export type PaymentProviderConfig = typeof paymentProviders.$inferSelect;
 export type InsertPaymentProviderConfig = typeof paymentProviders.$inferInsert;
 export type CommerceProduct = typeof commerceProducts.$inferSelect;
@@ -2817,3 +2907,13 @@ export type CommerceSubscription = typeof commerceSubscriptions.$inferSelect;
 export type InsertCommerceSubscription = typeof commerceSubscriptions.$inferInsert;
 export type CommerceEntitlement = typeof commerceEntitlements.$inferSelect;
 export type InsertCommerceEntitlement = typeof commerceEntitlements.$inferInsert;
+export type ReaderClubTariffTemplate = typeof readerClubTariffTemplates.$inferSelect;
+export type InsertReaderClubTariffTemplate = typeof readerClubTariffTemplates.$inferInsert;
+export type ReaderClubTariffRequest = typeof readerClubTariffRequests.$inferSelect;
+export type InsertReaderClubTariffRequest = typeof readerClubTariffRequests.$inferInsert;
+export type ReaderClubTariffAssignment = typeof readerClubTariffAssignments.$inferSelect;
+export type InsertReaderClubTariffAssignment = typeof readerClubTariffAssignments.$inferInsert;
+export type CommerceLedgerEntry = typeof commerceLedgerEntries.$inferSelect;
+export type InsertCommerceLedgerEntry = typeof commerceLedgerEntries.$inferInsert;
+export type CommerceRenewalReminder = typeof commerceRenewalReminders.$inferSelect;
+export type InsertCommerceRenewalReminder = typeof commerceRenewalReminders.$inferInsert;

@@ -6,6 +6,7 @@ import { db } from './db.js';
 import { and, eq } from 'drizzle-orm';
 import { clubDiscussions, clubs, notifications } from '../shared/schema.js';
 import { notificationService } from './services/notification-service.js';
+import { canClubMemberWrite } from './lib/club-member-moderation.js';
 
 const router = Router();
 
@@ -58,6 +59,10 @@ router.post('/clubs/:clubId/discussions', jwtAuth, requireActiveUser, async (req
       return res.status(403).json({ message: 'You must be a club member to post discussions' });
     }
 
+    if (!canClubMemberWrite(membership)) {
+      return res.status(403).json({ message: 'Ваши права на публикацию в клубе временно ограничены', code: 'CLUB_MEMBER_RESTRICTED' });
+    }
+
     const discussion = await storage.createClubDiscussion({
       clubId,
       userId: req.user.userId,
@@ -92,6 +97,10 @@ router.post('/clubs/:clubId/discussions/:discussionId/reply', jwtAuth, requireAc
     const membership = await storage.getUserClubMembership(clubId, req.user.userId);
     if (!membership) {
       return res.status(403).json({ message: 'You must be a club member to reply to discussions' });
+    }
+
+    if (!canClubMemberWrite(membership)) {
+      return res.status(403).json({ message: 'Ваши права на публикацию в клубе временно ограничены', code: 'CLUB_MEMBER_RESTRICTED' });
     }
 
     const parentRows = await db

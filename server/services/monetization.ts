@@ -4,8 +4,12 @@ import type { NextFunction, Request, Response } from 'express';
 import { db } from '../db.js';
 import { logger } from '../lib/logger.js';
 import { getPublicBaseUrl } from '../lib/public-base-url.js';
+import { commerceEntitlementEnd } from './commerce-periods.js';
 import {
+  clubMembers,
+  clubs,
   commerceEntitlements,
+  commerceLedgerEntries,
   commerceOrders,
   commercePaymentEvents,
   commercePayments,
@@ -13,6 +17,7 @@ import {
   commerceProductFeatures,
   commerceProducts,
   paymentProviders,
+  readerClubTariffAssignments,
   users,
   type CommerceProduct,
   type CommercePrice,
@@ -25,6 +30,52 @@ type Credentials = Record<string, string>;
 type CheckoutInput = { userId: string; product: CommerceProduct; price: CommercePrice; orderId: string; paymentId: string; userEmail?: string };
 type CheckoutResult = { provider: PaymentProviderCode; confirmationUrl: string; providerPaymentId: string };
 type PaymentNotificationResult = { eventId: string; providerPaymentId: string; status: 'succeeded' | 'failed' | 'cancelled' | 'refunded'; paymentMethodToken?: string };
+
+type DbExecutor = Pick<typeof db, 'select' | 'insert' | 'update'>;
+
+async function ensureReaderClubMembership(tx: DbExecutor, product: CommerceProduct, userId: string) {
+  if (product.scopeType !== 'reader_club' || !product.scopeId) return;
+  const [club] = await tx.select({ id: clubs.id, type: clubs.type }).from(clubs).where(eq(clubs.id, product.scopeId)).limit(1);
+  if (!club || club.type !== 'reader-led') return;
+
+  const [member] = await tx.select({ id: clubMembers.id, isActive: clubMembers.isActive }).from(clubMembers)
+    .where(and(eq(clubMembers.clubId, club.id), eq(clubMembers.userId, userId)))
+    .limit(1);
+  if (member?.isActive) return;
+  if (member) {
+    await tx.update(clubMembers).set({ isActive: true }).where(eq(clubMembers.id, member.id));
+    return;
+  }
+  await tx.insert(clubMembers).values({ clubId: club.id, userId, role: 'member', joinedAt: new Date(), isActive: true });
+}
+
+async function createReaderClubLedger(tx: DbExecutor, product: CommerceProduct, order: typeof commerceOrders.$inferSelect, payment: typeof commercePayments.$inferSelect) {
+  if (product.scopeType !== 'reader_club' || !product.scopeId || payment.amountRub <= 0) return;
+  const [existing] = await tx.select({ id: commerceLedgerEntries.id }).from(commerceLedgerEntries).where(eq(commerceLedgerEntries.paymentId, payment.id)).limit(1);
+  if (existing) return;
+
+  const [assignment] = await tx.select({ readerShareBps: readerClubTariffAssignments.readerShareBps, acquiringFeeBps: readerClubTariffAssignments.acquiringFeeBps }).from(readerClubTariffAssignments)
+    .where(and(
+      eq(readerClubTariffAssignments.productId, product.id),
+      eq(readerClubTariffAssignments.clubId, product.scopeId),
+      eq(readerClubTariffAssignments.status, 'active'),
+    ))
+    .limit(1);
+  if (!assignment) return;
+
+  const [club] = await tx.select({ ownerId: clubs.ownerId }).from(clubs).where(eq(clubs.id, product.scopeId)).limit(1);
+  const gross = payment.amountRub * 100;
+  const acquiringFee = Math.round(gross * assignment.acquiringFeeBps / 10000);
+  const net = gross - acquiringFee;
+  const readerEarning = Math.round(net * assignment.readerShareBps / 10000);
+  const platformFee = net - readerEarning;
+
+  await tx.insert(commerceLedgerEntries).values([
+    { paymentId: payment.id, orderId: order.id, productId: product.id, clubId: product.scopeId, entryType: 'acquiring_fee', amountKopecks: acquiringFee, shareBps: assignment.acquiringFeeBps, status: 'available' },
+    { paymentId: payment.id, orderId: order.id, productId: product.id, clubId: product.scopeId, readerUserId: club?.ownerId, entryType: 'reader_earning', amountKopecks: readerEarning, shareBps: assignment.readerShareBps, status: 'available' },
+    { paymentId: payment.id, orderId: order.id, productId: product.id, clubId: product.scopeId, entryType: 'platform_fee', amountKopecks: platformFee, status: 'available' },
+  ]);
+}
 
 export interface PaymentProvider {
   code: PaymentProviderCode;
@@ -219,7 +270,6 @@ export class CommerceService {
   }
 
   async hasEntitlement(userId: string, scopeType: CommerceScopeType, scopeId: string | null, featureKey: string) {
-    const now = new Date();
     const [row] = await db.select({ id: commerceEntitlements.id }).from(commerceEntitlements)
       .where(and(
         eq(commerceEntitlements.userId, userId),
@@ -227,7 +277,7 @@ export class CommerceService {
         scopeId ? eq(commerceEntitlements.scopeId, scopeId) : isNull(commerceEntitlements.scopeId),
         eq(commerceEntitlements.featureKey, featureKey),
         eq(commerceEntitlements.status, 'active'),
-        or(isNull(commerceEntitlements.endsAt), sql`${commerceEntitlements.endsAt} > ${now}`),
+        or(isNull(commerceEntitlements.endsAt), sql`${commerceEntitlements.endsAt} > now()`),
       )).limit(1);
     return Boolean(row);
   }
@@ -259,15 +309,16 @@ export class CommerceService {
 
   private async grantFreeAccess(userId: string, product: CommerceProduct, price: CommercePrice) {
     const [order] = await db.insert(commerceOrders).values({ userId, productId: product.id, priceId: price.id, amountRub: 0, status: 'paid' }).returning();
-    await this.grantProductEntitlements(userId, product, 'payment', order.id);
+    await this.grantProductEntitlements(userId, product, price, 'payment', order.id);
+    await ensureReaderClubMembership(db, product, userId);
     return { provider: null, confirmationUrl: '', providerPaymentId: '', granted: true };
   }
 
-  async grantProductEntitlements(userId: string, product: CommerceProduct, sourceType: 'payment' | 'subscription' | 'promo' | 'admin_grant' | 'migration', sourceId?: string) {
+  async grantProductEntitlements(userId: string, product: CommerceProduct, price: CommercePrice, sourceType: 'payment' | 'subscription' | 'promo' | 'admin_grant' | 'migration', sourceId?: string) {
     const features = await db.select().from(commerceProductFeatures).where(eq(commerceProductFeatures.productId, product.id));
     const granted = [];
     for (const feature of features) {
-      const [existing] = await db.select({ id: commerceEntitlements.id }).from(commerceEntitlements)
+      const [existing] = await db.select({ id: commerceEntitlements.id, endsAt: commerceEntitlements.endsAt }).from(commerceEntitlements)
         .where(and(
           eq(commerceEntitlements.userId, userId),
           eq(commerceEntitlements.scopeType, product.scopeType),
@@ -276,7 +327,15 @@ export class CommerceService {
           eq(commerceEntitlements.status, 'active'),
         ))
         .limit(1);
-      if (existing) continue;
+      if (existing && price.period === 'one_time') continue;
+      if (existing) {
+        const [entitlement] = await db.update(commerceEntitlements)
+          .set({ endsAt: commerceEntitlementEnd(price, existing.endsAt), sourceType, sourceId, updatedAt: new Date() })
+          .where(eq(commerceEntitlements.id, existing.id))
+          .returning();
+        granted.push(entitlement);
+        continue;
+      }
       const [entitlement] = await db.insert(commerceEntitlements).values({
         userId,
         scopeType: product.scopeType,
@@ -284,6 +343,7 @@ export class CommerceService {
         featureKey: feature.featureKey,
         sourceType,
         sourceId,
+        endsAt: commerceEntitlementEnd(price, null),
       }).returning();
       granted.push(entitlement);
     }
@@ -293,7 +353,9 @@ export class CommerceService {
   async adminGrantProductAccess(input: { userId: string; productId: string; adminUserId: string; sourceType: 'promo' | 'admin_grant' }) {
     const [product] = await db.select().from(commerceProducts).where(eq(commerceProducts.id, input.productId)).limit(1);
     if (!product) throw new Error('Продукт не найден');
-    const granted = await this.grantProductEntitlements(input.userId, product, input.sourceType, input.productId);
+    const [price] = await db.select().from(commercePrices).where(and(eq(commercePrices.productId, product.id), eq(commercePrices.isDefault, true), eq(commercePrices.status, 'active'))).limit(1);
+    if (!price) throw new Error('Цена не найдена');
+    const granted = await this.grantProductEntitlements(input.userId, product, price, input.sourceType, input.productId);
     if (granted.length > 0) {
       await db.update(commerceEntitlements)
         .set({ createdBy: input.adminUserId, updatedAt: new Date() })
@@ -353,9 +415,11 @@ export class PaymentNotificationProcessorService {
         await tx.update(commerceOrders).set({ status: 'paid', updatedAt: new Date() }).where(eq(commerceOrders.id, order.id));
         const [product] = await tx.select().from(commerceProducts).where(eq(commerceProducts.id, order.productId)).limit(1);
         if (product) {
+          const [price] = await tx.select().from(commercePrices).where(eq(commercePrices.id, order.priceId)).limit(1);
+          if (!price) throw new Error('Цена не найдена');
           const features = await tx.select().from(commerceProductFeatures).where(eq(commerceProductFeatures.productId, product.id));
           for (const feature of features) {
-            const [existing] = await tx.select({ id: commerceEntitlements.id }).from(commerceEntitlements)
+            const [existing] = await tx.select({ id: commerceEntitlements.id, endsAt: commerceEntitlements.endsAt }).from(commerceEntitlements)
               .where(and(
                 eq(commerceEntitlements.userId, order.userId),
                 eq(commerceEntitlements.scopeType, product.scopeType),
@@ -364,7 +428,13 @@ export class PaymentNotificationProcessorService {
                 eq(commerceEntitlements.status, 'active'),
               ))
               .limit(1);
-            if (existing) continue;
+            if (existing && price.period === 'one_time') continue;
+            if (existing) {
+              await tx.update(commerceEntitlements)
+                .set({ endsAt: commerceEntitlementEnd(price, existing.endsAt), sourceType: 'payment', sourceId: payment.id, updatedAt: new Date() })
+                .where(eq(commerceEntitlements.id, existing.id));
+              continue;
+            }
             await tx.insert(commerceEntitlements).values({
               userId: order.userId,
               scopeType: product.scopeType,
@@ -372,8 +442,11 @@ export class PaymentNotificationProcessorService {
               featureKey: feature.featureKey,
               sourceType: 'payment',
               sourceId: payment.id,
+              endsAt: commerceEntitlementEnd(price, null),
             });
           }
+          await ensureReaderClubMembership(tx, product, order.userId);
+          await createReaderClubLedger(tx, product, order, payment);
         }
         await tx.update(commercePaymentEvents).set({ status: 'processed', processedAt: new Date() }).where(eq(commercePaymentEvents.id, paymentEvent.id));
       });

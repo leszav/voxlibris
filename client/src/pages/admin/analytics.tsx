@@ -5,7 +5,7 @@ import { AdminLayout } from "../../components/layout/AdminLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui/select";
 import { Button } from "../../components/ui/button";
-import { Loader2, TrendingUp, Users, BookOpen, Clock, ArrowUpDown, Download } from "lucide-react";
+import { Loader2, TrendingUp, Users, BookOpen, Clock, ArrowUpDown, Download, CreditCard } from "lucide-react";
 import {
   Table,
   TableBody,
@@ -98,6 +98,15 @@ interface MobilePwaStatsResponse {
   }>;
 }
 
+interface CommerceDashboardResponse {
+  revenue: number;
+  mrr: number;
+  arr: number;
+  churn: number;
+  conversion: number;
+  recent: Array<{ id: string; status: string; amountRub: number; createdAt: string }>;
+}
+
 interface UserJourneyStatsResponse {
   period: string;
   usersWithFirstRead: number;
@@ -185,6 +194,50 @@ export default function AdminAnalyticsPage() {
     },
   });
 
+  const { data: commerceDashboard, isLoading: isCommerceLoading } = useQuery<CommerceDashboardResponse>({
+    queryKey: ["/api/commerce/admin/financial-dashboard"],
+    queryFn: async () => apiRequest<CommerceDashboardResponse>("/api/commerce/admin/financial-dashboard"),
+  });
+
+  const commerceSummary = (
+    <Card className="mb-8">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <CreditCard className="h-5 w-5" />
+          Коммерция
+        </CardTitle>
+        <CardDescription>Финансовые показатели RF Commerce Core за последние 30 дней</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {isCommerceLoading ? (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Загрузка коммерческих метрик...
+          </div>
+        ) : (
+          <div className="grid gap-4 md:grid-cols-4">
+            <div className="rounded-lg border p-4">
+              <div className="text-sm text-muted-foreground">Выручка</div>
+              <div className="text-2xl font-bold">{(commerceDashboard?.revenue ?? 0).toLocaleString()} ₽</div>
+            </div>
+            <div className="rounded-lg border p-4">
+              <div className="text-sm text-muted-foreground">MRR</div>
+              <div className="text-2xl font-bold">{(commerceDashboard?.mrr ?? 0).toLocaleString()} ₽</div>
+            </div>
+            <div className="rounded-lg border p-4">
+              <div className="text-sm text-muted-foreground">ARR</div>
+              <div className="text-2xl font-bold">{(commerceDashboard?.arr ?? 0).toLocaleString()} ₽</div>
+            </div>
+            <div className="rounded-lg border p-4">
+              <div className="text-sm text-muted-foreground">Churn</div>
+              <div className="text-2xl font-bold">{Math.round((commerceDashboard?.churn ?? 0) * 100)}%</div>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+
   if (isLoading) {
     return (
       <AdminLayout>
@@ -245,6 +298,7 @@ export default function AdminAnalyticsPage() {
               </div>
             </CardContent>
           </Card>
+          {commerceSummary}
         </div>
       </AdminLayout>
     );
@@ -781,6 +835,8 @@ export default function AdminAnalyticsPage() {
             </SelectContent>
           </Select>
         </div>
+
+          {commerceSummary}
 
           {/* Основные метрики */}
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 mb-8">

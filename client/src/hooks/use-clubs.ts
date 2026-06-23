@@ -67,6 +67,9 @@ export interface ClubMemberWithUser {
   role: ClubMemberRole;
   joinedAt: Date;
   isActive?: boolean;
+  mutedUntil?: Date | string | null;
+  deactivatedUntil?: Date | string | null;
+  restrictionReason?: string | null;
   status: string;
   emailConfirmed: boolean;
   createdAt: Date;
@@ -354,6 +357,39 @@ export function useRemoveMember() {
       queryClient.invalidateQueries({ queryKey: ["club-members", clubId] });
       queryClient.invalidateQueries({ queryKey: ["club", clubId] });
       queryClient.invalidateQueries({ queryKey: ["clubs"] });
+    },
+  });
+}
+
+export function useModerateClubMember() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      clubId,
+      userId,
+      action,
+      until,
+      reason,
+    }: {
+      clubId: string;
+      userId: string;
+      action: "mute" | "unmute" | "deactivate" | "reactivate";
+      until?: string | null;
+      reason?: string | null;
+    }): Promise<ClubMemberWithUser> => {
+      return apiRequest<ClubMemberWithUser>(`/api/clubs/${clubId}/members/${userId}/moderation`, {
+        method: "PATCH",
+        body: JSON.stringify({ action, until, reason }),
+      });
+    },
+    onSuccess: (updatedMember, { clubId }) => {
+      queryClient.setQueryData<ClubMemberWithUser[]>(["club-members", clubId], (members) => {
+        if (!members) return members;
+        return members.map((member) => member.id === updatedMember.id ? { ...member, ...updatedMember } : member);
+      });
+      queryClient.invalidateQueries({ queryKey: ["club-members", clubId] });
+      queryClient.invalidateQueries({ queryKey: ["club", clubId] });
     },
   });
 }
