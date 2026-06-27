@@ -13,7 +13,7 @@ import { logger } from "./lib/logger.js";
 import { getIcecastStreamUrl } from "./lib/icecast-public-url.js";
 import { syncBookReadingStatus } from "./lib/sync-reading-status.js";
 import { liveSessionsStore, type LiveReaderEntry } from "./lib/live-sessions-store.js";
-import { CommerceService } from "./services/monetization.js";
+import { EntitlementService } from "./services/commerce/entitlement-service.js";
 
 interface AuthenticatedSocket extends Socket {
   userId: string;
@@ -632,7 +632,7 @@ async function verifyReaderClubLiveAccess(userId: string, clubId?: string, bookI
     if (!membership) return false;
     if (membership.role === 'owner' || membership.role === 'moderator') return true;
 
-    return new CommerceService().hasEntitlement(userId, 'reader_club', clubId, 'reader_club_access');
+    return (await new EntitlementService().can(userId, 'reader_club_access', { scopeType: 'reader_club', scopeId: clubId })).allowed;
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     logger.error({ error: errorMessage }, '[WS Reader] Error verifying reader club live access');

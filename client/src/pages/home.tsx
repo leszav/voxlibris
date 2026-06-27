@@ -5,10 +5,11 @@ import { ClubCard } from "@/components/ui/club-card";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Card, CardContent } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ArrowRight, ArrowUp, Sparkles, Loader2, Mic2, Star, Users, Radio } from "lucide-react";
 import { ReadingDreamIllustration } from "@/components/illustrations/reading-dream";
 import { Link } from "wouter";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { useCatalogClubs, useCatalogClubsByType, useLandingReaderClubsStatus, useLandingTopReadersStatus, type PublicCatalogClub } from "@/hooks/use-clubs";
 import { useGridColumns } from "@/hooks/use-grid-columns";
 import { apiRequest } from "@/lib/queryClient";
@@ -33,6 +34,14 @@ interface TopReadersResponse {
   readers: LandingReaderProfile[];
 }
 
+interface PaymentSummary {
+  productTitle: string;
+  amountRub: number;
+  period: "one_time" | "week" | "month" | "quarter" | "year";
+  receiptUrl: string | null;
+  subscriptionModalDismissed: boolean;
+}
+
 function getReaderName(reader: LandingReaderProfile): string {
   return reader.displayName || "Чтец VoxLibris";
 }
@@ -50,8 +59,17 @@ function formatReaderRating(value: number): string {
   return value > 0 ? (value / 100).toFixed(1) : "—";
 }
 
+function periodLabel(period: PaymentSummary["period"]): string {
+  return { one_time: "разово", week: "неделя", month: "месяц", quarter: "квартал", year: "год" }[period];
+}
+
 export default function Home() {
   const [showScrollTop, setShowScrollTop] = React.useState(false);
+  const params = new URLSearchParams(window.location.search);
+  const subscriptionStatus = params.get("subscription");
+  const paymentId = params.get("paymentId");
+  const fallbackReceiptUrl = params.get("receiptUrl");
+  const [subscriptionModalOpen, setSubscriptionModalOpen] = React.useState(false);
   // Главная: grid md:grid-cols-2 lg:grid-cols-3 → breakpoints md=768, lg=1024
   const cols = useGridColumns({ sm: 768, lg: 1024 });
   // Показываем 2 строки, кратно cols
@@ -68,6 +86,14 @@ export default function Home() {
       return response.readers;
     },
     staleTime: 1000 * 60 * 5,
+  });
+  const { data: paymentSummary } = useQuery<PaymentSummary>({
+    queryKey: ["commerce-payment-summary", paymentId],
+    queryFn: () => apiRequest<PaymentSummary>(`/api/commerce/payments/${encodeURIComponent(paymentId ?? "")}/summary`),
+    enabled: (subscriptionStatus === "success" || subscriptionStatus === "failed") && Boolean(paymentId),
+  });
+  const dismissSubscriptionModal = useMutation({
+    mutationFn: () => apiRequest(`/api/commerce/payments/${encodeURIComponent(paymentId ?? "")}/dismiss-subscription-modal`, { method: "POST" }),
   });
 
   const featuredClubs = clubs || [];
@@ -89,10 +115,55 @@ export default function Home() {
     };
   }, []);
 
+  React.useEffect(() => {
+    if (subscriptionStatus !== "success" && subscriptionStatus !== "failed") return;
+    if (!paymentId) {
+      setSubscriptionModalOpen(true);
+      return;
+    }
+    if (paymentSummary && !paymentSummary.subscriptionModalDismissed) setSubscriptionModalOpen(true);
+    if (paymentSummary?.subscriptionModalDismissed) window.location.assign("/");
+  }, [paymentId, paymentSummary, subscriptionStatus]);
+
+  function handleSubscriptionModalOpenChange(open: boolean) {
+    setSubscriptionModalOpen(open);
+    if (!open) {
+      if (paymentId && !paymentSummary?.subscriptionModalDismissed) {
+        dismissSubscriptionModal.mutate(undefined, { onSettled: () => window.location.assign("/") });
+        return;
+      }
+      window.location.assign("/");
+    }
+  }
+
   const scrollToTop = () => window.scrollTo({ top: 0, behavior: "smooth" });
+  const receiptUrl = paymentSummary?.receiptUrl ?? fallbackReceiptUrl;
 
   return (
     <MainLayout>
+      <Dialog open={subscriptionModalOpen} onOpenChange={handleSubscriptionModalOpenChange}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{subscriptionStatus === "success" ? "Подписка успешно оформлена" : "Оплата не завершена"}</DialogTitle>
+            <DialogDescription>
+              {subscriptionStatus === "success"
+                ? "Доступ активирован. Подробности подписки отправлены на вашу электронную почту."
+                : "Платёж был отменён или не обработан. Подписка не активирована."}
+            </DialogDescription>
+          </DialogHeader>
+          {subscriptionStatus === "success" && (
+            <div className="space-y-2 rounded-lg border bg-muted/40 p-4 text-sm">
+              <div><span className="text-muted-foreground">Тариф:</span> {paymentSummary?.productTitle ?? "Подписка VoxLibris"}</div>
+              {paymentSummary && <div><span className="text-muted-foreground">Стоимость:</span> {paymentSummary.amountRub.toLocaleString("ru-RU")} ₽ / {periodLabel(paymentSummary.period)}</div>}
+              {receiptUrl && <div><a className="text-primary underline" href={receiptUrl} target="_blank" rel="noreferrer">Открыть фейковый чек</a></div>}
+              <div className="text-muted-foreground">Отказаться от подписки можно в профиле или через поддержку VoxLibris.</div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button onClick={() => handleSubscriptionModalOpenChange(false)}>Закрыть</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       {/* Hero Section */}
       <section className="relative flex min-h-[31rem] w-full items-center justify-center overflow-hidden py-16 sm:min-h-[36rem] md:h-[600px] md:py-0">
         <div className="absolute inset-0 z-0">

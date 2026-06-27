@@ -14,6 +14,7 @@ import { optimizeImage } from './image-optimizer.js';
 import { db } from './db.js';
 import { and, eq } from 'drizzle-orm';
 import { genreService } from './services/genre-service.js';
+import { EntitlementError, EntitlementService } from './services/commerce/entitlement-service.js';
 
 const router = Router();
 
@@ -24,6 +25,10 @@ function parsePositiveInt(value: string | undefined, fallback: number): number {
 
 function sanitizeUploadFileName(fileName: string): string {
     return fileName.replaceAll(/[^a-zA-Z0-9._-]/g, '_');
+}
+
+function entitlementDenied(error: EntitlementError) {
+    return { message: error.message, code: error.code, featureKey: error.featureKey, upgradeUrl: '/pricing' };
 }
 
 const MAX_BOOK_UPLOAD_BYTES = parsePositiveInt(process.env.MAX_BOOK_UPLOAD_MB, 50) * 1024 * 1024;
@@ -350,6 +355,14 @@ router.post('/upload/:sessionId/confirm', jwtAuth, requireActiveUser, async (req
 
         if (!session) return res.status(404).json({ error: 'Session not found or expired' });
         if (session.userId !== req.user?.id) return res.status(403).json({ error: 'Forbidden' });
+
+        try {
+            const books = await storage.getPersonalBooksByUser(req.user.id);
+            await new EntitlementService().assertLimit(req.user.id, 'personal_library.max_books', books.length, { scopeType: 'platform' });
+        } catch (error) {
+            if (error instanceof EntitlementError) return res.status(403).json(entitlementDenied(error));
+            throw error;
+        }
 
         // Download raw file from MinIO temp storage
         const fileBuffer = await fileStorage.getFile(session.tempStorageKey);

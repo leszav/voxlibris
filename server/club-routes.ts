@@ -4,7 +4,7 @@ import { jwtAuth, optionalJwtAuth, requireActiveUser } from './jwt-middleware.js
 import { storage } from './repositories/index.js';
 import { db } from './db.js';
 import { clubs, clubMembers, clubTypes, commercePrices, commerceProductFeatures, commerceProducts, readerClubTariffAssignments, readerClubTariffRequests, readerClubTariffTemplates, readerRatings, readingSessions, sessionQuestions, users } from '../shared/schema.js';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, ne, sql } from 'drizzle-orm';
 import type { InsertClub, ClubMemberRole, InsertClubInvitation, Club, UserRole, ClubType } from '../shared/schema.js';
 import { emailService } from './services/email-service.js';
 import crypto from 'node:crypto';
@@ -18,6 +18,7 @@ import { gamificationService } from './services/gamification-service.js';
 import { canCreateReaderLedClubForUser, isReaderLedClub } from './lib/reader-club-access.js';
 import { getFeatureFlag } from './lib/feature-flags.js';
 import { sessionAnalyticsService } from './services/session-analytics-service.js';
+import { EntitlementError, EntitlementService } from './services/commerce/entitlement-service.js';
 
 function isFuture(value: Date | string | null | undefined): boolean {
   return value ? new Date(value).getTime() > Date.now() : false;
@@ -90,7 +91,34 @@ async function canAccessReaderLedClub(club: Club, userId: string, userRole: User
     return true;
   }
 
-  return new CommerceService().hasEntitlement(userId, 'reader_club', club.id, 'reader_club_access');
+  return (await new EntitlementService().can(userId, 'reader_club_access', { scopeType: 'reader_club', scopeId: club.id })).allowed;
+}
+
+function isElevatedRole(role: string | undefined) {
+  return role === 'admin' || role === 'moderator';
+}
+
+async function countOwnedStandardClubs(userId: string) {
+  const [row] = await db.select({ count: sql<number>`count(*)::int` }).from(clubs)
+    .where(and(eq(clubs.ownerId, userId), ne(clubs.type, 'reader-led')));
+  return row?.count ?? 0;
+}
+
+async function countActiveClubMembers(clubId: string) {
+  const [row] = await db.select({ count: sql<number>`count(*)::int` }).from(clubMembers)
+    .where(and(eq(clubMembers.clubId, clubId), eq(clubMembers.isActive, true)));
+  return row?.count ?? 0;
+}
+
+async function countJoinedStandardClubs(userId: string) {
+  const [row] = await db.select({ count: sql<number>`count(*)::int` }).from(clubMembers)
+    .innerJoin(clubs, eq(clubs.id, clubMembers.clubId))
+    .where(and(eq(clubMembers.userId, userId), eq(clubMembers.isActive, true), ne(clubs.type, 'reader-led')));
+  return row?.count ?? 0;
+}
+
+function entitlementDenied(error: EntitlementError) {
+  return { message: error.message, code: error.code, featureKey: error.featureKey, upgradeUrl: '/pricing' };
 }
 
 async function requireReaderClubOwner(clubId: string, userId: string) {
@@ -158,6 +186,24 @@ async function findInvitationByToken(token: string) {
         message: 'Создание клуба чтецов доступно только после одобрения администрацией платформы.',
         code: 'READER_LED_CLUB_CREATION_REQUIRES_APPROVAL',
       });
+    }
+
+    if (clubType !== 'reader-led' && !isElevatedRole(req.user.role)) {
+      try {
+        await new EntitlementService().assertLimit(req.user.userId, 'clubs.owned.max_count', await countOwnedStandardClubs(req.user.userId), { scopeType: 'club' });
+      } catch (error) {
+        if (error instanceof EntitlementError) return res.status(403).json(entitlementDenied(error));
+        throw error;
+      }
+    }
+
+    if (clubType !== 'reader-led' && Boolean(req.body.isPrivate) && !isElevatedRole(req.user.role)) {
+      try {
+        await new EntitlementService().assertCan(req.user.userId, 'club.private.enabled', { scopeType: 'club' });
+      } catch (error) {
+        if (error instanceof EntitlementError) return res.status(403).json(entitlementDenied(error));
+        throw error;
+      }
     }
 
     // Валидация данных
@@ -391,6 +437,15 @@ router.put('/:id', jwtAuth, async (req, res) => {
       return res.status(403).json({ message: 'Only club owner can update club' });
     }
 
+    if (!isReaderLedClub(club) && req.body.isPrivate === true && !club.isPrivate && !isElevatedRole(req.user.role)) {
+      try {
+        await new EntitlementService().assertCan(req.user.userId, 'club.private.enabled', { scopeType: 'club', scopeId: club.id });
+      } catch (error) {
+        if (error instanceof EntitlementError) return res.status(403).json(entitlementDenied(error));
+        throw error;
+      }
+    }
+
     const sanitizedSettings = sanitizeClubSettingsInput(req.body.settings);
     const coverImage = await storeOptimizedImageIfNeeded(req.body.coverImage, {
       type: 'background',
@@ -498,7 +553,7 @@ router.post('/:id/monetization/select-template', jwtAuth, async (req, res) => {
         metadata: { tariffTemplateId: template.id },
       }).returning();
       await tx.insert(commercePrices).values({ productId: product.id, amountRub: template.amountRub, period: template.period, isDefault: true });
-      await tx.insert(commerceProductFeatures).values({ productId: product.id, label: 'Доступ к клубу чтеца', featureKey: 'reader_club_access', isHighlighted: true });
+      await tx.insert(commerceProductFeatures).values({ productId: product.id, label: 'Доступ к клубу чтеца', featureKey: 'reader_club_access', valueType: 'boolean', valueBool: true, isHighlighted: true });
       return tx.insert(readerClubTariffAssignments).values({
         clubId: req.params.id,
         templateId: template.id,
@@ -1117,6 +1172,16 @@ router.post('/invitations/:token/accept', jwtAuth, async (req, res) => {
     // Проверяем, не заполнен ли клуб
     if (club.memberCount >= club.maxMembers) {
       return res.status(409).json({ message: 'Club is full' });
+    }
+
+    if (!isReaderLedClub(club)) {
+      try {
+        await new EntitlementService().assertLimit(req.user.userId, 'clubs.joined.max_count', await countJoinedStandardClubs(req.user.userId), { scopeType: 'platform' });
+        await new EntitlementService().assertLimit(club.ownerId, 'club.members.max_count', await countActiveClubMembers(club.id), { scopeType: 'club', scopeId: club.id });
+      } catch (error) {
+        if (error instanceof EntitlementError) return res.status(403).json(entitlementDenied(error));
+        throw error;
+      }
     }
 
     // Проверяем, не является ли пользователь уже участником

@@ -453,6 +453,9 @@ export function MainLayout({ children }: { readonly children: React.ReactNode })
                     <Link href="/library" className="text-lg font-medium hover:text-primary transition-colors">
                       {impersonating ? `Моя Библиотека (как ${impersonatedUser})` : "Моя Библиотека"}
                     </Link>
+                    <Link href="/pricing" className="text-lg font-medium hover:text-primary transition-colors">
+                      Тарифы
+                    </Link>
                     <Link href="/clubs" className="text-lg font-medium hover:text-primary transition-colors">
                       {impersonating ? `Мои Клубы (как ${impersonatedUser})` : "Мои Клубы"}
                     </Link>
@@ -494,6 +497,9 @@ export function MainLayout({ children }: { readonly children: React.ReactNode })
               </Link>
               <Link href="/library" className="transition-colors hover:text-primary text-muted-foreground">
                 Библиотека
+              </Link>
+              <Link href="/pricing" className="transition-colors hover:text-primary text-muted-foreground">
+                Тарифы
               </Link>
             </nav>
           </div>

@@ -5,6 +5,7 @@ import { db } from '../db.js';
 import { logger } from '../lib/logger.js';
 import { getPublicBaseUrl } from '../lib/public-base-url.js';
 import { commerceEntitlementEnd } from './commerce-periods.js';
+import { emailService } from './email-service.js';
 import {
   clubMembers,
   clubs,
@@ -29,7 +30,7 @@ import {
 type Credentials = Record<string, string>;
 type CheckoutInput = { userId: string; product: CommerceProduct; price: CommercePrice; orderId: string; paymentId: string; userEmail?: string };
 type CheckoutResult = { provider: PaymentProviderCode; confirmationUrl: string; providerPaymentId: string };
-type PaymentNotificationResult = { eventId: string; providerPaymentId: string; status: 'succeeded' | 'failed' | 'cancelled' | 'refunded'; paymentMethodToken?: string };
+type PaymentNotificationResult = { eventId: string; providerPaymentId: string; status: 'succeeded' | 'failed' | 'cancelled' | 'refunded'; paymentMethodToken?: string; fiscalReceiptId?: string; fiscalReceiptUrl?: string };
 
 type DbExecutor = Pick<typeof db, 'select' | 'insert' | 'update'>;
 
@@ -102,10 +103,78 @@ function decryptCredentials(value: string): Credentials {
   return JSON.parse(Buffer.concat([decipher.update(Buffer.from(encryptedRaw, 'base64')), decipher.final()]).toString('utf8')) as Credentials;
 }
 
+function formatPeriod(period: CommercePrice['period']) {
+  const labels: Record<CommercePrice['period'], string> = { one_time: 'разово', week: 'неделя', month: 'месяц', quarter: 'квартал', year: 'год' };
+  return labels[period] ?? period;
+}
+
+function escapeEmailHtml(value: string) {
+  return value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char] ?? char));
+}
+
+function subscriptionEmailHtml(input: { title: string; amountRub: number; period: CommercePrice['period']; receiptUrl?: string | null }) {
+  const receiptLink = input.receiptUrl
+    ? `<p><a class="button" href="${escapeEmailHtml(input.receiptUrl)}">Открыть чек</a></p>`
+    : '';
+  const content = `
+    <h2>Подписка успешно оформлена</h2>
+    <p>Спасибо, что выбрали VoxLibris. Доступ по подписке активирован.</p>
+    <div class="highlight">
+      <p><strong>Тариф:</strong> ${escapeEmailHtml(input.title)}</p>
+      <p><strong>Стоимость:</strong> ${input.amountRub.toLocaleString('ru-RU')} ₽ / ${formatPeriod(input.period)}</p>
+    </div>
+    ${receiptLink ? `<div class="button-wrap">${receiptLink}</div>` : ''}
+    <div class="info">
+      <strong>Как отказаться от подписки</strong><br>
+      Откройте профиль или раздел управления подпиской и отмените продление. Если раздел ещё недоступен, напишите в поддержку VoxLibris — мы отключим продление вручную.
+    </div>
+  `;
+  return `<!DOCTYPE html>
+<html lang="ru"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Подписка VoxLibris оформлена</title><style>
+body,table,td,p,a,h1,h2,h3{margin:0;padding:0}table{border-spacing:0;border-collapse:collapse}body{font-family:"DM Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;line-height:1.6;color:#3D2B1F;background:#F5F2ED}a{color:#8B5A2B;text-decoration:underline}.wrapper{width:100%;max-width:600px;margin:0 auto;padding:40px 20px}.card{background:#FFFFFF;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(92,64,51,.08)}.header{background:#5C4033;padding:32px 40px;text-align:center}.header-icon{width:48px;height:48px;margin:0 auto 12px;background:rgba(255,255,255,.15);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:24px}.header-title{font-family:"Playfair Display",serif;font-size:24px;font-weight:600;color:#FFFFFF;margin:0}.body{padding:40px}.body h2{font-family:"Playfair Display",serif;font-size:20px;font-weight:600;color:#5C4033;margin:0 0 16px}.body p{margin:0 0 16px;color:#3D2B1F}.highlight{background:#F7F3ED;border-left:3px solid #D4A574;padding:16px 20px;margin:20px 0;border-radius:0 8px 8px 0}.button{display:inline-block;background:#5C4033;color:#FFFFFF;text-decoration:none;padding:14px 28px;border-radius:8px;font-weight:600;font-size:15px}.button-wrap{text-align:center;margin:28px 0}.info{background:#F7F3ED;border-radius:8px;padding:16px 20px;margin:20px 0;font-size:14px;color:#8B7355}.footer{padding:24px 40px;text-align:center;border-top:1px solid #E8DFD5;background:#F7F3ED}.footer-logo{font-family:"Playfair Display",serif;font-size:16px;font-weight:600;color:#5C4033;margin-bottom:8px}.footer-text{font-size:13px;color:#8B7355;margin:0}.footer-link{color:#C49565}@media(max-width:640px){.wrapper{padding:20px 16px}.header{padding:24px 20px}.body{padding:24px 20px}.footer{padding:20px}}
+</style></head><body><div class="wrapper"><div class="card"><div class="header"><div class="header-icon">📚</div><h1 class="header-title">VoxLibris</h1></div><div class="body">${content}</div><div class="footer"><div class="footer-logo">VoxLibris</div><p class="footer-text">Платформа для книжных клубов<br>Это автоматическое письмо, отвечать не нужно.<br><a class="footer-link" href="mailto:support@voxlibris.ru">support@voxlibris.ru</a></p></div></div></div></body></html>`;
+}
+
+async function sendSubscriptionEmail(input: { email: string; title: string; amountRub: number; period: CommercePrice['period']; receiptUrl?: string | null }) {
+  const text = [
+    `Подписка успешно оформлена: ${input.title}.`,
+    `Стоимость: ${input.amountRub.toLocaleString('ru-RU')} ₽ / ${formatPeriod(input.period)}.`,
+    input.receiptUrl ? `Чек: ${input.receiptUrl}` : null,
+    '',
+    'Как отказаться от подписки: откройте профиль или раздел управления подпиской и отмените продление. Если раздел ещё недоступен, напишите в поддержку VoxLibris — мы отключим продление вручную.',
+  ].filter(Boolean).join('\n');
+  const ok = await emailService.sendEmail({
+    to: input.email,
+    subject: `Подписка VoxLibris оформлена: ${input.title}`,
+    html: subscriptionEmailHtml(input),
+    text,
+  });
+  if (!ok) throw new Error('EmailService не отправил письмо о подписке');
+}
+
+async function sendSubscriptionEmailForPayment(paymentId: string) {
+  const [row] = await db.select({
+    email: users.email,
+    title: commerceProducts.title,
+    amountRub: commercePrices.amountRub,
+    period: commercePrices.period,
+    receiptUrl: commercePayments.fiscalReceiptUrl,
+  })
+    .from(commercePayments)
+    .innerJoin(commerceOrders, eq(commerceOrders.id, commercePayments.orderId))
+    .innerJoin(users, eq(users.id, commerceOrders.userId))
+    .innerJoin(commerceProducts, eq(commerceProducts.id, commerceOrders.productId))
+    .innerJoin(commercePrices, eq(commercePrices.id, commerceOrders.priceId))
+    .where(eq(commercePayments.id, paymentId))
+    .limit(1);
+  if (!row?.email) return;
+  await sendSubscriptionEmail(row);
+}
+
 async function yookassaPaymentVerified(paymentId: string, credentials: Credentials) {
   const authorization = yookassaAuthorization(credentials);
   if (!paymentId || !authorization) return false;
-  const response = await fetch(`https://api.yookassa.ru/v3/payments/${encodeURIComponent(paymentId)}`, {
+  const response = await fetch(`${yookassaApiBaseUrl()}/v3/payments/${encodeURIComponent(paymentId)}`, {
     headers: { Authorization: authorization },
   });
   if (!response.ok) return false;
@@ -118,6 +187,13 @@ function yookassaAuthorization(credentials: Credentials) {
   const apiKey = (credentials.apiKey ?? credentials.secretKey)?.trim();
   if (!shopId || !apiKey) return null;
   return `Basic ${Buffer.from(`${shopId}:${apiKey}`).toString('base64')}`;
+}
+
+function yookassaApiBaseUrl() {
+  if (process.env.NODE_ENV !== 'production' && process.env.YOOKASSA_API_BASE_URL) {
+    return process.env.YOOKASSA_API_BASE_URL.replace(/\/+$/, '');
+  }
+  return 'https://api.yookassa.ru';
 }
 
 function parseYookassaNumber(value: string | undefined, fallback: number) {
@@ -152,7 +228,7 @@ const yookassaProvider: PaymentProvider = {
     const authorization = yookassaAuthorization(credentials);
     if (!authorization) throw new Error('Не настроены ID магазина и API-key ЮKassa');
     const receipt = yookassaReceipt(input, credentials);
-    const response = await fetch('https://api.yookassa.ru/v3/payments', {
+    const response = await fetch(`${yookassaApiBaseUrl()}/v3/payments`, {
       method: 'POST',
       headers: {
         Authorization: authorization,
@@ -179,9 +255,16 @@ const yookassaProvider: PaymentProvider = {
     return yookassaPaymentVerified(String(event.object?.id ?? ''), credentials);
   },
   parseNotification(body) {
-    const event = body as { event?: string; object?: { id?: string; status?: string; payment_method?: { id?: string } } };
+    const event = body as { event?: string; object?: { id?: string; status?: string; payment_method?: { id?: string }; metadata?: { fiscalReceiptId?: string; fiscalReceiptUrl?: string } } };
     const status = event.object?.status === 'succeeded' ? 'succeeded' : event.object?.status === 'canceled' ? 'cancelled' : 'failed';
-    return { eventId: `${event.event ?? 'payment'}:${event.object?.id ?? ''}:${status}`, providerPaymentId: String(event.object?.id ?? ''), status, paymentMethodToken: event.object?.payment_method?.id };
+    return {
+      eventId: `${event.event ?? 'payment'}:${event.object?.id ?? ''}:${status}`,
+      providerPaymentId: String(event.object?.id ?? ''),
+      status,
+      paymentMethodToken: event.object?.payment_method?.id,
+      fiscalReceiptId: event.object?.metadata?.fiscalReceiptId,
+      fiscalReceiptUrl: event.object?.metadata?.fiscalReceiptUrl,
+    };
   },
 };
 
@@ -253,7 +336,7 @@ export class CommerceService {
     const rows = await db.select({ product: commerceProducts, price: commercePrices, feature: commerceProductFeatures })
       .from(commerceProducts)
       .leftJoin(commercePrices, and(eq(commercePrices.productId, commerceProducts.id), eq(commercePrices.status, 'active')))
-      .leftJoin(commerceProductFeatures, eq(commerceProductFeatures.productId, commerceProducts.id))
+      .leftJoin(commerceProductFeatures, and(eq(commerceProductFeatures.productId, commerceProducts.id), eq(commerceProductFeatures.isActive, true)))
       .where(and(...conditions))
       .orderBy(asc(commerceProducts.sortOrder), asc(commercePrices.amountRub), asc(commerceProductFeatures.sortOrder));
 
@@ -318,7 +401,7 @@ export class CommerceService {
   }
 
   async grantProductEntitlements(userId: string, product: CommerceProduct, price: CommercePrice, sourceType: 'payment' | 'subscription' | 'promo' | 'admin_grant' | 'migration', sourceId?: string) {
-    const features = await db.select().from(commerceProductFeatures).where(eq(commerceProductFeatures.productId, product.id));
+    const features = await db.select().from(commerceProductFeatures).where(and(eq(commerceProductFeatures.productId, product.id), eq(commerceProductFeatures.isActive, true)));
     const granted = [];
     for (const feature of features) {
       const [existing] = await db.select({ id: commerceEntitlements.id, endsAt: commerceEntitlements.endsAt }).from(commerceEntitlements)
@@ -404,7 +487,7 @@ export class PaymentNotificationProcessorService {
           await tx.update(commercePaymentEvents).set({ status: 'processed', processedAt: new Date() }).where(eq(commercePaymentEvents.id, paymentEvent.id));
           return;
         }
-        await tx.update(commercePayments).set({ status: event.status, paymentMethodToken: event.paymentMethodToken, updatedAt: new Date() }).where(eq(commercePayments.id, payment.id));
+        await tx.update(commercePayments).set({ status: event.status, paymentMethodToken: event.paymentMethodToken, fiscalReceiptId: event.fiscalReceiptId, fiscalReceiptUrl: event.fiscalReceiptUrl, updatedAt: new Date() }).where(eq(commercePayments.id, payment.id));
         if (event.status !== 'succeeded') {
           await tx.update(commercePaymentEvents).set({ status: 'processed', processedAt: new Date() }).where(eq(commercePaymentEvents.id, paymentEvent.id));
           return;
@@ -420,7 +503,7 @@ export class PaymentNotificationProcessorService {
         if (product) {
           const [price] = await tx.select().from(commercePrices).where(eq(commercePrices.id, order.priceId)).limit(1);
           if (!price) throw new Error('Цена не найдена');
-          const features = await tx.select().from(commerceProductFeatures).where(eq(commerceProductFeatures.productId, product.id));
+          const features = await tx.select().from(commerceProductFeatures).where(and(eq(commerceProductFeatures.productId, product.id), eq(commerceProductFeatures.isActive, true)));
           for (const feature of features) {
             const [existing] = await tx.select({ id: commerceEntitlements.id, endsAt: commerceEntitlements.endsAt }).from(commerceEntitlements)
               .where(and(
@@ -453,6 +536,12 @@ export class PaymentNotificationProcessorService {
         }
         await tx.update(commercePaymentEvents).set({ status: 'processed', processedAt: new Date() }).where(eq(commercePaymentEvents.id, paymentEvent.id));
       });
+      if (event.status === 'succeeded') {
+        const [payment] = await db.select({ id: commercePayments.id }).from(commercePayments).where(eq(commercePayments.providerPaymentId, event.providerPaymentId)).limit(1);
+        if (payment) {
+          await sendSubscriptionEmailForPayment(payment.id).catch((error) => logger.warn({ paymentId: payment.id, error }, 'Subscription email failed'));
+        }
+      }
     } catch (error) {
       await db.update(commercePaymentEvents)
         .set({ status: 'failed', errorMessage: error instanceof Error ? error.message : 'Unknown payment event processing error' })

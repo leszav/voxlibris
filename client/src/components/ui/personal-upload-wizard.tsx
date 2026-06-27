@@ -9,6 +9,8 @@ import { Loader2, Upload, FileText } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { DuplicateWarningModal } from "@/components/ui/duplicate-warning-modal";
 import { useAuth } from "@/hooks/use-auth";
+import { ApiError } from "@/lib/queryClient";
+import { upgradeDescription } from "@/lib/upgrade-cta";
 
 interface PersonalUploadWizardProps {
     readonly onSuccess: () => void;
@@ -27,6 +29,12 @@ export function PersonalUploadWizard({ onSuccess, onCancel }: Readonly<PersonalU
 
     const { upload, confirm } = usePersonalBookUpload();
     const { refetchUser } = useAuth();
+
+    const showUpgradeToast = (error: unknown) => toast({
+        title: "Лимит тарифа исчерпан",
+        description: upgradeDescription(error, "Чтобы добавить больше книг, откройте раздел «Тарифы» и выберите расширенный тариф."),
+        variant: "destructive",
+    });
 
     const handleFileSelect = async (selectedFile: File) => {
         setStep('processing');
@@ -73,6 +81,12 @@ export function PersonalUploadWizard({ onSuccess, onCancel }: Readonly<PersonalU
             });
             onSuccess();
         } catch (error) {
+            if (error instanceof ApiError && error.code === "LIMIT_EXCEEDED") {
+                showUpgradeToast(error);
+                setStep('metadata');
+                return;
+            }
+
             const errorMessage = error instanceof Error ? error.message : "Не удалось сохранить книгу";
             
             toast({

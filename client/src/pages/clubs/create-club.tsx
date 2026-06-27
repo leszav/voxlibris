@@ -11,6 +11,7 @@ import { ErrorDialog } from "@/components/ui/error-dialog";
 import { useCreateClub } from "@/hooks/use-clubs";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
+import { isUpgradeError, upgradeDescription, upgradeUrl } from "@/lib/upgrade-cta";
 import { ArrowLeft, Loader2, Users, CheckCircle, Clock, Mic2 } from "lucide-react";
 import {
   Dialog,
@@ -95,6 +96,14 @@ export default function CreateClub() {
       }
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : "Не удалось создать клуб";
+      if (isUpgradeError(error)) {
+        toast({
+          title: "Нужен другой тариф",
+          description: upgradeDescription(error, errorMessage),
+          variant: "destructive",
+        });
+        setLocation(upgradeUrl(error));
+      }
       setErrorDialog({
         open: true,
         title: "Ошибка создания клуба",

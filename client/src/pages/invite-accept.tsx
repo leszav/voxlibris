@@ -8,6 +8,7 @@ import { useAuth } from '@/hooks/use-auth';
 import { getMobileAnalyticsContext } from '@/lib/mobile-analytics';
 import { useToast } from '@/hooks/use-toast';
 import { reachYandexGoal } from '@/lib/yandexMetrika';
+import { isUpgradeError, upgradeDescription, upgradeUrl } from '@/lib/upgrade-cta';
 import { Mic, CheckCircle, XCircle, AlertCircle, Loader2, Users } from 'lucide-react';
 
 export default function InviteAccept() {
@@ -72,6 +73,15 @@ export default function InviteAccept() {
       // Перенаправляем в клуб через 2 секунды
       scheduleRedirect(`/clubs/${result.club?.id || invitation.club?.id}`, 2000);
     } catch (error) {
+      if (isUpgradeError(error)) {
+        toast({
+          title: "Нужен другой тариф",
+          description: upgradeDescription(error, "Не удалось принять приглашение"),
+          variant: "destructive",
+        });
+        setLocation(upgradeUrl(error));
+        return;
+      }
       toast({
         title: "Ошибка",
         description: error instanceof Error ? error.message : "Не удалось принять приглашение",

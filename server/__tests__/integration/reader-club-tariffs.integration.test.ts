@@ -10,6 +10,10 @@ const readerClubId = process.env.TEST_READER_CLUB_ID;
 const paidReaderClubId = process.env.TEST_PAID_READER_CLUB_ID ?? readerClubId;
 const paidReaderProductId = process.env.TEST_PAID_READER_CLUB_PRODUCT_ID;
 const grantUserId = process.env.TEST_GRANT_USER_ID;
+const standardOwnerToken = process.env.TEST_STANDARD_OWNER_TOKEN ?? ownerToken;
+const standardMemberToken = process.env.TEST_STANDARD_MEMBER_TOKEN;
+const standardInviteToken = process.env.TEST_STANDARD_INVITE_TOKEN;
+const paidStandardInviteToken = process.env.TEST_PAID_STANDARD_INVITE_TOKEN;
 
 before(async () => {
   apiAvailable = await isApiAvailable();
@@ -51,7 +55,111 @@ function skipIfNoGrantContext(t: { skip: (message?: string) => void }): boolean 
   return false;
 }
 
+function skipIfNoStandardClubContext(t: { skip: (message?: string) => void }): boolean {
+  if (!standardOwnerToken || !standardMemberToken || !standardInviteToken || !paidStandardInviteToken) {
+    t.skip("Set TEST_STANDARD_OWNER_TOKEN, TEST_STANDARD_MEMBER_TOKEN, TEST_STANDARD_INVITE_TOKEN and TEST_PAID_STANDARD_INVITE_TOKEN to run standard club entitlement checks");
+    return true;
+  }
+
+  return false;
+}
+
 describe("Integration: reader club tariff API", () => {
+  it("commerce constructor admin endpoints требуют админский токен", async (t) => {
+    if (skipIfApiUnavailable(t)) return;
+
+    const features = await apiRequest("/api/commerce/admin/features");
+    if (features.response.status === 404) {
+      t.skip("Commerce constructor routes are not loaded in the running API server");
+      return;
+    }
+    expectStatus(features.response, 401);
+
+    const products = await apiRequest("/api/commerce/admin/products");
+    expectStatus(products.response, 401);
+  });
+
+  it("admin может создать feature, product, price и typed product feature", async (t) => {
+    if (skipIfApiUnavailable(t) || skipIfNoAdminToken(t)) return;
+
+    const suffix = Date.now();
+    const feature = await apiRequest<{ key: string; valueType: string }>("/api/commerce/admin/features", {
+      method: "POST",
+      headers: bearerAuth(adminToken!),
+      body: JSON.stringify({
+        key: `integration.feature.${suffix}`,
+        title: "Integration feature",
+        category: "integration",
+        scopeType: "platform",
+        valueType: "integer",
+        defaultInt: 1,
+      }),
+    });
+    expectStatus(feature.response, 201);
+    assert.equal(feature.body.valueType, "integer");
+
+    const product = await apiRequest<{ id: string; code: string }>("/api/commerce/admin/products", {
+      method: "POST",
+      headers: bearerAuth(adminToken!),
+      body: JSON.stringify({
+        type: "platform_subscription",
+        scopeType: "platform",
+        code: `integration_product_${suffix}`,
+        title: "Integration product",
+        status: "draft",
+        visibility: "private",
+      }),
+    });
+    expectStatus(product.response, 201);
+
+    const price = await apiRequest<{ id: string; amountRub: number }>(`/api/commerce/admin/products/${product.body.id}/prices`, {
+      method: "POST",
+      headers: bearerAuth(adminToken!),
+      body: JSON.stringify({ amountRub: 123, period: "month", isDefault: true }),
+    });
+    expectStatus(price.response, 201);
+    assert.equal(price.body.amountRub, 123);
+
+    const productFeature = await apiRequest<{ id: string; valueInt: number }>(`/api/commerce/admin/products/${product.body.id}/features`, {
+      method: "POST",
+      headers: bearerAuth(adminToken!),
+      body: JSON.stringify({ label: "Integration limit", featureKey: feature.body.key, valueType: "integer", valueInt: 10 }),
+    });
+    expectStatus(productFeature.response, 201);
+    assert.equal(productFeature.body.valueInt, 10);
+
+    const detail = await apiRequest<{ prices: unknown[]; features: Array<{ featureKey: string }> }>(`/api/commerce/admin/products/${product.body.id}`, {
+      headers: bearerAuth(adminToken!),
+    });
+    expectStatus(detail.response, 200);
+    assert.equal(detail.body.prices.length, 1);
+    assert.ok(detail.body.features.some((item) => item.featureKey === feature.body.key));
+  });
+
+  it("admin product/price/product-feature endpoints возвращают 404 для неизвестных id", async (t) => {
+    if (skipIfApiUnavailable(t) || skipIfNoAdminToken(t)) return;
+
+    const missingId = "00000000-0000-4000-8000-000000000000";
+    const auth = bearerAuth(adminToken!);
+
+    const product = await apiRequest(`/api/commerce/admin/products/${missingId}`, { headers: auth });
+    expectStatus(product.response, 404);
+
+    const price = await apiRequest(`/api/commerce/admin/prices/${missingId}`, {
+      method: "PATCH",
+      headers: auth,
+      body: JSON.stringify({ status: "archived" }),
+    });
+    expectStatus(price.response, 404);
+
+    const productFeature = await apiRequest(`/api/commerce/admin/product-features/${missingId}`, {
+      method: "PATCH",
+      headers: auth,
+      body: JSON.stringify({ label: "Missing", featureKey: "missing.feature", valueType: "boolean", valueBool: true }),
+    });
+    expectStatus(productFeature.response, 404);
+  });
+
   it("admin tariff templates требуют админский токен", async (t) => {
     if (skipIfApiUnavailable(t)) return;
 
@@ -132,6 +240,52 @@ describe("Integration: reader club tariff API", () => {
     }
   });
 
+  it("обычный клуб блокирует Freemium-превышение участников и даёт paid plan повысить лимит", async (t) => {
+    if (skipIfApiUnavailable(t) || skipIfNoStandardClubContext(t)) return;
+
+    const blocked = await apiRequest<{ code?: string; featureKey?: string; upgradeUrl?: string }>(`/api/invitations/${standardInviteToken}/accept`, {
+      method: "POST",
+      headers: bearerAuth(standardMemberToken!),
+    });
+
+    expectStatus(blocked.response, 403);
+    assert.equal(blocked.body.code, "LIMIT_EXCEEDED");
+    assert.equal(blocked.body.featureKey, "club.members.max_count");
+    assert.equal(blocked.body.upgradeUrl, "/pricing");
+
+    const allowed = await apiRequest<{ club?: { id?: string } }>(`/api/invitations/${paidStandardInviteToken}/accept`, {
+      method: "POST",
+      headers: bearerAuth(standardMemberToken!),
+    });
+
+    expectStatusIn(allowed.response, [200, 409]);
+  });
+
+  it("приватный обычный клуб запрещён без feature и разрешён с платным plan", async (t) => {
+    if (skipIfApiUnavailable(t) || skipIfNoStandardClubContext(t)) return;
+
+    const suffix = Date.now();
+    const blocked = await apiRequest<{ code?: string; featureKey?: string; upgradeUrl?: string }>("/api/clubs", {
+      method: "POST",
+      headers: bearerAuth(standardMemberToken!),
+      body: JSON.stringify({ title: `Private blocked ${suffix}`, description: "Integration", type: "standard", isPrivate: true }),
+    });
+
+    expectStatus(blocked.response, 403);
+    assert.equal(blocked.body.code, "MISSING_ENTITLEMENT");
+    assert.equal(blocked.body.featureKey, "club.private.enabled");
+    assert.equal(blocked.body.upgradeUrl, "/pricing");
+
+    const allowed = await apiRequest<{ id: string; isPrivate: boolean }>("/api/clubs", {
+      method: "POST",
+      headers: bearerAuth(standardOwnerToken!),
+      body: JSON.stringify({ title: `Private paid ${suffix}`, description: "Integration", type: "standard", isPrivate: true }),
+    });
+
+    expectStatusIn(allowed.response, [201, 409]);
+    if (allowed.response.status === 201) assert.equal(allowed.body.isPrivate, true);
+  });
+
   it("commerce dashboard и grants требуют админский токен", async (t) => {
     if (skipIfApiUnavailable(t)) return;
 
@@ -197,5 +351,16 @@ describe("Integration: reader club tariff API", () => {
     assert.equal(product.scopeId, paidReaderClubId);
     assert.ok(product.prices.some((price) => price.amountRub > 0 && price.period === "month" && price.isDefault));
     assert.ok(product.features.some((feature) => feature.featureKey === "reader_club_access"));
+  });
+
+  it("active reader-led product содержит typed reader_club_access=true", async (t) => {
+    if (skipIfApiUnavailable(t) || skipIfNoAdminToken(t) || !paidReaderProductId) return;
+
+    const product = await apiRequest<{ features: Array<{ featureKey: string; valueType: string; valueBool: boolean | null }> }>(`/api/commerce/admin/products/${paidReaderProductId}`, {
+      headers: bearerAuth(adminToken!),
+    });
+
+    expectStatus(product.response, 200);
+    assert.ok(product.body.features.some((feature) => feature.featureKey === "reader_club_access" && feature.valueType === "boolean" && feature.valueBool === true));
   });
 });

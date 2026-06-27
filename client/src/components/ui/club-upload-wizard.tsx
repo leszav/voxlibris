@@ -8,6 +8,8 @@ import { useClubBookUpload, type DuplicateMatch, type UploadMetadata } from "@/h
 import { Loader2, Upload, FileText, Users } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { DuplicateWarningModal } from "@/components/ui/duplicate-warning-modal";
+import { ApiError } from "@/lib/queryClient";
+import { upgradeDescription } from "@/lib/upgrade-cta";
 
 interface ClubUploadWizardProps {
     readonly clubId: string;
@@ -27,6 +29,12 @@ export function ClubUploadWizard({ clubId, onSuccess, onCancel }: Readonly<ClubU
     const [showDuplicateModal, setShowDuplicateModal] = useState(false);
 
     const { upload, confirm } = useClubBookUpload(clubId);
+
+    const showUpgradeToast = (error: unknown) => toast({
+        title: "Лимит тарифа исчерпан",
+        description: upgradeDescription(error, "Чтобы добавить больше книг в клуб, откройте раздел «Тарифы» и выберите расширенный тариф."),
+        variant: "destructive",
+    });
 
     const handleFileSelect = async (selectedFile: File) => {
         setStep('processing');
@@ -65,6 +73,12 @@ export function ClubUploadWizard({ clubId, onSuccess, onCancel }: Readonly<ClubU
             });
             onSuccess();
         } catch (error) {
+            if (error instanceof ApiError && error.code === "LIMIT_EXCEEDED") {
+                showUpgradeToast(error);
+                setStep('metadata');
+                return;
+            }
+
             toast({
                 title: "Ошибка сохранения",
                 description: error instanceof Error ? error.message : "Не удалось сохранить книгу",

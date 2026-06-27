@@ -14,6 +14,7 @@ import { optimizeImage } from './image-optimizer.js';
 import { storeOptimizedImageIfNeeded } from './lib/uploaded-image-storage.js';
 import { genreService } from './services/genre-service.js';
 import { serializeClubBook } from './lib/client-serializers.js';
+import { EntitlementError, EntitlementService } from './services/commerce/entitlement-service.js';
 
 const router = Router();
 
@@ -24,6 +25,10 @@ function parsePositiveInt(value: string | undefined, fallback: number): number {
 
 function sanitizeUploadFileName(fileName: string): string {
     return fileName.replaceAll(/[^a-zA-Z0-9._-]/g, '_');
+}
+
+function entitlementDenied(error: EntitlementError) {
+    return { message: error.message, code: error.code, featureKey: error.featureKey, upgradeUrl: '/pricing' };
 }
 
 const MAX_BOOK_UPLOAD_BYTES = parsePositiveInt(process.env.MAX_BOOK_UPLOAD_MB, 50) * 1024 * 1024;
@@ -393,6 +398,14 @@ router.post('/clubs/:clubId/books/upload/:sessionId/confirm', jwtAuth, requireAc
         const validation = validateUploadSession(session, req.user!.id, clubId);
         if (!validation.valid) {
             return res.status(validation.status!).json({ error: validation.error });
+        }
+
+        try {
+            const books = await storage.getClubBooksByClub(clubId);
+            await new EntitlementService().assertLimit(req.user!.id, 'club.books.max_count', books.length, { scopeType: 'club', scopeId: clubId });
+        } catch (error) {
+            if (error instanceof EntitlementError) return res.status(403).json(entitlementDenied(error));
+            throw error;
         }
 
         const fileBuffer = await fileStorage.getFile(session!.tempStorageKey);

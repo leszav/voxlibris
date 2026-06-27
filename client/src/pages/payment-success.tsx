@@ -9,7 +9,10 @@ export default function PaymentSuccessPage() {
   const [, setLocation] = useLocation();
   const [secondsLeft, setSecondsLeft] = useState(4);
   const clubId = useMemo(() => new URLSearchParams(window.location.search).get("clubId"), []);
-  const targetPath = clubId ? `/clubs/${clubId}` : "/library";
+  const status = useMemo(() => new URLSearchParams(window.location.search).get("status"), []);
+  const paymentId = useMemo(() => new URLSearchParams(window.location.search).get("paymentId"), []);
+  const receiptUrl = useMemo(() => new URLSearchParams(window.location.search).get("receiptUrl"), []);
+  const targetPath = clubId ? `/clubs/${clubId}` : `/?subscription=${status === "success" ? "success" : "failed"}${paymentId ? `&paymentId=${encodeURIComponent(paymentId)}` : ""}${receiptUrl ? `&receiptUrl=${encodeURIComponent(receiptUrl)}` : ""}`;
 
   useEffect(() => {
     const redirectTimer = window.setTimeout(() => setLocation(targetPath), 4000);
@@ -31,9 +34,11 @@ export default function PaymentSuccessPage() {
             <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
               <CheckCircle2 className="h-8 w-8" />
             </div>
-            <CardTitle>Подписка успешно оформлена</CardTitle>
+            <CardTitle>{status === "failed" ? "Оплата не завершена" : "Подписка успешно оформлена"}</CardTitle>
             <CardDescription>
-              {clubId
+              {status === "failed"
+                ? "Оплата не завершена. Сейчас вернём вас на главную страницу."
+                : clubId
                 ? "Доступ к клубу открыт. Сейчас перенаправим вас на страницу клуба."
                 : "Оплата прошла успешно. Сейчас перенаправим вас дальше."}
             </CardDescription>

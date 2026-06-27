@@ -3,7 +3,7 @@
 ![VoxLibris](./client/public/og-image.webp)
 
 **Статус документа:** Current  
-**Дата обновления:** 2026-06-13
+**Дата обновления:** 2026-06-28
 
 VoxLibris — платформа социального чтения: книжные клубы, совместное чтение, live/audio-сессии, ридеры, социальный граф, activity feed, direct messages, рекомендации, геймификация и административные инструменты.
 
@@ -38,8 +38,20 @@ pnpm dev
 - VoxLibris Studio baseline на Icecast/streaming route; WebRTC/mediasoup — roadmap/reference.
 - Социальный граф, activity feed, presence и direct messages.
 - Рекомендации, геймификация и Web Push-уведомления для браузера/PWA.
-- Административные маршруты и feature flags.
+- Тарифы и монетизация: публичная страница тарифов, Freemium-лимиты, YooKassa checkout/webhooks, подписки, grants и entitlement-проверки.
+- Административные маршруты, feature flags, конструктор тарифов и управление подписками.
 - Email через `nodemailer` и HTML-шаблоны из `email-templates/`.
+
+## Тарифы и монетизация
+
+В проекте реализован текущий commerce-контур для платформенных и клубных тарифов:
+
+- публичная страница `/pricing` показывает активные продукты и тарифные возможности;
+- Freemium-ограничения проверяются на сервере через entitlement layer, а UI показывает upgrade CTA для лимитов личной библиотеки, клубов, приглашений и загрузок;
+- YooKassa используется для checkout, webhook-обработки, статусов платежей и email-уведомлений о подписке;
+- админка содержит конструктор тарифов: продукты, цены, feature registry, привязка возможностей к продуктам, soft-archive product features;
+- админка содержит управление подписками с пагинацией, отменой/приостановкой/возобновлением и аудитом действий;
+- для клубов чтецов поддержаны тарифные шаблоны, заявки владельцев и ручные grants.
 
 ## Web Push-уведомления
 
@@ -116,6 +128,11 @@ Production-миграции применяются вручную, строго 
 
 Для эмоциональной карты используется миграция `0048_add_emotional_map.sql`: она добавляет таймкоды реакций и JSONB-кэш эмоциональной карты завершённых reading sessions.
 
+Для конструктора тарифов и commerce entitlement используются миграции:
+
+- `0055_tariff_constructor_features.sql` — feature registry, тарифные возможности продуктов, шаблоны/заявки тарифов клубов чтецов;
+- `0056_commerce_entitlement_actions.sql` — действия по подпискам, audit trail, soft-archive product features и дополнительные commerce-поля.
+
 Для dev доступны команды Drizzle из `package.json`, но они не заменяют production-процесс:
 
 ```bash
@@ -130,11 +147,24 @@ pnpm test
 pnpm test:watch
 pnpm test:coverage
 pnpm run test:integration
+pnpm run test:pricing:yookassa
 pnpm run quality:gate
 ```
 
 Тесты находятся в `server/__tests__/` и запускаются через `node --test --experimental-strip-types`.
 Интеграционные HTTP-тесты лежат в `server/__tests__/integration/` и запускаются против поднятого API server (`TEST_API_BASE_URL`, по умолчанию `http://127.0.0.1:5000`). Подробности: [docs/10-testing/api-integration-coverage.md](./docs/10-testing/api-integration-coverage.md).
+
+Для pricing/YooKassa smoke используется `pnpm run test:pricing:yookassa`. При полном прогоне HTTP-интеграций может потребоваться задержка между запросами, чтобы не упереться в rate limit:
+
+```bash
+TEST_API_REQUEST_DELAY_MS=2500 pnpm run test
+```
+
+Для точечной проверки entitlement и тарифов клубов чтецов:
+
+```bash
+node --test --experimental-strip-types server/__tests__/entitlement-service.test.ts server/__tests__/integration/reader-club-tariffs.integration.test.ts
+```
 
 ## Лицензия
 

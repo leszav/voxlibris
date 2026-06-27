@@ -7,7 +7,7 @@ import { activityService } from '../services/activity-service.js';
 import { gamificationService } from '../services/gamification-service.js';
 import { emotionalMapService } from '../services/emotional-map-service.js';
 import { isReaderLedClub } from '../lib/reader-club-access.js';
-import { CommerceService } from '../services/monetization.js';
+import { EntitlementService } from '../services/commerce/entitlement-service.js';
 
 const router = Router();
 const readingSessionStatuses = ['active', 'paused', 'completed', 'cancelled'] as const;
@@ -20,7 +20,7 @@ function isReadingSessionStatus(value: string): value is ReadingSessionStatus {
 async function canListenReaderClub(clubId: string, userId: string) {
   const club = await storage.getClub(clubId);
   if (!club || !isReaderLedClub(club) || club.ownerId === userId) return true;
-  return new CommerceService().hasEntitlement(userId, 'reader_club', club.id, 'reader_club_access');
+  return (await new EntitlementService().can(userId, 'reader_club_access', { scopeType: 'reader_club', scopeId: club.id })).allowed;
 }
 
 /**

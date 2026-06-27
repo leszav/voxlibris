@@ -26,16 +26,19 @@ import {
 } from "./lib/studio-stream-intent-store.js";
 import { sessionAnalyticsService } from "./services/session-analytics-service.js";
 import { db } from "./db.js";
+import { and, eq, sql } from "drizzle-orm";
 import { getIO } from "./lib/socket-registry.js";
 import { getFeatureFlag } from "./lib/feature-flags.js";
 import {
   analyticsEvents,
+  clubMembers,
   insertClubSchema,
   insertBookSchema,
   type InsertAnalyticsEvent,
   type InsertBook
 } from "../shared/schema.js";
 import { isReaderLedClub } from "./lib/reader-club-access.js";
+import { EntitlementError, EntitlementService } from "./services/commerce/entitlement-service.js";
 
 // Helper: robust lookup of invitation by token with fallbacks
 async function findInvitationByToken(token: string) {
@@ -63,6 +66,12 @@ async function findInvitationByToken(token: string) {
   }
 
   return undefined;
+}
+
+async function countActiveClubMembersForEntitlement(clubId: string) {
+  const [row] = await db.select({ count: sql<number>`count(*)::int` }).from(clubMembers)
+    .where(and(eq(clubMembers.clubId, clubId), eq(clubMembers.isActive, true)));
+  return row?.count ?? 0;
 }
 
 function normalizeFavoriteGenresInput(input: unknown): string | null | undefined {
@@ -341,6 +350,15 @@ export async function registerRoutes(
       // Проверяем, не заполнен ли клуб
       if (club.memberCount >= club.maxMembers) {
         return res.status(409).json({ message: 'Club is full' });
+      }
+
+      if (!isReaderLedClub(club)) {
+        try {
+          await new EntitlementService().assertLimit(club.ownerId, 'club.members.max_count', await countActiveClubMembersForEntitlement(club.id), { scopeType: 'club', scopeId: club.id });
+        } catch (error) {
+          if (error instanceof EntitlementError) return res.status(403).json({ message: error.message, code: error.code });
+          throw error;
+        }
       }
 
       // Проверяем, не является ли пользователь уже участником

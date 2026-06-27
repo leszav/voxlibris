@@ -3,11 +3,15 @@ import { getAccessToken, syncTokenFromCookie } from "./token-store";
 
 export class ApiError extends Error {
   code?: string;
+  featureKey?: string;
+  upgradeUrl?: string;
 
-  constructor(message: string, code?: string) {
+  constructor(message: string, code?: string, featureKey?: string, upgradeUrl?: string) {
     super(message);
     this.name = "ApiError";
     this.code = code;
+    this.featureKey = featureKey;
+    this.upgradeUrl = upgradeUrl;
   }
 }
 
@@ -123,10 +127,10 @@ async function handle403Error(res: Response, text: string): Promise<never> {
     }
     
     if (errorData.code === 'PRIVATE_CLUB_ACCESS_DENIED') {
-      throw new ApiError(errorData.message || 'Это закрытый клуб. Для доступа необходимо получить приглашение.', errorData.code);
+      throw new ApiError(errorData.message || 'Это закрытый клуб. Для доступа необходимо получить приглашение.', errorData.code, errorData.featureKey, errorData.upgradeUrl);
     }
     
-    throw new ApiError(errorData.message || text || res.statusText, errorData.code);
+    throw new ApiError(errorData.message || text || res.statusText, errorData.code, errorData.featureKey, errorData.upgradeUrl);
   } catch (parseError) {
     if (parseError instanceof SyntaxError) {
       throw new Error(text || res.statusText);

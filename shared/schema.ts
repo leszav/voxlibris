@@ -2673,7 +2673,11 @@ export type CommercePaymentStatus = 'pending' | 'succeeded' | 'failed' | 'cancel
 export type CommercePaymentEventStatus = 'received' | 'processed' | 'failed';
 export type CommerceSubscriptionStatus = 'pending' | 'active' | 'grace' | 'past_due' | 'cancelled' | 'expired';
 export type CommerceEntitlementSourceType = 'payment' | 'subscription' | 'promo' | 'admin_grant' | 'migration';
-export type CommerceEntitlementStatus = 'active' | 'revoked' | 'expired';
+export type CommerceEntitlementStatus = 'active' | 'revoked' | 'expired' | 'deleted';
+export type CommerceEntitlementRenewalStatus = 'active' | 'cancel_at_period_end';
+export type CommerceEntitlementActionType = 'revoke_now' | 'cancel_at_period_end' | 'restore' | 'delete_revoked';
+export type CommerceFeatureValueType = 'boolean' | 'integer' | 'string' | 'json';
+export type CommerceFeatureResetPeriod = 'day' | 'week' | 'month' | 'year' | null;
 export type ReaderClubTariffTemplateStatus = 'draft' | 'active' | 'archived';
 export type ReaderClubTariffVisibility = 'public' | 'private';
 export type ReaderClubTariffRequestStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
@@ -2721,16 +2725,44 @@ export const commercePrices = pgTable('commerce_prices', {
   updatedAt: timestamp('updated_at').notNull().default(sql`now()`),
 });
 
+export const commerceFeatureRegistry = pgTable('commerce_feature_registry', {
+  key: varchar('key', { length: 120 }).primaryKey(),
+  title: varchar('title', { length: 180 }).notNull(),
+  description: text('description'),
+  category: varchar('category', { length: 60 }).notNull(),
+  scopeType: varchar('scope_type', { length: 30 }).notNull().$type<CommerceScopeType>(),
+  valueType: varchar('value_type', { length: 20 }).notNull().default('boolean').$type<CommerceFeatureValueType>(),
+  defaultBool: boolean('default_bool'),
+  defaultInt: integer('default_int'),
+  defaultText: text('default_text'),
+  defaultJson: jsonb('default_json'),
+  isPublic: boolean('is_public').notNull().default(true),
+  isActive: boolean('is_active').notNull().default(true),
+  createdAt: timestamp('created_at').notNull().default(sql`now()`),
+  updatedAt: timestamp('updated_at').notNull().default(sql`now()`),
+}, (table) => ({
+  scopeIdx: index('commerce_feature_registry_scope_idx').on(table.scopeType, table.category, table.isActive),
+}));
+
 export const commerceProductFeatures = pgTable('commerce_product_features', {
   id: varchar('id').primaryKey().default(sql`gen_random_uuid()`),
   productId: varchar('product_id').notNull().references(() => commerceProducts.id, { onDelete: 'cascade' }),
   label: text('label').notNull(),
   featureKey: varchar('feature_key', { length: 120 }).notNull(),
+  valueType: varchar('value_type', { length: 20 }).notNull().default('boolean').$type<CommerceFeatureValueType>(),
+  valueBool: boolean('value_bool'),
+  valueInt: integer('value_int'),
+  valueText: text('value_text'),
+  valueJson: jsonb('value_json'),
+  resetPeriod: varchar('reset_period', { length: 20 }).$type<CommerceFeatureResetPeriod>(),
   sortOrder: integer('sort_order').notNull().default(0),
   isHighlighted: boolean('is_highlighted').notNull().default(false),
+  isActive: boolean('is_active').notNull().default(true),
   createdAt: timestamp('created_at').notNull().default(sql`now()`),
   updatedAt: timestamp('updated_at').notNull().default(sql`now()`),
-});
+}, (table) => ({
+  featureKeyIdx: index('commerce_product_features_feature_key_idx').on(table.featureKey),
+}));
 
 export const commerceOrders = pgTable('commerce_orders', {
   id: varchar('id').primaryKey().default(sql`gen_random_uuid()`),
@@ -2803,12 +2835,31 @@ export const commerceEntitlements = pgTable('commerce_entitlements', {
   sourceType: varchar('source_type', { length: 30 }).notNull().$type<CommerceEntitlementSourceType>(),
   sourceId: varchar('source_id'),
   status: varchar('status', { length: 20 }).notNull().default('active').$type<CommerceEntitlementStatus>(),
+  renewalStatus: varchar('renewal_status', { length: 30 }).notNull().default('active').$type<CommerceEntitlementRenewalStatus>(),
+  renewalCancelledAt: timestamp('renewal_cancelled_at'),
   startsAt: timestamp('starts_at').notNull().default(sql`now()`),
   endsAt: timestamp('ends_at'),
   createdBy: varchar('created_by').references(() => users.id, { onDelete: 'set null' }),
   createdAt: timestamp('created_at').notNull().default(sql`now()`),
   updatedAt: timestamp('updated_at').notNull().default(sql`now()`),
 });
+
+export const commerceEntitlementActions = pgTable('commerce_entitlement_actions', {
+  id: varchar('id').primaryKey().default(sql`gen_random_uuid()`),
+  entitlementId: varchar('entitlement_id').notNull().references(() => commerceEntitlements.id, { onDelete: 'cascade' }),
+  userId: varchar('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  adminUserId: varchar('admin_user_id').references(() => users.id, { onDelete: 'set null' }),
+  actionType: varchar('action_type', { length: 40 }).notNull().$type<CommerceEntitlementActionType>(),
+  reason: text('reason').notNull(),
+  previousStatus: varchar('previous_status', { length: 20 }).notNull().$type<CommerceEntitlementStatus>(),
+  newStatus: varchar('new_status', { length: 20 }).notNull().$type<CommerceEntitlementStatus>(),
+  previousEndsAt: timestamp('previous_ends_at'),
+  newEndsAt: timestamp('new_ends_at'),
+  createdAt: timestamp('created_at').notNull().default(sql`now()`),
+}, (table) => ({
+  entitlementIdx: index('commerce_entitlement_actions_entitlement_idx').on(table.entitlementId, table.createdAt),
+  userIdx: index('commerce_entitlement_actions_user_idx').on(table.userId, table.createdAt),
+}));
 
 export const readerClubTariffTemplates = pgTable('reader_club_tariff_templates', {
   id: varchar('id').primaryKey().default(sql`gen_random_uuid()`),
@@ -2895,6 +2946,8 @@ export type CommerceProduct = typeof commerceProducts.$inferSelect;
 export type InsertCommerceProduct = typeof commerceProducts.$inferInsert;
 export type CommercePrice = typeof commercePrices.$inferSelect;
 export type InsertCommercePrice = typeof commercePrices.$inferInsert;
+export type CommerceFeatureRegistryItem = typeof commerceFeatureRegistry.$inferSelect;
+export type InsertCommerceFeatureRegistryItem = typeof commerceFeatureRegistry.$inferInsert;
 export type CommerceProductFeature = typeof commerceProductFeatures.$inferSelect;
 export type InsertCommerceProductFeature = typeof commerceProductFeatures.$inferInsert;
 export type CommerceOrder = typeof commerceOrders.$inferSelect;
@@ -2907,6 +2960,8 @@ export type CommerceSubscription = typeof commerceSubscriptions.$inferSelect;
 export type InsertCommerceSubscription = typeof commerceSubscriptions.$inferInsert;
 export type CommerceEntitlement = typeof commerceEntitlements.$inferSelect;
 export type InsertCommerceEntitlement = typeof commerceEntitlements.$inferInsert;
+export type CommerceEntitlementAction = typeof commerceEntitlementActions.$inferSelect;
+export type InsertCommerceEntitlementAction = typeof commerceEntitlementActions.$inferInsert;
 export type ReaderClubTariffTemplate = typeof readerClubTariffTemplates.$inferSelect;
 export type InsertReaderClubTariffTemplate = typeof readerClubTariffTemplates.$inferInsert;
 export type ReaderClubTariffRequest = typeof readerClubTariffRequests.$inferSelect;

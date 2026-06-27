@@ -1,6 +1,6 @@
 import type { ClubWithDetails } from "@shared/schema";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, BookOpen, Loader2, TrendingUp, Users, Shield, KeyRound, MessageCircle } from "lucide-react";
+import { ArrowLeft, BookOpen, CreditCard, Loader2, TrendingUp, Users, Shield, KeyRound, MessageCircle } from "lucide-react";
 import * as React from "react";
 import { useLocation, useParams } from "wouter";
 import { AchievementShowcase } from "@/components/gamification/AchievementShowcase";
@@ -38,6 +38,30 @@ interface UserProfile {
   totalListeners: number;
   createdAt: string;
   updatedAt: string;
+}
+
+interface UserSubscription {
+  entitlementId: string;
+  featureKey: string;
+  status: string;
+  renewalStatus: "active" | "cancel_at_period_end";
+  renewalCancelledAt: string | null;
+  startsAt: string;
+  endsAt: string | null;
+  providerPaymentId: string | null;
+  receiptUrl: string | null;
+  productTitle: string;
+  amountRub: number;
+  period: "one_time" | "week" | "month" | "quarter" | "year";
+}
+
+function periodLabel(period: UserSubscription["period"]) {
+  return { one_time: "разово", week: "неделя", month: "месяц", quarter: "квартал", year: "год" }[period];
+}
+
+function formatDate(value: string | null) {
+  if (!value) return "Без срока окончания";
+  return new Date(value).toLocaleDateString("ru-RU");
 }
 
 export default function ProfilePage() {
@@ -117,6 +141,21 @@ export default function ProfilePage() {
       if (!response.ok) return [];
       return response.json();
     },
+  });
+
+  const { data: subscriptions = [], isLoading: subscriptionsLoading } = useQuery<UserSubscription[]>({
+    queryKey: ["my-commerce-subscriptions"],
+    queryFn: () => apiRequest<UserSubscription[]>("/api/commerce/me/subscriptions"),
+    enabled: !id,
+  });
+
+  const cancelSubscriptionMutation = useMutation({
+    mutationFn: (entitlementId: string) => apiRequest(`/api/commerce/me/subscriptions/${entitlementId}/cancel`, { method: "POST" }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["my-commerce-subscriptions"] });
+      toast({ title: "Продление отменено", description: "Доступ сохранён до конца оплаченного периода." });
+    },
+    onError: () => toast({ title: "Не удалось отменить продление", variant: "destructive" }),
   });
 
   const {
@@ -235,7 +274,7 @@ export default function ProfilePage() {
 
   let tabsListClassName = "grid h-auto w-full gap-1 rounded-xl p-1 grid-cols-3";
   if (isOwnProfile) {
-    tabsListClassName = "grid h-auto w-full gap-1 rounded-xl p-1 grid-cols-3 sm:grid-cols-6";
+    tabsListClassName = "grid h-auto w-full gap-1 rounded-xl p-1 grid-cols-3 sm:grid-cols-7";
   } else if (profile.isReader) {
     tabsListClassName = "grid h-auto w-full gap-1 rounded-xl p-1 grid-cols-4";
   }
@@ -362,6 +401,12 @@ export default function ProfilePage() {
               </TabsTrigger>
             )}
             {isOwnProfile && (
+              <TabsTrigger value="subscription" className="flex min-h-10 items-center gap-2 px-2 text-xs sm:text-sm">
+                <CreditCard className="h-4 w-4" />
+                <span>Подписка</span>
+              </TabsTrigger>
+            )}
+            {isOwnProfile && (
               <TabsTrigger value="security" className="flex min-h-10 items-center gap-2 px-2 text-xs sm:text-sm">
                 <Shield className="h-4 w-4" />
                 <span>Безопасность</span>
@@ -442,6 +487,50 @@ export default function ProfilePage() {
                 totalListeners={profile.totalListeners}
                 gamification={gamification}
               />
+            </TabsContent>
+          )}
+
+          {isOwnProfile && (
+            <TabsContent value="subscription">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <CreditCard className="h-5 w-5" />
+                    Моя подписка
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {subscriptionsLoading ? (
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />Загружаем подписки...</div>
+                  ) : subscriptions.length === 0 ? (
+                    <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">Активных платформенных подписок пока нет.</div>
+                  ) : subscriptions.map((subscription) => {
+                    const renewalCancelled = subscription.renewalStatus === "cancel_at_period_end";
+                    return <div key={subscription.entitlementId} className="rounded-lg border p-4 space-y-3">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                        <div>
+                          <div className="font-semibold">{subscription.productTitle}</div>
+                          <div className="text-sm text-muted-foreground">{subscription.amountRub.toLocaleString("ru-RU")} ₽ / {periodLabel(subscription.period)}</div>
+                        </div>
+                        <Badge variant={renewalCancelled ? "secondary" : "default"}>{renewalCancelled ? "Продление отменено" : "Активна"}</Badge>
+                      </div>
+                      <div className="grid gap-2 text-sm text-muted-foreground sm:grid-cols-2">
+                        <div>Начало: {formatDate(subscription.startsAt)}</div>
+                        <div>Окончание: {formatDate(subscription.endsAt)}</div>
+                        {renewalCancelled && subscription.renewalCancelledAt && <div>Отмена продления: {formatDate(subscription.renewalCancelledAt)}</div>}
+                        {subscription.providerPaymentId && <div>Платёж: {subscription.providerPaymentId}</div>}
+                        {subscription.receiptUrl && <a className="text-primary underline" href={subscription.receiptUrl} target="_blank" rel="noreferrer">Открыть чек</a>}
+                      </div>
+                      <div className="rounded-md bg-muted/50 p-3 text-sm text-muted-foreground">
+                        {renewalCancelled ? `Автопродление уже отменено. Доступ сохранён до ${formatDate(subscription.endsAt)}.` : "Можно отменить только следующее продление. Текущий оплаченный доступ сохранится до конца периода."}
+                      </div>
+                      <Button variant="destructive" onClick={() => cancelSubscriptionMutation.mutate(subscription.entitlementId)} disabled={renewalCancelled || cancelSubscriptionMutation.isPending}>
+                        {renewalCancelled ? "Продление уже отменено" : cancelSubscriptionMutation.isPending ? "Отменяем..." : "Отказаться от продления"}
+                      </Button>
+                    </div>
+                  })}
+                </CardContent>
+              </Card>
             </TabsContent>
           )}
 

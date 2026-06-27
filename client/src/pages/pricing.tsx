@@ -45,7 +45,7 @@ function formatPrice(plan: SubscriptionPlan) {
 }
 
 export default function Pricing() {
-  const { data: plans = [], isLoading } = useQuery<SubscriptionPlan[]>({ queryKey: ["/api/commerce/plans"] });
+  const { data: plans = [], isLoading, error } = useQuery<SubscriptionPlan[]>({ queryKey: ["/api/commerce/plans"] });
 
   async function checkout(plan: SubscriptionPlan) {
     const price = defaultPrice(plan);
@@ -66,6 +66,10 @@ export default function Pricing() {
 
         {isLoading ? (
           <div className="flex justify-center py-20"><Loader2 className="h-8 w-8 animate-spin" /></div>
+        ) : error ? (
+          <div className="rounded-xl border border-destructive/30 bg-destructive/10 p-8 text-center text-destructive">Не удалось загрузить тарифы. Попробуйте обновить страницу.</div>
+        ) : plans.length === 0 ? (
+          <div className="rounded-xl border border-dashed p-8 text-center text-muted-foreground">Публичные тарифы пока не опубликованы.</div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-20">
             {plans.map((plan) => {

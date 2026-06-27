@@ -143,7 +143,7 @@ wait_for_port() {
 
 # Остановка локальных dev-процессов приложения (без PostgreSQL)
 stop_local_dev_processes() {
-    local ports=(3000 5000)
+    local ports=(3000 4010 5000)
     local pids=""
 
     for port in "${ports[@]}"; do
@@ -166,6 +166,29 @@ stop_local_dev_processes() {
             print_log "$GREEN" "INFO" "✅ Порт $port уже свободен"
         fi
     done
+}
+
+# Запуск локального YooKassa emulator для UI/dev checkout flow
+start_yookassa_emulator() {
+    local emulator_script="$SCRIPT_DIR/.tmp/yooksssa_emulator/server.mjs"
+
+    if [ ! -f "$emulator_script" ]; then
+        print_log "$YELLOW" "WARN" "⚠️  YooKassa emulator не найден: $emulator_script"
+        return 0
+    fi
+
+    if check_port 4010; then
+        print_log "$GREEN" "INFO" "✅ YooKassa emulator уже запущен (http://127.0.0.1:4010)"
+        return 0
+    fi
+
+    print_log "$BLUE" "INFO" "💳 Запуск YooKassa emulator..."
+    YOOKASSA_EMULATOR_WEBHOOK_URL="${YOOKASSA_EMULATOR_WEBHOOK_URL:-http://127.0.0.1:5000/api/commerce/webhooks/yookassa}" \
+        node "$emulator_script" \
+        > >(sed 's/^/[yookassa-emulator] /') \
+        2> >(sed 's/^/[yookassa-emulator] /' >&2) &
+
+    wait_for_port 4010 "YooKassa emulator" 20 1
 }
 
 # Проверка: занят ли PostgreSQL порт внешним процессом
@@ -208,6 +231,13 @@ check_app_services() {
         echo -e "  🟢 Icecast: ${GREEN}Запущен${NC} (http://localhost:8000)"
     else
         echo -e "  🔴 Icecast: ${RED}Остановлен${NC} (http://localhost:8000)"
+    fi
+
+    # Проверка YooKassa emulator (порт 4010)
+    if check_port 4010; then
+        echo -e "  🟢 YooKassa emulator: ${GREEN}Запущен${NC} (http://127.0.0.1:4010)"
+    else
+        echo -e "  🔴 YooKassa emulator: ${RED}Остановлен${NC} (http://127.0.0.1:4010)"
     fi
 }
 
@@ -318,7 +348,10 @@ start_dev() {
     
     # Инициализация хранилища
     init_storage || return 1
-    
+
+    # Запуск YooKassa emulator до backend, чтобы checkout сразу работал из UI
+    start_yookassa_emulator || return 1
+     
     # Запуск backend с ожиданием готовности до старта frontend
     print_log "$GREEN" "INFO" "🌟 Запуск backend..."
     pnpm run dev:server \
@@ -376,6 +409,7 @@ show_status() {
     echo -e "  📦 MinIO: http://localhost:9000 (Console: http://localhost:9001)"
     echo -e "  🔴 Redis: localhost:6379"
     echo -e "  🎙️  Icecast: http://localhost:8000 (Admin: http://localhost:8000/admin)"
+    echo -e "  💳 YooKassa emulator: http://127.0.0.1:4010"
 }
 
 # Очистка логов

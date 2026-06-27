@@ -25,6 +25,7 @@ import { ReaderQualityRatingsRepository } from './ReaderQualityRatingsRepository
 import { SocialRepository } from './SocialRepository.js';
 import { DmRepository } from './DmRepository.js';
 import { GamificationRepository } from './GamificationRepository.js';
+import { CommerceRepository } from './CommerceRepository.js';
 import type { BookType, GenreSource, ReadingSessionWithDetails, InvitationStatus } from '../../shared/schema.js';
 
 /**
@@ -78,6 +79,7 @@ export class RepositoryContainer {
   private _social?: SocialRepository;
   private _dm?: DmRepository;
   private _gamification?: GamificationRepository;
+  private _commerce?: CommerceRepository;
 
   // Ленивая инициализация репозиториев
   get users(): UserRepository {
@@ -204,6 +206,11 @@ export class RepositoryContainer {
   get gamification(): GamificationRepository {
     this._gamification ??= new GamificationRepository();
     return this._gamification;
+  }
+
+  get commerce(): CommerceRepository {
+    this._commerce ??= new CommerceRepository();
+    return this._commerce;
   }
 }
 
