@@ -1,6 +1,9 @@
 import { CommerceRepository } from '../../repositories/CommerceRepository.js';
+import { db } from '../../db.js';
+import { and, eq, isNull } from 'drizzle-orm';
 import { emailService } from '../email-service.js';
-import type { CommerceEntitlementActionType, InsertCommerceFeatureRegistryItem, InsertCommercePrice, InsertCommerceProduct, InsertCommerceProductFeature } from '../../../shared/schema.js';
+import { commerceEntitlements, commerceOrders, commercePayments, commercePrices, commerceProductFeatures, commerceProducts, type CommerceEntitlementActionType, type InsertCommerceFeatureRegistryItem, type InsertCommercePrice, type InsertCommerceProduct, type InsertCommerceProductFeature } from '../../../shared/schema.js';
+import { commerceEntitlementEnd } from '../commerce-periods.js';
 
 export class AdminCommerceNotFoundError extends Error {
   readonly statusCode = 404;
@@ -104,6 +107,57 @@ export class AdminCommerceService {
     const audit = await this.commerce.getPaymentAudit(id);
     if (!audit) throw new AdminCommerceNotFoundError('Payment not found');
     return audit;
+  }
+
+  async resyncPaymentEntitlements(paymentId: string) {
+    return db.transaction(async (tx) => {
+      const [payment] = await tx.select().from(commercePayments).where(eq(commercePayments.id, paymentId)).limit(1);
+      if (!payment) throw new AdminCommerceNotFoundError('Payment not found');
+      if (payment.status !== 'succeeded') throw new AdminCommerceConflictError('Payment is not succeeded');
+
+      const [order] = await tx.select().from(commerceOrders).where(eq(commerceOrders.id, payment.orderId)).limit(1);
+      if (!order) throw new AdminCommerceNotFoundError('Order not found');
+      if (order.status !== 'paid') throw new AdminCommerceConflictError('Order is not paid');
+
+      const [product] = await tx.select().from(commerceProducts).where(eq(commerceProducts.id, order.productId)).limit(1);
+      const [price] = await tx.select().from(commercePrices).where(eq(commercePrices.id, order.priceId)).limit(1);
+      if (!product) throw new AdminCommerceNotFoundError('Product not found');
+      if (!price) throw new AdminCommerceNotFoundError('Price not found');
+
+      const features = await tx.select().from(commerceProductFeatures).where(and(eq(commerceProductFeatures.productId, product.id), eq(commerceProductFeatures.isActive, true)));
+      const changed = [];
+      const endsAt = commerceEntitlementEnd(price, null, payment.updatedAt ?? payment.createdAt);
+      for (const feature of features) {
+        const [existing] = await tx.select().from(commerceEntitlements).where(and(
+          eq(commerceEntitlements.userId, order.userId),
+          eq(commerceEntitlements.scopeType, product.scopeType),
+          product.scopeId ? eq(commerceEntitlements.scopeId, product.scopeId) : isNull(commerceEntitlements.scopeId),
+          eq(commerceEntitlements.featureKey, feature.featureKey),
+          eq(commerceEntitlements.status, 'active'),
+        )).limit(1);
+
+        if (existing) {
+          const [updated] = await tx.update(commerceEntitlements)
+            .set({ sourceType: 'payment', sourceId: payment.id, endsAt, updatedAt: new Date() })
+            .where(eq(commerceEntitlements.id, existing.id))
+            .returning();
+          changed.push(updated);
+          continue;
+        }
+
+        const [created] = await tx.insert(commerceEntitlements).values({
+          userId: order.userId,
+          scopeType: product.scopeType,
+          scopeId: product.scopeId,
+          featureKey: feature.featureKey,
+          sourceType: 'payment',
+          sourceId: payment.id,
+          endsAt,
+        }).returning();
+        changed.push(created);
+      }
+      return { paymentId: payment.id, orderId: order.id, productId: product.id, changed };
+    });
   }
 
   listPaymentEvents(filter: { status?: string; providerPaymentId?: string; dateFrom?: Date; dateTo?: Date; limit?: number }) { return this.commerce.listPaymentEvents(filter); }

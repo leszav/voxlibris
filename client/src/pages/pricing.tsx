@@ -29,6 +29,12 @@ interface SubscriptionPlan {
   features: CommerceFeature[];
 }
 
+interface ActiveSubscription {
+  status: string;
+  productId: string | null;
+  amountRub: number | null;
+}
+
 const FAQS = [
   { question: "Можно ли сменить тариф в любой момент?", answer: "Да, тариф можно изменить или отменить в настройках профиля." },
   { question: "Карты хранятся в VoxLibris?", answer: "Нет. Токенизация и рекуррентные платежи выполняются на стороне платёжного провайдера." },
@@ -52,6 +58,11 @@ function sortedFeatures(features: CommerceFeature[]) {
 export default function Pricing() {
   const { isAuthenticated } = useAuth();
   const { data: plans = [], isLoading, error } = useQuery<SubscriptionPlan[]>({ queryKey: ["/api/commerce/plans"] });
+  const { data: subscriptions = [] } = useQuery<ActiveSubscription[]>({
+    queryKey: ["/api/commerce/me/subscriptions"],
+    enabled: isAuthenticated,
+  });
+  const activePaidProductId = subscriptions.find((item) => item.status === "active" && (item.amountRub ?? 0) > 0)?.productId ?? null;
 
   async function checkout(plan: SubscriptionPlan) {
     const price = defaultPrice(plan);
@@ -87,7 +98,7 @@ export default function Pricing() {
               const price = defaultPrice(plan);
               const isPopular = Boolean(plan.metadata?.isPopular);
               const isFree = !price || price.amountRub === 0;
-              const isCurrentFreePlan = isAuthenticated && isFree;
+              const isCurrentPlan = isAuthenticated && (activePaidProductId ? activePaidProductId === plan.id : isFree);
 
               return (
               <Card key={plan.id} className={`flex flex-col relative ${isPopular ? "border-amber-500 shadow-xl scale-105 z-10" : "border-border"}`}>
@@ -111,8 +122,8 @@ export default function Pricing() {
                   </ul>
                 </CardContent>
                 <CardFooter>
-                  <Button className={`w-full ${isPopular ? "bg-amber-600 hover:bg-amber-700" : ""}`} variant={isPopular ? "default" : "outline"} onClick={() => checkout(plan)} disabled={isCurrentFreePlan || !price}>
-                    {isCurrentFreePlan ? "Ваш тариф" : isFree ? "Начать бесплатно" : "Оформить подписку"}
+                  <Button className={`w-full ${isPopular ? "bg-amber-600 hover:bg-amber-700" : ""}`} variant={isPopular ? "default" : "outline"} onClick={() => checkout(plan)} disabled={isCurrentPlan || !price}>
+                    {isCurrentPlan ? "Ваш тариф" : isFree ? "Начать бесплатно" : "Оформить подписку"}
                   </Button>
                 </CardFooter>
               </Card>

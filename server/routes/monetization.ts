@@ -204,6 +204,7 @@ router.get('/me/subscriptions', jwtAuth, async (req, res) => {
     paymentId: commercePayments.id,
     providerPaymentId: commercePayments.providerPaymentId,
     receiptUrl: commercePayments.fiscalReceiptUrl,
+    productId: commerceProducts.id,
     productTitle: commerceProducts.title,
     amountRub: commercePrices.amountRub,
     period: commercePrices.period,
@@ -445,6 +446,12 @@ router.get('/admin/payments', jwtAuth, requireAdmin, async (req, res) => {
 router.get('/admin/payments/:id', jwtAuth, requireAdmin, async (req, res, next) => {
   try {
     res.json(await new AdminCommerceService().getPaymentAudit(req.params.id));
+  } catch (error) { next(error); }
+});
+
+router.post('/admin/payments/:id/resync-entitlements', jwtAuth, requireAdmin, async (req, res, next) => {
+  try {
+    res.json(await new AdminCommerceService().resyncPaymentEntitlements(req.params.id));
   } catch (error) { next(error); }
 });
 

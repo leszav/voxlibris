@@ -24,15 +24,19 @@ interface SubscriptionRow {
   payment: { id: string; providerPaymentId: string | null; status: string; fiscalReceiptUrl: string | null } | null;
 }
 
+type SubscriptionItem = SubscriptionRow & { entitlementIds: string[]; featureKeys: string[] };
+
 interface SubscriptionsResponse { items: SubscriptionRow[]; total: number; }
 
 interface RowHandlers {
   checked: boolean;
-  inlineAction: { id: string; actionType: ActionType } | null;
+  inlineAction: { ids: string[]; actionType: ActionType } | null;
   reason: string;
   pending: boolean;
-  onToggle: (id: string) => void;
-  onOpenInline: (id: string, actionType: ActionType) => void;
+  syncingPaymentId: string | null;
+  onToggle: (ids: string[]) => void;
+  onOpenInline: (ids: string[], actionType: ActionType) => void;
+  onResync: (paymentId: string) => void;
   onReason: (value: string) => void;
   onCancel: () => void;
   onSubmit: () => void;
@@ -64,7 +68,7 @@ function priceLabel(item: SubscriptionRow) {
   return `${item.price.amountRub.toLocaleString("ru-RU")} ₽ / ${formatPeriod(item.price.period)}`;
 }
 
-function compareRows(a: SubscriptionRow, b: SubscriptionRow, sort: SortKey) {
+function compareRows(a: SubscriptionItem, b: SubscriptionItem, sort: SortKey) {
   if (sort === "user") return (a.user?.email ?? "").localeCompare(b.user?.email ?? "");
   if (sort === "product") return (a.product?.title ?? a.entitlement.featureKey).localeCompare(b.product?.title ?? b.entitlement.featureKey);
   if (sort === "status") return a.entitlement.status.localeCompare(b.entitlement.status);
@@ -72,7 +76,7 @@ function compareRows(a: SubscriptionRow, b: SubscriptionRow, sort: SortKey) {
   return new Date(b.entitlement.createdAt).getTime() - new Date(a.entitlement.createdAt).getTime();
 }
 
-function groupTitle(row: SubscriptionRow, group: GroupKey) {
+function groupTitle(row: SubscriptionItem, group: GroupKey) {
   if (group === "status") return statusLabel(row.entitlement.status);
   if (group === "product") return row.product?.title ?? row.entitlement.featureKey;
   if (group === "period") return formatPeriod(row.price?.period);
@@ -89,7 +93,7 @@ export default function AdminSubscriptionsPage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [inlineAction, setInlineAction] = useState<{ id: string; actionType: ActionType } | null>(null);
+  const [inlineAction, setInlineAction] = useState<{ ids: string[]; actionType: ActionType } | null>(null);
   const [reason, setReason] = useState("");
   const offset = (page - 1) * pageSize;
   const params = new URLSearchParams({ limit: String(pageSize), offset: String(offset) });
@@ -101,11 +105,24 @@ export default function AdminSubscriptionsPage() {
     queryFn: () => apiRequest<SubscriptionsResponse>(`/api/commerce/admin/subscriptions?${params.toString()}`),
   });
 
-  const total = subscriptions.data?.total ?? 0;
+  const rows = useMemo(() => {
+    const map = new Map<string, SubscriptionItem>();
+    for (const row of subscriptions.data?.items ?? []) {
+      const key = row.payment?.id ?? row.entitlement.id;
+      const existing = map.get(key);
+      if (existing) {
+        existing.entitlementIds.push(row.entitlement.id);
+        existing.featureKeys.push(row.entitlement.featureKey);
+        continue;
+      }
+      map.set(key, { ...row, entitlementIds: [row.entitlement.id], featureKeys: [row.entitlement.featureKey] });
+    }
+    return [...map.values()].sort((a, b) => compareRows(a, b, sort));
+  }, [subscriptions.data, sort]);
+  const total = rows.length;
   const totalPages = Math.max(Math.ceil(total / pageSize), 1);
-  const rows = useMemo(() => [...(subscriptions.data?.items ?? [])].sort((a, b) => compareRows(a, b, sort)), [subscriptions.data, sort]);
   const groupedRows = useMemo(() => {
-    const map = new Map<string, SubscriptionRow[]>();
+    const map = new Map<string, SubscriptionItem[]>();
     rows.forEach((row) => {
       const title = groupTitle(row, group);
       map.set(title, [...(map.get(title) ?? []), row]);
@@ -132,25 +149,35 @@ export default function AdminSubscriptionsPage() {
     onError: (error) => toast({ variant: "destructive", title: "Ошибка", description: error instanceof Error ? error.message : "Не удалось обновить подписки" }),
   });
 
-  function toggleSelected(id: string) {
-    setSelectedIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
+  const resync = useMutation({
+    mutationFn: (paymentId: string) => apiRequest(`/api/commerce/admin/payments/${paymentId}/resync-entitlements`, { method: "POST" }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: QUERY_KEY });
+      toast({ title: "Права синхронизированы", description: "Entitlements обновлены по текущим настройкам тарифа." });
+    },
+    onError: (error) => toast({ variant: "destructive", title: "Ошибка синхронизации", description: error instanceof Error ? error.message : "Не удалось синхронизировать права" }),
+  });
+
+  function toggleSelected(ids: string[]) {
+    const selected = ids.every((id) => selectedIds.includes(id));
+    setSelectedIds((current) => selected ? current.filter((item) => !ids.includes(item)) : [...new Set([...current, ...ids])]);
   }
 
-  function openInline(id: string, actionType: ActionType) {
-    setInlineAction({ id, actionType });
+  function openInline(ids: string[], actionType: ActionType) {
+    setInlineAction({ ids, actionType });
     setReason(actionType === "restore" ? "Восстановление подписки администратором" : actionType === "delete_revoked" ? "Окончательное скрытие отозванной подписки" : "");
   }
 
   function selectedByStatus(targetStatus: string) {
-    return selectedIds.filter((id) => rows.some((row) => row.entitlement.id === id && row.entitlement.status === targetStatus));
+    return selectedIds.filter((id) => rows.some((row) => row.entitlementIds.includes(id) && row.entitlement.status === targetStatus));
   }
 
   function selectedActiveRenewing() {
-    return selectedIds.filter((id) => rows.some((row) => row.entitlement.id === id && row.entitlement.status === "active" && row.entitlement.renewalStatus !== "cancel_at_period_end"));
+    return selectedIds.filter((id) => rows.some((row) => row.entitlementIds.includes(id) && row.entitlement.status === "active" && row.entitlement.renewalStatus !== "cancel_at_period_end"));
   }
 
   function selectVisibleRows() {
-    setSelectedIds(rows.map((row) => row.entitlement.id));
+    setSelectedIds([...new Set(rows.flatMap((row) => row.entitlementIds))]);
   }
 
   function clearSelection() {
@@ -167,11 +194,13 @@ export default function AdminSubscriptionsPage() {
     inlineAction,
     reason,
     pending: action.isPending,
+    syncingPaymentId: resync.variables ?? null,
     onToggle: toggleSelected,
     onOpenInline: openInline,
+    onResync: (paymentId) => resync.mutate(paymentId),
     onReason: setReason,
     onCancel: () => setInlineAction(null),
-    onSubmit: () => inlineAction && action.mutate({ ids: [inlineAction.id], actionType: inlineAction.actionType, actionReason: reason }),
+    onSubmit: () => inlineAction && action.mutate({ ids: inlineAction.ids, actionType: inlineAction.actionType, actionReason: reason }),
   };
 
   return (
@@ -217,14 +246,14 @@ export default function AdminSubscriptionsPage() {
               <section key={title} className="mb-5 space-y-3">
                 {group !== "none" && <h2 className="sticky top-0 z-10 rounded-md bg-background/95 py-2 text-sm font-medium backdrop-blur">{title} · {items.length}</h2>}
                 <div className="grid gap-3 lg:hidden">
-                  {items.map((item) => <MobileCard key={item.entitlement.id} item={item} checked={selectedIds.includes(item.entitlement.id)} {...rowHandlers} />)}
+                  {items.map((item) => <MobileCard key={item.payment?.id ?? item.entitlement.id} item={item} checked={item.entitlementIds.every((id) => selectedIds.includes(id))} {...rowHandlers} />)}
                 </div>
                 <div className="hidden overflow-x-auto lg:block">
                   <table className="w-full text-sm">
                     <thead className="sticky top-0 z-10 bg-background text-left text-muted-foreground">
                       <tr><th className="w-8 p-2" /><th className="p-2">Пользователь</th><th className="p-2">Тариф</th><th className="p-2">Период</th><th className="p-2">Доступ</th><th className="p-2">Платёж</th><th className="p-2">Действия</th></tr>
                     </thead>
-                    <tbody>{items.map((item) => <TableRow key={item.entitlement.id} item={item} checked={selectedIds.includes(item.entitlement.id)} {...rowHandlers} />)}</tbody>
+                    <tbody>{items.map((item) => <TableRow key={item.payment?.id ?? item.entitlement.id} item={item} checked={item.entitlementIds.every((id) => selectedIds.includes(id))} {...rowHandlers} />)}</tbody>
                   </table>
                 </div>
               </section>
@@ -251,23 +280,24 @@ function InlineReason({ visible, reason, pending, onReason, onSubmit, onCancel }
   return <div className="rounded-lg border bg-amber-50/70 p-3"><div className="space-y-2"><Label>Причина действия</Label><Textarea value={reason} onChange={(event) => onReason(event.target.value)} placeholder="Причина будет сохранена в audit" /><div className="grid gap-2 sm:flex"><Button size="sm" onClick={onSubmit} disabled={pending}>{pending ? "Сохраняем..." : "Подтвердить"}</Button><Button size="sm" variant="outline" onClick={onCancel} disabled={pending}>Отмена</Button></div></div></div>;
 }
 
-function Actions({ item, onOpenInline }: Readonly<{ item: SubscriptionRow; onOpenInline: (id: string, actionType: ActionType) => void }>) {
+function Actions({ item, syncingPaymentId, onOpenInline, onResync }: Readonly<{ item: SubscriptionItem; syncingPaymentId: string | null; onOpenInline: (ids: string[], actionType: ActionType) => void; onResync: (paymentId: string) => void }>) {
   const renewalCancelled = item.entitlement.renewalStatus === "cancel_at_period_end";
-  return <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap lg:flex-nowrap"><Button size="sm" variant="destructive" disabled={item.entitlement.status !== "active"} onClick={() => onOpenInline(item.entitlement.id, "revoke_now")}>Отозвать</Button><Button size="sm" variant="outline" disabled={item.entitlement.status !== "active" || renewalCancelled} onClick={() => onOpenInline(item.entitlement.id, "cancel_at_period_end")}>{renewalCancelled ? "Отменено" : "Отменить"}</Button><Button size="sm" variant="outline" disabled={!['revoked', 'deleted'].includes(item.entitlement.status)} onClick={() => onOpenInline(item.entitlement.id, "restore")}>Вернуть</Button><Button size="sm" variant="outline" disabled={item.entitlement.status !== "revoked"} onClick={() => onOpenInline(item.entitlement.id, "delete_revoked")}>Удалить</Button></div>;
+  const paymentId = item.payment?.id ?? null;
+  return <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap lg:flex-nowrap"><Button size="sm" variant="destructive" disabled={item.entitlement.status !== "active"} onClick={() => onOpenInline(item.entitlementIds, "revoke_now")}>Отозвать</Button><Button size="sm" variant="outline" disabled={item.entitlement.status !== "active" || renewalCancelled} onClick={() => onOpenInline(item.entitlementIds, "cancel_at_period_end")}>{renewalCancelled ? "Отменено" : "Отменить"}</Button><Button size="sm" variant="outline" disabled={!['revoked', 'deleted'].includes(item.entitlement.status)} onClick={() => onOpenInline(item.entitlementIds, "restore")}>Вернуть</Button><Button size="sm" variant="outline" disabled={item.entitlement.status !== "revoked"} onClick={() => onOpenInline(item.entitlementIds, "delete_revoked")}>Удалить</Button><Button size="sm" variant="outline" disabled={!paymentId || syncingPaymentId === paymentId} onClick={() => paymentId && onResync(paymentId)}>{syncingPaymentId === paymentId ? "Синхр..." : "Синхр."}</Button></div>;
 }
 
-function MobileCard(props: Readonly<{ item: SubscriptionRow } & RowHandlers>) {
+function MobileCard(props: Readonly<{ item: SubscriptionItem } & RowHandlers>) {
   const { item, checked, inlineAction, reason, pending, onToggle, onOpenInline, onReason, onCancel, onSubmit } = props;
-  const visible = inlineAction?.id === item.entitlement.id;
-  return <article className="rounded-xl border bg-card p-3 shadow-sm"><div className="flex items-start gap-3"><Checkbox checked={checked} onCheckedChange={() => onToggle(item.entitlement.id)} className="mt-1" /><div className="min-w-0 flex-1 space-y-3"><div><div className="truncate font-medium">{item.product?.title ?? item.entitlement.featureKey}</div><div className="truncate text-xs text-muted-foreground">{item.user?.email ?? item.entitlement.userId}</div></div><div className="grid grid-cols-2 gap-2 text-xs"><Info label="Статус" value={statusLabel(item.entitlement.status)} /><Info label="Продление" value={renewalLabel(item)} /><Info label="Период" value={priceLabel(item)} /><Info label="Доступ" value={`${formatDate(item.entitlement.startsAt)} — ${formatDate(item.entitlement.endsAt)}`} /><Info label="Платёж" value={item.payment?.providerPaymentId ?? "—"} /></div><Actions item={item} onOpenInline={onOpenInline} /><InlineReason visible={visible} reason={reason} pending={pending} onReason={onReason} onSubmit={onSubmit} onCancel={onCancel} /></div></div></article>;
+  const visible = Boolean(inlineAction && inlineAction.ids.every((id) => item.entitlementIds.includes(id)));
+  return <article className="rounded-xl border bg-card p-3 shadow-sm"><div className="flex items-start gap-3"><Checkbox checked={checked} onCheckedChange={() => onToggle(item.entitlementIds)} className="mt-1" /><div className="min-w-0 flex-1 space-y-3"><div><div className="truncate font-medium">{item.product?.title ?? item.entitlement.featureKey}</div><div className="truncate text-xs text-muted-foreground">{item.user?.email ?? item.entitlement.userId}</div><div className="truncate text-xs text-muted-foreground">Прав: {item.featureKeys.length}</div></div><div className="grid grid-cols-2 gap-2 text-xs"><Info label="Статус" value={statusLabel(item.entitlement.status)} /><Info label="Продление" value={renewalLabel(item)} /><Info label="Период" value={priceLabel(item)} /><Info label="Доступ" value={`${formatDate(item.entitlement.startsAt)} — ${formatDate(item.entitlement.endsAt)}`} /><Info label="Платёж" value={item.payment?.providerPaymentId ?? "—"} /></div><Actions item={item} syncingPaymentId={props.syncingPaymentId} onOpenInline={onOpenInline} onResync={props.onResync} /><InlineReason visible={visible} reason={reason} pending={pending} onReason={onReason} onSubmit={onSubmit} onCancel={onCancel} /></div></div></article>;
 }
 
 function Info({ label, value }: Readonly<{ label: string; value: string }>) {
   return <div className="min-w-0"><div className="text-muted-foreground">{label}</div><div className="truncate">{value}</div></div>;
 }
 
-function TableRow(props: Readonly<{ item: SubscriptionRow } & RowHandlers>) {
+function TableRow(props: Readonly<{ item: SubscriptionItem } & RowHandlers>) {
   const { item, checked, inlineAction, reason, pending, onToggle, onOpenInline, onReason, onCancel, onSubmit } = props;
-  const visible = inlineAction?.id === item.entitlement.id;
-  return <><tr className="border-t align-top"><td className="p-2"><Checkbox checked={checked} onCheckedChange={() => onToggle(item.entitlement.id)} /></td><td className="p-2"><div>{item.user?.username ?? "—"}</div><div className="text-xs text-muted-foreground">{item.user?.email ?? item.entitlement.userId}</div></td><td className="p-2"><div>{item.product?.title ?? item.entitlement.featureKey}</div><div className="text-xs text-muted-foreground">{item.product?.type ?? item.entitlement.featureKey}</div></td><td className="p-2">{priceLabel(item)}</td><td className="p-2"><div>{statusLabel(item.entitlement.status)}</div><div className="text-xs text-muted-foreground">{renewalLabel(item)}</div><div className="text-xs text-muted-foreground">{formatDate(item.entitlement.startsAt)} — {formatDate(item.entitlement.endsAt)}</div></td><td className="p-2"><div>{item.payment?.status ?? "—"}</div><div className="text-xs text-muted-foreground">{item.payment?.providerPaymentId ?? "—"}</div>{item.payment?.fiscalReceiptUrl && <a className="text-xs underline" href={item.payment.fiscalReceiptUrl}>чек</a>}</td><td className="p-2"><Actions item={item} onOpenInline={onOpenInline} /></td></tr>{visible && <tr className="border-t"><td /><td className="p-3" colSpan={6}><InlineReason visible reason={reason} pending={pending} onReason={onReason} onSubmit={onSubmit} onCancel={onCancel} /></td></tr>}</>;
+  const visible = Boolean(inlineAction && inlineAction.ids.every((id) => item.entitlementIds.includes(id)));
+  return <><tr className="border-t align-top"><td className="p-2"><Checkbox checked={checked} onCheckedChange={() => onToggle(item.entitlementIds)} /></td><td className="p-2"><div>{item.user?.username ?? "—"}</div><div className="text-xs text-muted-foreground">{item.user?.email ?? item.entitlement.userId}</div></td><td className="p-2"><div>{item.product?.title ?? item.entitlement.featureKey}</div><div className="text-xs text-muted-foreground">{item.product?.type ?? item.entitlement.featureKey}</div><div className="text-xs text-muted-foreground">Прав: {item.featureKeys.length}</div></td><td className="p-2">{priceLabel(item)}</td><td className="p-2"><div>{statusLabel(item.entitlement.status)}</div><div className="text-xs text-muted-foreground">{renewalLabel(item)}</div><div className="text-xs text-muted-foreground">{formatDate(item.entitlement.startsAt)} — {formatDate(item.entitlement.endsAt)}</div></td><td className="p-2"><div>{item.payment?.status ?? "—"}</div><div className="text-xs text-muted-foreground">{item.payment?.providerPaymentId ?? "—"}</div>{item.payment?.fiscalReceiptUrl && <a className="text-xs underline" href={item.payment.fiscalReceiptUrl}>чек</a>}</td><td className="p-2"><Actions item={item} syncingPaymentId={props.syncingPaymentId} onOpenInline={onOpenInline} onResync={props.onResync} /></td></tr>{visible && <tr className="border-t"><td /><td className="p-3" colSpan={6}><InlineReason visible reason={reason} pending={pending} onReason={onReason} onSubmit={onSubmit} onCancel={onCancel} /></td></tr>}</>;
 }
