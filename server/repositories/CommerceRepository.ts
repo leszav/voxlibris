@@ -92,6 +92,13 @@ export class CommerceRepository extends BaseRepository {
     return product;
   }
 
+  async deleteArchivedProduct(id: string) {
+    const [product] = await this.db.delete(commerceProducts)
+      .where(and(eq(commerceProducts.id, id), eq(commerceProducts.status, 'archived')))
+      .returning();
+    return product;
+  }
+
   async productExists(id: string) {
     const [product] = await this.db.select({ id: commerceProducts.id }).from(commerceProducts).where(eq(commerceProducts.id, id)).limit(1);
     return Boolean(product);
@@ -118,7 +125,7 @@ export class CommerceRepository extends BaseRepository {
   }
 
   async deleteProductFeature(id: string) {
-    const [feature] = await this.db.update(commerceProductFeatures).set({ isActive: false, updatedAt: new Date() }).where(eq(commerceProductFeatures.id, id)).returning();
+    const [feature] = await this.db.delete(commerceProductFeatures).where(eq(commerceProductFeatures.id, id)).returning();
     return feature;
   }
 

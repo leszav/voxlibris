@@ -41,6 +41,12 @@ export class AdminCommerceService {
     return product;
   }
 
+  async deleteArchivedProduct(id: string) {
+    const product = await this.commerce.deleteArchivedProduct(id);
+    if (!product) throw new AdminCommerceNotFoundError('Archived product not found');
+    return { deleted: true, product };
+  }
+
   async createPrice(productId: string, input: Omit<InsertCommercePrice, 'productId'>) {
     await this.assertProductExists(productId);
     return this.commerce.createPrice(productId, input);

@@ -293,6 +293,12 @@ router.patch('/admin/products/:id', jwtAuth, requireAdmin, async (req, res, next
   } catch (error) { next(error); }
 });
 
+router.delete('/admin/products/:id', jwtAuth, requireAdmin, async (req, res, next) => {
+  try {
+    res.json(await new AdminCommerceService().deleteArchivedProduct(req.params.id));
+  } catch (error) { next(error); }
+});
+
 router.post('/admin/products/:id/prices', jwtAuth, requireAdmin, async (req, res, next) => {
   try {
     res.status(201).json(await new AdminCommerceService().createPrice(req.params.id, priceSchema.parse(req.body)));
