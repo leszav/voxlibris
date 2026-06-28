@@ -154,7 +154,17 @@ class DrizzleEntitlementStore implements EntitlementStore {
         ))
         .where(or(eq(commercePayments.id, row.entitlement.sourceId), eq(commerceOrders.id, row.entitlement.sourceId)))
         .limit(1);
-      return { feature: paymentRows[0]?.feature ?? null };
+      if (paymentRows[0]?.feature) return { feature: paymentRows[0].feature };
+
+      const orderRows = await db.select({ feature: commerceProductFeatures }).from(commerceOrders)
+        .innerJoin(commerceProductFeatures, and(
+          eq(commerceProductFeatures.productId, commerceOrders.productId),
+          eq(commerceProductFeatures.featureKey, input.featureKey),
+          eq(commerceProductFeatures.isActive, true),
+        ))
+        .where(eq(commerceOrders.id, row.entitlement.sourceId))
+        .limit(1);
+      return { feature: orderRows[0]?.feature ?? null };
     }
 
     return { feature: null };
