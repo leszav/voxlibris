@@ -42,6 +42,9 @@ export class AdminCommerceService {
   }
 
   async deleteArchivedProduct(id: string) {
+    const blockers = await this.commerce.archivedProductDeleteBlockers(id);
+    const blockerCount = Object.values(blockers).reduce((total, value) => total + value, 0);
+    if (blockerCount > 0) throw new AdminCommerceConflictError('Архивный тариф нельзя удалить: по нему уже есть финансовая история', blockers);
     const product = await this.commerce.deleteArchivedProduct(id);
     if (!product) throw new AdminCommerceNotFoundError('Archived product not found');
     return { deleted: true, product };
@@ -141,7 +144,7 @@ export class AdminCommerceService {
 export class AdminCommerceConflictError extends Error {
   readonly statusCode = 409;
 
-  constructor(message: string) {
+  constructor(message: string, readonly details?: unknown) {
     super(message);
   }
 }

@@ -12,6 +12,7 @@ import {
   commercePrices,
   commerceProductFeatures,
   commerceProducts,
+  commerceSubscriptions,
   paymentProviders,
   readerClubTariffAssignments,
   users,
@@ -97,6 +98,23 @@ export class CommerceRepository extends BaseRepository {
       .where(and(eq(commerceProducts.id, id), eq(commerceProducts.status, 'archived')))
       .returning();
     return product;
+  }
+
+  async archivedProductDeleteBlockers(id: string) {
+    const [[orders], [subscriptions], [ledger], [assignments], [entitlements]] = await Promise.all([
+      this.db.select({ total: count() }).from(commerceOrders).where(eq(commerceOrders.productId, id)),
+      this.db.select({ total: count() }).from(commerceSubscriptions).where(eq(commerceSubscriptions.productId, id)),
+      this.db.select({ total: count() }).from(commerceLedgerEntries).where(eq(commerceLedgerEntries.productId, id)),
+      this.db.select({ total: count() }).from(readerClubTariffAssignments).where(eq(readerClubTariffAssignments.productId, id)),
+      this.db.select({ total: count() }).from(commerceEntitlements).where(eq(commerceEntitlements.sourceId, id)),
+    ]);
+    return {
+      orders: orders.total,
+      subscriptions: subscriptions.total,
+      ledgerEntries: ledger.total,
+      readerClubTariffAssignments: assignments.total,
+      entitlements: entitlements.total,
+    };
   }
 
   async productExists(id: string) {

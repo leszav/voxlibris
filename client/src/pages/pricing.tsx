@@ -44,6 +44,10 @@ function formatPrice(plan: SubscriptionPlan) {
   return `${price.amountRub.toLocaleString("ru-RU")} ₽`;
 }
 
+function sortedFeatures(features: CommerceFeature[]) {
+  return [...features].sort((a, b) => Number(b.isHighlighted) - Number(a.isHighlighted));
+}
+
 export default function Pricing() {
   const { data: plans = [], isLoading, error } = useQuery<SubscriptionPlan[]>({ queryKey: ["/api/commerce/plans"] });
 
@@ -89,9 +93,9 @@ export default function Pricing() {
                     {price && price.amountRub > 0 && price.period !== "one_time" && <span className="text-muted-foreground"> / {price.period === "month" ? "месяц" : "год"}</span>}
                   </div>
                   <ul className="space-y-3">
-                    {plan.features.map((feature) => (
-                      <li key={feature.featureKey} className="flex items-start gap-3 text-sm">
-                        <Check className="w-5 h-5 text-green-500 shrink-0" />
+                    {sortedFeatures(plan.features).map((feature) => (
+                      <li key={feature.featureKey} className={`flex items-start gap-3 rounded-lg text-sm ${feature.isHighlighted ? "bg-amber-50 px-3 py-2 font-medium text-amber-950" : ""}`}>
+                        <Check className={`h-5 w-5 shrink-0 ${feature.isHighlighted ? "text-amber-600" : "text-green-500"}`} />
                         <span>{feature.label}</span>
                       </li>
                     ))}
