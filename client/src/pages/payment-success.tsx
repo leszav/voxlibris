@@ -12,7 +12,8 @@ export default function PaymentSuccessPage() {
   const status = useMemo(() => new URLSearchParams(window.location.search).get("status"), []);
   const paymentId = useMemo(() => new URLSearchParams(window.location.search).get("paymentId"), []);
   const receiptUrl = useMemo(() => new URLSearchParams(window.location.search).get("receiptUrl"), []);
-  const targetPath = clubId ? `/clubs/${clubId}` : `/?subscription=${status === "success" ? "success" : "failed"}${paymentId ? `&paymentId=${encodeURIComponent(paymentId)}` : ""}${receiptUrl ? `&receiptUrl=${encodeURIComponent(receiptUrl)}` : ""}`;
+  const subscriptionStatus = status === "failed" ? "failed" : paymentId ? "check" : "success";
+  const targetPath = clubId ? `/clubs/${clubId}` : `/?subscription=${subscriptionStatus}${paymentId ? `&paymentId=${encodeURIComponent(paymentId)}` : ""}${receiptUrl ? `&receiptUrl=${encodeURIComponent(receiptUrl)}` : ""}`;
 
   useEffect(() => {
     const redirectTimer = window.setTimeout(() => setLocation(targetPath), 4000);

@@ -11,6 +11,10 @@ import { fileStorage } from "./file-storage.js";
 
 const router = Router();
 
+router.get("/status", async (_req: Request, res: Response) => {
+  res.json({ enabled: await isGuestAccessEnabled() });
+});
+
 // ============================================
 // Middleware: Check if guest access is enabled
 // ============================================

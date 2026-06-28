@@ -5,7 +5,7 @@ import { jwtAuth, requireAdmin } from '../jwt-middleware.js';
 import { AdminCommerceService } from '../services/commerce/admin-commerce-service.js';
 import { CommerceService, financialDashboard, PaymentGatewayService, PaymentNotificationProcessorService } from '../services/monetization.js';
 import { commerceEntitlements, commerceOrders, commercePayments, commercePrices, commerceProductFeatures, commerceProducts, readerClubTariffAssignments, readerClubTariffRequests, readerClubTariffTemplates, type PaymentProviderCode } from '../../shared/schema.js';
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, or, sql } from 'drizzle-orm';
 
 const router = express.Router();
 
@@ -173,7 +173,7 @@ router.get('/payments/:providerPaymentId/summary', jwtAuth, async (req, res) => 
     .innerJoin(commerceOrders, eq(commerceOrders.id, commercePayments.orderId))
     .innerJoin(commerceProducts, eq(commerceProducts.id, commerceOrders.productId))
     .innerJoin(commercePrices, eq(commercePrices.id, commerceOrders.priceId))
-    .where(and(eq(commercePayments.providerPaymentId, req.params.providerPaymentId), eq(commerceOrders.userId, req.user!.userId)))
+    .where(and(or(eq(commercePayments.providerPaymentId, req.params.providerPaymentId), eq(commercePayments.id, req.params.providerPaymentId)), eq(commerceOrders.userId, req.user!.userId)))
     .limit(1);
   if (!row) return res.status(404).json({ message: 'Платёж не найден' });
   return res.json({ ...row, subscriptionModalDismissed: modalDismissed(row.metadata), metadata: undefined });
@@ -183,7 +183,7 @@ router.post('/payments/:providerPaymentId/dismiss-subscription-modal', jwtAuth, 
   const [row] = await db.select({ paymentId: commercePayments.id })
     .from(commercePayments)
     .innerJoin(commerceOrders, eq(commerceOrders.id, commercePayments.orderId))
-    .where(and(eq(commercePayments.providerPaymentId, req.params.providerPaymentId), eq(commerceOrders.userId, req.user!.userId)))
+    .where(and(or(eq(commercePayments.providerPaymentId, req.params.providerPaymentId), eq(commercePayments.id, req.params.providerPaymentId)), eq(commerceOrders.userId, req.user!.userId)))
     .limit(1);
   if (!row) return res.status(404).json({ message: 'Платёж не найден' });
   await db.update(commercePayments)

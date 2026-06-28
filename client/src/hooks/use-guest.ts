@@ -89,6 +89,10 @@ export async function initGuest(): Promise<GuestAccountResponse> {
   return apiCall<GuestAccountResponse>(`${API_BASE}/init`, { method: "POST" });
 }
 
+export async function getGuestStatus(): Promise<{ enabled: boolean }> {
+  return apiCall<{ enabled: boolean }>(`${API_BASE}/status`);
+}
+
 export async function restoreGuest(code: string): Promise<GuestAccountResponse> {
   return apiCall<GuestAccountResponse>(`${API_BASE}/restore`, {
     method: "POST",
@@ -250,7 +254,7 @@ function getOrCreateFingerprint(): string {
 export function useGuest(options?: { autoInit?: boolean }) {
   const autoInit = options?.autoInit ?? true;
   const [state, setState] = useState<UseGuestState>({
-    isLoading: true,
+    isLoading: false,
     isGuestAccessEnabled: null,
     error: null,
     guest: null,
@@ -337,17 +341,32 @@ export function useGuest(options?: { autoInit?: boolean }) {
     }
   }, []);
 
+  const loadGuestStatus = useCallback(async () => {
+    setState(s => ({ ...s, isLoading: true, error: null }));
+    try {
+      const status = await getGuestStatus();
+      setState(s => ({ ...s, isLoading: false, isGuestAccessEnabled: status.enabled }));
+    } catch (e) {
+      setState(s => ({
+        ...s,
+        isLoading: false,
+        isGuestAccessEnabled: false,
+        error: e instanceof Error ? e.message : "Failed to load guest status",
+      }));
+    }
+  }, []);
+
   // Initialize fingerprint and guest state
   useEffect(() => {
     getOrCreateFingerprint();
 
     if (!autoInit) {
-      setState(s => ({ ...s, isLoading: false, isGuestAccessEnabled: true }));
+      void loadGuestStatus();
       return;
     }
 
     void loadCurrentGuest();
-  }, [autoInit, loadCurrentGuest]);
+  }, [autoInit, loadCurrentGuest, loadGuestStatus]);
 
   const restore = useCallback(async (code: string) => {
     setState(s => ({ ...s, isLoading: true, error: null }));

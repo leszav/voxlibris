@@ -35,6 +35,8 @@ interface TopReadersResponse {
 }
 
 interface PaymentSummary {
+  paymentStatus: string;
+  orderStatus: string;
   productTitle: string;
   amountRub: number;
   period: "one_time" | "week" | "month" | "quarter" | "year";
@@ -90,7 +92,7 @@ export default function Home() {
   const { data: paymentSummary } = useQuery<PaymentSummary>({
     queryKey: ["commerce-payment-summary", paymentId],
     queryFn: () => apiRequest<PaymentSummary>(`/api/commerce/payments/${encodeURIComponent(paymentId ?? "")}/summary`),
-    enabled: (subscriptionStatus === "success" || subscriptionStatus === "failed") && Boolean(paymentId),
+    enabled: ["success", "failed", "check"].includes(subscriptionStatus ?? "") && Boolean(paymentId),
   });
   const dismissSubscriptionModal = useMutation({
     mutationFn: () => apiRequest(`/api/commerce/payments/${encodeURIComponent(paymentId ?? "")}/dismiss-subscription-modal`, { method: "POST" }),
@@ -116,7 +118,7 @@ export default function Home() {
   }, []);
 
   React.useEffect(() => {
-    if (subscriptionStatus !== "success" && subscriptionStatus !== "failed") return;
+    if (!["success", "failed", "check"].includes(subscriptionStatus ?? "")) return;
     if (!paymentId) {
       setSubscriptionModalOpen(true);
       return;
@@ -138,20 +140,29 @@ export default function Home() {
 
   const scrollToTop = () => window.scrollTo({ top: 0, behavior: "smooth" });
   const receiptUrl = paymentSummary?.receiptUrl ?? fallbackReceiptUrl;
+  const paymentUiStatus = paymentSummary?.paymentStatus === "succeeded" || paymentSummary?.orderStatus === "paid"
+    ? "success"
+    : paymentSummary && ["cancelled", "failed"].includes(paymentSummary.paymentStatus)
+    ? "failed"
+    : subscriptionStatus === "failed" && !paymentSummary
+    ? "failed"
+    : "pending";
 
   return (
     <MainLayout>
       <Dialog open={subscriptionModalOpen} onOpenChange={handleSubscriptionModalOpenChange}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{subscriptionStatus === "success" ? "Подписка успешно оформлена" : "Оплата не завершена"}</DialogTitle>
+            <DialogTitle>{paymentUiStatus === "success" ? "Подписка успешно оформлена" : paymentUiStatus === "failed" ? "Оплата не завершена" : "Проверяем оплату"}</DialogTitle>
             <DialogDescription>
-              {subscriptionStatus === "success"
+              {paymentUiStatus === "success"
                 ? "Доступ активирован. Подробности подписки отправлены на вашу электронную почту."
-                : "Платёж был отменён или не обработан. Подписка не активирована."}
+                : paymentUiStatus === "failed"
+                ? "Платёж был отменён или не обработан. Подписка не активирована."
+                : "Платёж возвращён из ЮKassa, ожидаем подтверждение статуса."}
             </DialogDescription>
           </DialogHeader>
-          {subscriptionStatus === "success" && (
+          {paymentUiStatus === "success" && (
             <div className="space-y-2 rounded-lg border bg-muted/40 p-4 text-sm">
               <div><span className="text-muted-foreground">Тариф:</span> {paymentSummary?.productTitle ?? "Подписка VoxLibris"}</div>
               {paymentSummary && <div><span className="text-muted-foreground">Стоимость:</span> {paymentSummary.amountRub.toLocaleString("ru-RU")} ₽ / {periodLabel(paymentSummary.period)}</div>}
