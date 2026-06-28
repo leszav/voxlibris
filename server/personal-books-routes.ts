@@ -200,6 +200,13 @@ router.post('/upload', jwtAuth, requireActiveUser, upload.single('file'), async 
         if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
         if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
 
+        try {
+            await new EntitlementService().assertCan(req.user.id, 'personal_books.upload.enabled', { scopeType: 'platform' });
+        } catch (error) {
+            if (error instanceof EntitlementError) return res.status(403).json(entitlementDenied(error));
+            throw error;
+        }
+
         if (uploadSessions.size >= MAX_ACTIVE_UPLOAD_SESSIONS) {
             return res.status(429).json({ error: 'Too many active upload sessions. Please try again later.' });
         }

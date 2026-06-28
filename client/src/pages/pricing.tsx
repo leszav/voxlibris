@@ -5,6 +5,7 @@ import { Check, Loader2 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { apiRequest } from "@/lib/queryClient";
+import { useAuth } from "@/hooks/use-auth";
 
 interface CommercePrice {
   id: string;
@@ -49,10 +50,16 @@ function sortedFeatures(features: CommerceFeature[]) {
 }
 
 export default function Pricing() {
+  const { isAuthenticated } = useAuth();
   const { data: plans = [], isLoading, error } = useQuery<SubscriptionPlan[]>({ queryKey: ["/api/commerce/plans"] });
 
   async function checkout(plan: SubscriptionPlan) {
     const price = defaultPrice(plan);
+    if (!isAuthenticated) {
+      window.location.href = "/auth/register";
+      return;
+    }
+    if (!price || price.amountRub === 0) return;
     const result = await apiRequest<{ confirmationUrl: string }>("/api/commerce/checkout", {
       method: "POST",
       body: JSON.stringify({ productId: plan.id, priceId: price?.id }),
@@ -79,6 +86,8 @@ export default function Pricing() {
             {plans.map((plan) => {
               const price = defaultPrice(plan);
               const isPopular = Boolean(plan.metadata?.isPopular);
+              const isFree = !price || price.amountRub === 0;
+              const isCurrentFreePlan = isAuthenticated && isFree;
 
               return (
               <Card key={plan.id} className={`flex flex-col relative ${isPopular ? "border-amber-500 shadow-xl scale-105 z-10" : "border-border"}`}>
@@ -102,8 +111,8 @@ export default function Pricing() {
                   </ul>
                 </CardContent>
                 <CardFooter>
-                  <Button className={`w-full ${isPopular ? "bg-amber-600 hover:bg-amber-700" : ""}`} variant={isPopular ? "default" : "outline"} onClick={() => checkout(plan)} disabled={!price}>
-                    {!price || price.amountRub === 0 ? "Начать бесплатно" : "Оформить подписку"}
+                  <Button className={`w-full ${isPopular ? "bg-amber-600 hover:bg-amber-700" : ""}`} variant={isPopular ? "default" : "outline"} onClick={() => checkout(plan)} disabled={isCurrentFreePlan || !price}>
+                    {isCurrentFreePlan ? "Ваш тариф" : isFree ? "Начать бесплатно" : "Оформить подписку"}
                   </Button>
                 </CardFooter>
               </Card>

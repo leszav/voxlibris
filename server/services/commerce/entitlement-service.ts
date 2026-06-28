@@ -152,7 +152,7 @@ class DrizzleEntitlementStore implements EntitlementStore {
           eq(commerceProductFeatures.featureKey, input.featureKey),
           eq(commerceProductFeatures.isActive, true),
         ))
-        .where(eq(commercePayments.id, row.entitlement.sourceId))
+        .where(or(eq(commercePayments.id, row.entitlement.sourceId), eq(commerceOrders.id, row.entitlement.sourceId)))
         .limit(1);
       return { feature: paymentRows[0]?.feature ?? null };
     }
