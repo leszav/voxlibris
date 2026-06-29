@@ -810,9 +810,13 @@ app.use("/api/v1/guest", guestRoutes);
 logger.info("Guest routes mounted (controlled by feature flag in database)");
 
 // Reader Wallet API (demo wallet for reader-led clubs)
-const { default: readerWalletRoutes } = await import("./routes/reader-routes.js");
-app.use("/api/v1/reader", readerWalletRoutes);
-logger.info("Reader wallet routes mounted");
+try {
+	const { default: readerWalletRoutes } = await import("./routes/reader-routes.js");
+	app.use("/api/v1/reader", readerWalletRoutes);
+	logger.info("Reader wallet routes mounted");
+} catch (error) {
+	logger.error({ error: formatUnknownError(error) }, "Failed to load reader wallet routes");
+}
 
 // Debug API (development only)
 if (process.env.NODE_ENV !== "production") {

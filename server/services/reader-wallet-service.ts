@@ -1,6 +1,6 @@
 import { and, eq, desc, inArray } from 'drizzle-orm';
-import { db } from '../db';
-import { commerceLedgerEntries, clubs } from '../../shared/schema';
+import { db } from '../db.js';
+import { commerceLedgerEntries, clubs } from '../../shared/schema.js';
 
 export interface ReaderWalletBalance {
   availableKopecks: number;

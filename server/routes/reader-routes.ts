@@ -1,6 +1,6 @@
 import { Router } from 'express';
-import { jwtAuth } from '../jwt-middleware';
-import { ReaderWalletService } from '../services/reader-wallet-service';
+import { jwtAuth } from '../jwt-middleware.js';
+import { ReaderWalletService } from '../services/reader-wallet-service.js';
 
 const router = Router();
 const walletService = new ReaderWalletService();
