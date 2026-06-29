@@ -1,5 +1,5 @@
 import { Link, useLocation } from "wouter";
-import { Search, User, Menu, Settings, Construction, LogOut, House, Compass, BookOpen, LayoutDashboard, LibraryBig, Users, MessageCircle } from "lucide-react";
+import { Search, User, Menu, Settings, Construction, LogOut, House, Compass, BookOpen, LayoutDashboard, LibraryBig, Users, MessageCircle, Wallet } from "lucide-react";
 import { Logo } from "@/components/logo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,6 +25,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { useUnreadSummary } from "@/hooks/use-notifications";
 import { useSocket } from "@/hooks/use-socket";
+import { useReaderStatus } from "@/hooks/use-reader-status";
 import { isImpersonating, getImpersonatedUsername, exitImpersonation } from "@/lib/token-store";
 import { GuestStatusBanner } from "@/components/guest/GuestStatusBanner";
 import { PwaInstallPrompt } from "@/components/layout/PwaInstallPrompt";
@@ -99,6 +100,7 @@ function UserActions({
   const notificationsUnread = unreadSummary?.notificationsUnread ?? 0;
   const bellUnread = unreadSummary?.totalUnread ?? (messagesUnread + notificationsUnread);
   const showAdminPanel = (user?.role === "admin" || user?.role === "moderator") && !impersonating;
+  const { data: readerStatus } = useReaderStatus();
 
   if (!isAuthenticated) {
     return (
@@ -196,6 +198,17 @@ function UserActions({
               </span>
             )}
           </DropdownMenuItem>
+          {readerStatus?.isReaderClubOwner && (
+            <DropdownMenuItem onClick={() => setLocation("/reader/wallet")}>
+              <Wallet className="mr-2 h-4 w-4" />
+              Кошелёк
+              {impersonating && (
+                <span className="ml-2 text-muted-foreground text-sm">
+                  (как {impersonatedUser})
+                </span>
+              )}
+            </DropdownMenuItem>
+          )}
           {impersonating && (
             <>
               <DropdownMenuSeparator />

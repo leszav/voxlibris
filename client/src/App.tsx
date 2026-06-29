@@ -57,6 +57,7 @@ const ReaderWorkspacePage = lazy(async () => ({
 const ClubReaderPage = lazy(async () => ({
   default: (await import("@/components/reader/ClubReader")).ClubReader,
 }));
+const ReaderWalletPage = lazy(() => import("@/pages/reader-wallet"));
 
 function RouteFallback() {
   return (
@@ -87,6 +88,7 @@ const ProtectedClubReader      = () => <ProtectedRoute component={ClubReaderPage
 const ProtectedDashboard       = () => <ProtectedRoute component={DashboardPage} />;
 const ProtectedFeed            = () => <ProtectedRoute component={FeedPage} />;
 const ProtectedOnboardingGenres = () => <ProtectedRoute component={OnboardingGenres} />;
+const ProtectedReaderWallet    = () => <ProtectedRoute component={ReaderWalletPage} />;
 
 function Router() {
   return (
@@ -152,6 +154,9 @@ function Router() {
       <Route path="/pricing" component={Pricing} />
       <Route path="/become-reader" component={BecomeReader} />
       <Route path="/payment/success" component={PaymentSuccessPage} />
+
+      {/* Reader Wallet */}
+      <Route path="/reader/wallet" component={ProtectedReaderWallet} />
 
       {/* Profile Page */}
       <Route path="/profile" component={ProfilePage} />

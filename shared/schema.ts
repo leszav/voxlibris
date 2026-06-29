@@ -2683,7 +2683,7 @@ export type ReaderClubTariffVisibility = 'public' | 'private';
 export type ReaderClubTariffRequestStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
 export type ReaderClubTariffAssignmentStatus = 'active' | 'inactive' | 'archived';
 export type CommerceLedgerEntryType = 'acquiring_fee' | 'reader_earning' | 'platform_fee';
-export type CommerceLedgerEntryStatus = 'pending' | 'available' | 'paid' | 'void';
+export type CommerceLedgerEntryStatus = 'pending' | 'available' | 'paid' | 'withdrawn' | 'void';
 
 export const paymentProviders = pgTable('payment_providers', {
   id: varchar('id').primaryKey().default(sql`gen_random_uuid()`),

@@ -494,6 +494,7 @@ const authLimiter = rateLimit({
 	windowMs: 15 * 60 * 1000, // 15 минут
 	max: 5, // максимум 5 попыток
 	keyGenerator: getAuthRateLimitKey,
+	skip: () => isRateLimitDisabled,
 	message: {
 		error: "Too many authentication attempts. Please try again later.",
 		retryAfter: "15 minutes",
@@ -511,6 +512,7 @@ const resendConfirmationLimiter = rateLimit({
 	windowMs: resendConfirmationWindowMs,
 	max: resendConfirmationMax,
 	keyGenerator: getResendConfirmationRateLimitKey,
+	skip: () => isRateLimitDisabled,
 	message: {
 		error: "Too many confirmation email requests. Please try again later.",
 		code: "RESEND_CONFIRMATION_LIMIT",
@@ -533,6 +535,7 @@ const guestInitLimiter = rateLimit({
 	windowMs: guestInitWindowMs,
 	max: guestInitMax,
 	keyGenerator: getGeneralRateLimitKey,
+	skip: () => isRateLimitDisabled,
 	message: {
 		error: "Too many guest accounts created. Please try again later.",
 		code: "GUEST_INIT_LIMIT",
@@ -551,6 +554,7 @@ const guestRestoreLimiter = rateLimit({
 	windowMs: guestRestoreWindowMs,
 	max: guestRestoreMax,
 	keyGenerator: getGeneralRateLimitKey,
+	skip: () => isRateLimitDisabled,
 	message: {
 		error: "Too many restore attempts. Please try again later.",
 		code: "GUEST_RESTORE_LIMIT",
@@ -569,6 +573,7 @@ const guestUploadLimiter = rateLimit({
 	windowMs: guestUploadWindowMs,
 	max: guestUploadMax,
 	keyGenerator: getGeneralRateLimitKey,
+	skip: () => isRateLimitDisabled,
 	message: {
 		error: "Too many uploads. Please try again later.",
 		code: "GUEST_UPLOAD_LIMIT",
@@ -587,6 +592,7 @@ const guestAnalyticsLimiter = rateLimit({
 	windowMs: guestAnalyticsWindowMs,
 	max: guestAnalyticsMax,
 	keyGenerator: getGeneralRateLimitKey,
+	skip: () => isRateLimitDisabled,
 	message: {
 		error: "Too many analytics events. Please slow down.",
 		code: "GUEST_ANALYTICS_LIMIT",
@@ -604,6 +610,7 @@ const speedLimiter = slowDown({
 	windowMs: authSlowDownWindowMs,
 	delayAfter: authSlowDownDelayAfter,
 	keyGenerator: getAuthRateLimitKey,
+	skip: () => isRateLimitDisabled,
 	delayMs: (used, req) => {
 		const delayAfter = req.slowDown.limit;
 		return (used - delayAfter) * 500;
@@ -625,7 +632,8 @@ const authWriteMax = parsePositiveIntEnv("RL_AUTH_WRITE_MAX", 300);
 const expensiveWindowMs = parsePositiveIntEnv("RL_EXPENSIVE_WINDOW_MS", 15 * 60 * 1000);
 const expensiveMax = parsePositiveIntEnv("RL_EXPENSIVE_MAX", 30);
 
-const shouldSkipRiskLimiter = (req: Request) => isHealthPath(req) || isAuthPath(req);
+const isRateLimitDisabled = parseBooleanEnv('RATE_LIMIT_DISABLE', false) || process.env.NODE_ENV === 'test';
+const shouldSkipRiskLimiter = (req: Request) => isRateLimitDisabled || isHealthPath(req) || isAuthPath(req);
 
 // Check if user is admin (for skipping rate limits on expensive operations)
 function isAdminUser(req: Request): boolean {
@@ -800,6 +808,11 @@ setupAuthRoutes(app);
 // Guest System API (feature flag checked in middleware)
 app.use("/api/v1/guest", guestRoutes);
 logger.info("Guest routes mounted (controlled by feature flag in database)");
+
+// Reader Wallet API (demo wallet for reader-led clubs)
+const { default: readerWalletRoutes } = await import("./routes/reader-routes.js");
+app.use("/api/v1/reader", readerWalletRoutes);
+logger.info("Reader wallet routes mounted");
 
 // Debug API (development only)
 if (process.env.NODE_ENV !== "production") {

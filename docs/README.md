@@ -37,6 +37,7 @@
 - [Социальные функции](SOCIAL_FEATURES.md) — граф, лента, сообщения
 - [Геймификация](GAMIFICATION.md) — достижения, XP, уровни
 - [Монетизация](MONETIZATION.md) — тарифы, подписки, платежи
+- [Демо-кошелёк чтеца и payout layer](reader-wallet-payouts/README.md) — демо-баланс, заявки на вывод, будущий payout-контур
 - [Тарифные ключи](TARIFF_KEYS.md) — права доступа и лимиты
 - [Studio и аудио](STUDIO_AUDIO.md) — стриминг, записи, качество чтецов
 - [WebSocket системы](WEBSOCKET_SYSTEMS.md) — real-time коммуникации
