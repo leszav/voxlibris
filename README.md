@@ -1,175 +1,182 @@
+<div align="center">
+
 # VoxLibris
 
 ![VoxLibris](./client/public/og-image.webp)
 
-**Статус документа:** Current  
-**Дата обновления:** 2026-06-28
+**Платформа социального чтения: книжные клубы, совместное чтение, live/audio-сессии, рекомендации и геймификация.**
 
-VoxLibris — платформа социального чтения: книжные клубы, совместное чтение, live/audio-сессии, ридеры, социальный граф, activity feed, direct messages, рекомендации, геймификация и административные инструменты.
+[![License](https://img.shields.io/badge/license-proprietary-red)](./LICENSE)
+[![Node.js](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](https://nodejs.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178c6)](https://www.typescriptlang.org/)
+[![pnpm](https://img.shields.io/badge/pnpm-9-f69220)](https://pnpm.io/)
+[![React](https://img.shields.io/badge/React-19-61dafb)](https://react.dev/)
 
-## Быстрый старт для разработчика
+</div>
+
+---
+
+## Оглавление
+
+- [О проекте](#о-проекте)
+- [Возможности](#возможности)
+- [Технологический стек](#технологический-стек)
+- [Быстрый старт](#быстрый-старт)
+- [Структура проекта](#структура-проекта)
+- [Доступные команды](#доступные-команды)
+- [Тестирование](#тестирование)
+- [Документация](#документация)
+- [Лицензия](#лицензия)
+
+## О проекте
+
+VoxLibris — платформа социального чтения, объединяющая книжные клубы, совместное чтение, live и audio-сессии (VoxLibris Studio), рекомендации, геймификацию и административные инструменты в единой экосистеме.
+
+## Возможности
+
+| Область | Описание |
+|---------|----------|
+| **Книжные клубы** | Участники, приглашения, роли, модерация и тарифные шаблоны |
+| **Библиотека** | Личная и клубная, загрузка EPUB/FB2, обложки, S3/MinIO-хранилище |
+| **Чтение** | Reader core/adapters, синхронизация статуса чтения |
+| **Reading sessions** | Реакции, вопросы, расписание, записи, эмоциональная карта эфиров |
+| **VoxLibris Studio** | Baseline на Icecast/streaming; WebRTC/mediasoup — roadmap |
+| **Социальный граф** | Activity feed, presence, direct messages |
+| **Рекомендации** | Персонализированные рекомендации книг и клубов |
+| **Геймификация** | Баллы, достижения, рейтинги |
+| **Уведомления** | Web Push (self-hosted, VAPID), in-app уведомления |
+| **Монетизация** | Freemium-лимиты, YooKassa checkout/webhooks, конструктор тарифов |
+| **Админка** | Feature flags, управление подписками, аудит, email-шаблоны |
+
+## Технологический стек
+
+| Слой | Технологии |
+|------|-----------|
+| **Frontend** | React 19, Vite, Tailwind CSS, Radix UI, TanStack React Query |
+| **Backend** | Express 5, Socket.IO, helmet, rate-limit |
+| **База данных** | PostgreSQL, Drizzle ORM, SQL-миграции |
+| **Хранилище** | S3-совместимое / MinIO |
+| **Кэш** | Redis (rate limiting) |
+| **Email** | nodemailer + HTML-шаблоны |
+| **Push** | web-push (VAPID), service worker |
+| **Язык** | TypeScript, Node.js 20+ |
+| **Пакетный менеджер** | pnpm 9 |
+
+## Быстрый старт
+
+### Предварительные требования
+
+- [Node.js](https://nodejs.org/) >= 20
+- [pnpm](https://pnpm.io/) >= 8
+- [Docker](https://www.docker.com/) и Docker Compose
+
+### Установка и запуск
 
 ```bash
+# Клонируйте репозиторий
+git clone <repository-url>
+cd voxlibris
+
+# Установите зависимости
 pnpm install
+
+# Настройте переменные окружения
 cp .env.example .env
+# Отредактируйте .env — укажите DATABASE_URL и другие переменные
+
+# Запустите сервисы (PostgreSQL, MinIO)
 pnpm run dev:services
+
+# Инициализируйте хранилище
 pnpm run init-storage
+
+# Запустите приложение (клиент + сервер)
 pnpm dev
 ```
 
-Фактические команды берутся из `package.json`:
+После запуска клиент доступен на `http://localhost:3000`, сервер — на `http://localhost:5000`.
 
-- `pnpm run dev:client` — Vite dev server на порту 3000;
-- `pnpm run dev:server` — Express server через `tsx`;
-- `pnpm run dev:services` — PostgreSQL и MinIO через Docker Compose;
-- `pnpm run dev` — подготовка портов, сервисов, storage и запуск клиента/сервера;
-- `pnpm test` — тесты через встроенный Node.js test runner;
-- `pnpm run quality:gate` — TypeScript, ESLint и production build.
+### Переменные окружения
 
-Перед первым запуском проверьте `.env.example` и настройте переменные окружения в `.env`, включая `DATABASE_URL` для PostgreSQL.
+Скопируйте `.env.example` в `.env` и заполните обязательные переменные:
 
-## Что реализовано сейчас
+| Переменная | Описание |
+|-----------|----------|
+| `DATABASE_URL` | Строка подключения к PostgreSQL |
+| `VAPID_EMAIL` | Email для VAPID-ключей (Web Push) |
+| `VAPID_PUBLIC_KEY` | Публичный VAPID-ключ |
+| `VAPID_PRIVATE_KEY` | Приватный VAPID-ключ |
 
-- Книжные клубы, участники, приглашения, роли и модерация.
-- Личная и клубная библиотека, загрузка EPUB/FB2, обложки и S3/MinIO-хранилище.
-- Reader core/adapters и синхронизация статуса чтения.
-- Reading sessions, реакции, вопросы, расписание и записи.
-- Эмоциональная карта эфиров: таймкод-реакции слушателей, live-индикатор для чтеца, карта реакции аудитории и highlights завершённой сессии.
-- VoxLibris Studio baseline на Icecast/streaming route; WebRTC/mediasoup — roadmap/reference.
-- Социальный граф, activity feed, presence и direct messages.
-- Рекомендации, геймификация и Web Push-уведомления для браузера/PWA.
-- Тарифы и монетизация: публичная страница тарифов, Freemium-лимиты, YooKassa checkout/webhooks, подписки, grants и entitlement-проверки.
-- Административные маршруты, feature flags, конструктор тарифов и управление подписками.
-- Email через `nodemailer` и HTML-шаблоны из `email-templates/`.
-
-## Тарифы и монетизация
-
-В проекте реализован текущий commerce-контур для платформенных и клубных тарифов:
-
-- публичная страница `/pricing` показывает активные продукты и тарифные возможности;
-- Freemium-ограничения проверяются на сервере через entitlement layer, а UI показывает upgrade CTA для лимитов личной библиотеки, клубов, приглашений и загрузок;
-- YooKassa используется для checkout, webhook-обработки, статусов платежей и email-уведомлений о подписке;
-- админка содержит конструктор тарифов: продукты, цены, feature registry, привязка возможностей к продуктам, soft-archive product features;
-- админка содержит управление подписками с пагинацией, отменой/приостановкой/возобновлением и аудитом действий;
-- для клубов чтецов поддержаны тарифные шаблоны, заявки владельцев и ручные grants.
-
-## Web Push-уведомления
-
-В проекте реализованы self-hosted Web Push-уведомления без внешнего push-сервера приложения. Backend использует `web-push` и VAPID, а доставка выполняется через стандартные push endpoints браузеров.
-
-Возможности:
-
-- пользователь включает push в личном кабинете через переключатель **Push уведомления**;
-- браузерная подписка сохраняется в `push_subscriptions`;
-- настройки канала хранятся в `push_notification_settings`;
-- отправки логируются в `push_notification_log`;
-- service worker `client/public/sw.js` показывает системные уведомления браузера/PWA;
-- администратор может отправить тестовый push выбранному пользователю из админки;
-- успешный админский тест также создаёт in-app уведомление для колокольчика.
-
-Для работы Web Push нужны переменные окружения:
-
-```env
-VAPID_EMAIL=support@example.com
-VAPID_PUBLIC_KEY=...
-VAPID_PRIVATE_KEY=...
-```
-
-Ключи VAPID генерируются специальной командой, это не произвольные строки:
+VAPID-ключи генерируются командой:
 
 ```bash
 pnpm exec web-push generate-vapid-keys
 ```
 
-Для production требуется HTTPS. После смены VAPID-ключей пользователям может потребоваться выключить и снова включить push-уведомления, чтобы создать подписку с новым public key.
+## Структура проекта
 
-## Эмоциональная карта эфиров
-
-В reading sessions реализован первый production-level слой эмоциональной карты:
-
-- слушатели отправляют быстрые emoji-реакции с таймкодом прослушивания;
-- реакции доставляются чтецу в live-режиме через существующий Socket.IO-контур `/reading-sessions`, с HTTP fallback для синхронизации;
-- завершённые сессии получают эмоциональную карту по временным окнам и топ-моменты/highlights;
-- карта кэшируется в PostgreSQL JSONB для завершённых сессий;
-- в VoxLibris Studio отображается компактный live-индикатор реакций;
-- в summary завершённого эфира доступна панель эмоциональной карты и highlights.
-
-## Технологический стек
-
-- TypeScript, Node.js 20+, pnpm 9.
-- React 19, Vite, Tailwind CSS, Radix UI, TanStack React Query.
-- Express 5, Socket.IO, cookie-parser, helmet, express-rate-limit, express-slow-down.
-- PostgreSQL, Drizzle ORM, SQL-миграции в `migrations/`.
-- Redis для rate limiting там, где настроен.
-- S3-совместимое хранилище/MinIO для файлов.
-- `nodemailer` для email.
-- `web-push` для Web Push/PWA уведомлений.
-- Node.js test runner для текущих тестов.
-
-> В текущем `package.json` нет `resend`, `react-email`, Vitest, Playwright, Supertest или MSW. Они не считаются current baseline.
-
-## Документация
-
-- [Центр документации](./docs/README.md)
-- [Аудит документации](./docs/DOCUMENTATION_AUDIT.md)
-- [Архитектура](./docs/02-architecture/README.md)
-- [Клубы чтецов](./docs/02-architecture/reader-clubs-system.md)
-- [API и маршруты](./docs/05-server/routes.md)
-- [База данных и миграции](./docs/06-database/README.md)
-- [Тестирование](./docs/10-testing/README.md)
-- [Деплой](./docs/11-deployment/deployment-guide.md)
-- [VoxLibris Studio](./docs/vlstudio/README.md)
-
-## Миграции
-
-Production-миграции применяются вручную, строго по одной, через pgAdmin на CapRover. Автоматического запуска миграций при деплое нет. Это осознанное решение для полного контроля за миграциями. Подробные правила см. в [AGENTS.md](./AGENTS.md) и [deployment guide](./docs/11-deployment/deployment-guide.md).
-
-Для Web Push используется миграция `0047_add_push_notifications.sql`. Она идемпотентна: таблицы создаются через `CREATE TABLE IF NOT EXISTS`, индексы — через `CREATE INDEX IF NOT EXISTS`.
-
-Для эмоциональной карты используется миграция `0048_add_emotional_map.sql`: она добавляет таймкоды реакций и JSONB-кэш эмоциональной карты завершённых reading sessions.
-
-Для конструктора тарифов и commerce entitlement используются миграции:
-
-- `0055_tariff_constructor_features.sql` — feature registry, тарифные возможности продуктов, шаблоны/заявки тарифов клубов чтецов;
-- `0056_commerce_entitlement_actions.sql` — действия по подпискам, audit trail, soft-archive product features и дополнительные commerce-поля.
-
-Для dev доступны команды Drizzle из `package.json`, но они не заменяют production-процесс:
-
-```bash
-pnpm run db:migrate
-pnpm run db:push
+```text
+client/              # React frontend (Vite, Tailwind, Radix/shadcn)
+server/              # Express API, сервисы, маршруты, Socket.IO
+shared/              # Общие типы, схемы и утилиты
+migrations/          # SQL-миграции PostgreSQL (применяются вручную)
+docs/                # Архитектурная и эксплуатационная документация
+email-templates/     # HTML-шаблоны email-уведомлений
+script/, scripts/    # Вспомогательные скрипты
+uploads/             # Локальные загруженные файлы (dev)
 ```
+
+## Доступные команды
+
+| Команда | Описание |
+|---------|----------|
+| `pnpm dev` | Полный запуск dev-окружения (клиент + сервер + сервисы) |
+| `pnpm run dev:client` | Только Vite dev server (порт 3000) |
+| `pnpm run dev:server` | Только Express server через tsx |
+| `pnpm run dev:services` | PostgreSQL и MinIO через Docker Compose |
+| `pnpm run build` | Production-сборка |
+| `pnpm start` | Запуск production-сборки |
+| `pnpm run quality:gate` | TypeScript + ESLint + production build |
+| `pnpm run db:migrate` | Применение миграций (dev) |
+| `pnpm run db:push` | Push схемы в БД (dev) |
 
 ## Тестирование
 
 ```bash
-pnpm test
-pnpm test:watch
-pnpm test:coverage
-pnpm run test:integration
-pnpm run test:pricing:yookassa
-pnpm run quality:gate
+pnpm test                    # Все тесты
+pnpm test:watch              # Watch-режим
+pnpm test:coverage           # С покрытием
+pnpm run test:integration    # Интеграционные HTTP-тесты
+pnpm run quality:gate        # Полная проверка качества
 ```
 
-Тесты находятся в `server/__tests__/` и запускаются через `node --test --experimental-strip-types`.
-Интеграционные HTTP-тесты лежат в `server/__tests__/integration/` и запускаются против поднятого API server (`TEST_API_BASE_URL`, по умолчанию `http://127.0.0.1:5000`). Подробности: [docs/10-testing/api-integration-coverage.md](./docs/10-testing/api-integration-coverage.md).
+Тесты расположены в `server/__tests__/` и запускаются через `node --test --experimental-strip-types`.
 
-Для pricing/YooKassa smoke используется `pnpm run test:pricing:yookassa`. При полном прогоне HTTP-интеграций может потребоваться задержка между запросами, чтобы не упереться в rate limit:
+Интеграционные тесты находятся в `server/__tests__/integration/` и требуют запущенного API-сервера (`TEST_API_BASE_URL`, по умолчанию `http://127.0.0.1:5000`).
 
-```bash
-TEST_API_REQUEST_DELAY_MS=2500 pnpm run test
-```
+> При полном прогоне HTTP-интеграций может потребоваться задержка между запросами для избежания rate limit:
+> ```bash
+> TEST_API_REQUEST_DELAY_MS=2500 pnpm run test
+> ```
 
-Для точечной проверки entitlement и тарифов клубов чтецов:
+## Документация
 
-```bash
-node --test --experimental-strip-types server/__tests__/entitlement-service.test.ts server/__tests__/integration/reader-club-tariffs.integration.test.ts
-```
+| Документ | Описание |
+|----------|----------|
+| [Центр документации](./docs/README.md) | Точка входа в документацию |
+| [Аудит документации](./docs/DOCUMENTATION_AUDIT.md) | Актуальность документов |
+| [Архитектура](./docs/02-architecture/README.md) | Общая архитектура системы |
+| [Клубы чтецов](./docs/02-architecture/reader-clubs-system.md) | Система книжных клубов |
+| [API и маршруты](./docs/05-server/routes.md) | Справочник API |
+| [База данных](./docs/06-database/README.md) | Схема и миграции |
+| [Тестирование](./docs/10-testing/README.md) | Стратегия и инфраструктура тестов |
+| [Деплой](./docs/11-deployment/deployment-guide.md) | Руководство по развёртыванию |
+| [VoxLibris Studio](./docs/vlstudio/README.md) | Аудио/видео-сессии |
 
 ## Лицензия
 
-Репозиторий VoxLibris Platform распространяется на проприетарной основе и не является open-source.
+Репозиторий VoxLibris Platform распространяется на **проприетарной основе** и не является open-source.
 
-Допускается только просмотр и оценка содержимого репозитория. Любое использование, копирование, модификация, распространение или иная эксплуатация допускаются исключительно с предварительного письменного разрешения правообладателя.
+Допускается только просмотр и оценка содержимого. Любое использование, копирование, модификация или распространение допускаются исключительно с предварительного письменного разрешения правообладателя.
 
-Подробные условия указаны в [LICENSE](LICENSE).
+Подробные условия: [LICENSE](./LICENSE).
