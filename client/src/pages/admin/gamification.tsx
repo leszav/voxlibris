@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { AchievementImagePreview } from "@/components/gamification/AchievementImagePreview";
 import {
   Blocks,
   ChevronsUpDown,
@@ -787,7 +788,12 @@ function RewardAssetsGalleryContent({
                         />
                       </TableCell>
                       <TableCell>
-                        <img src={asset.imageUrl} alt={asset.nameRu} className="h-10 w-10 rounded object-cover border" />
+                        <AchievementImagePreview
+                          src={asset.imageUrl}
+                          alt={asset.nameRu}
+                          triggerClassName="h-10 w-10 border"
+                          imageClassName="rounded"
+                        />
                       </TableCell>
                       <TableCell>{asset.nameRu}</TableCell>
                       <TableCell>{ICON_TYPE_LABELS[asset.assetType]}</TableCell>
@@ -847,7 +853,12 @@ function RewardAssetsGalleryContent({
                 />
               </TableCell>
               <TableCell>
-                <img src={asset.imageUrl} alt={asset.nameRu} className="h-10 w-10 rounded object-cover border" />
+                <AchievementImagePreview
+                  src={asset.imageUrl}
+                  alt={asset.nameRu}
+                  triggerClassName="h-10 w-10 border"
+                  imageClassName="rounded"
+                />
               </TableCell>
               <TableCell>{asset.nameRu}</TableCell>
               <TableCell>{asset.groupKey}</TableCell>
@@ -2013,7 +2024,12 @@ export default function AdminGamificationPage() { // NOSONAR: orchestration comp
                   {achievementForm.badgeImageUrl ? (
                     <div className="rounded-lg border bg-slate-50 p-3">
                       <p className="mb-2 text-sm font-medium text-gray-700">Предпросмотр</p>
-                      <img src={achievementForm.badgeImageUrl} alt="Предпросмотр награды" className="h-24 w-24 rounded-lg object-cover" />
+                      <AchievementImagePreview
+                        src={achievementForm.badgeImageUrl}
+                        alt="Предпросмотр награды"
+                        triggerClassName="h-24 w-24"
+                        imageClassName="rounded-lg"
+                      />
                     </div>
                   ) : null}
                 </div>
@@ -2521,10 +2537,11 @@ export default function AdminGamificationPage() { // NOSONAR: orchestration comp
                 <p className="text-xs text-muted-foreground">Выбран файл: {rewardAssetFile.name}</p>
               ) : null}
               {!rewardAssetFile && rewardAssetForm.imageUrl ? (
-                <img
+                <AchievementImagePreview
                   src={rewardAssetForm.imageUrl}
                   alt="Предпросмотр ассета"
-                  className="h-16 w-16 rounded border object-cover"
+                  triggerClassName="h-16 w-16 border"
+                  imageClassName="rounded"
                 />
               ) : null}
             </div>

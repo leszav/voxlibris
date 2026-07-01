@@ -33,6 +33,7 @@ import { InviteMemberModal } from "@/components/club/invite-member-modal";
 import { ReadingPlan } from "@/components/club/reading-plan";
 import { ClubDiscussionBoard } from "@/components/club/ClubDiscussionBoard";
 import { BookDescriptionDialog } from "@/components/club/BookDescriptionDialog";
+import { AchievementImagePreview } from "@/components/gamification/AchievementImagePreview";
 import { TransferOwnershipDialog } from "@/components/club/TransferOwnershipDialog";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { ChatWidget } from "@/components/chat/ChatWidget";
@@ -820,7 +821,11 @@ function MembersListCard({ clubId, clubTitle, members, memberCount, membersLoadi
                             className="flex h-5 w-5 shrink-0 items-center justify-center overflow-hidden rounded border bg-muted/30 text-[10px]"
                           >
                             {achievement.badgeImageUrl ? (
-                              <img src={achievement.badgeImageUrl} alt={achievement.titleRu} className="h-5 w-5 object-cover" />
+                              <AchievementImagePreview
+                                src={achievement.badgeImageUrl}
+                                alt={achievement.titleRu}
+                                triggerClassName="h-5 w-5"
+                              />
                              ) : (
                                <span>
                                  {getAchievementIconSymbol(achievement.iconType)}

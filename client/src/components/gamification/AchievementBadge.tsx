@@ -1,4 +1,5 @@
 import { Award, Star, Trophy } from "lucide-react";
+import { AchievementImagePreview } from "@/components/gamification/AchievementImagePreview";
 import { Badge } from "@/components/ui/badge";
 import type { ProfileAchievement } from "@/types/gamification";
 
@@ -22,11 +23,11 @@ export function AchievementBadge({ achievement }: Readonly<AchievementBadgeProps
   return (
     <Badge variant="secondary" className="max-w-full gap-2 px-2.5 py-1.5">
       {achievement.badgeImageUrl ? (
-        <img
+        <AchievementImagePreview
           src={achievement.badgeImageUrl}
           alt={achievement.titleRu}
-          className="h-4 w-4 rounded object-cover"
-          loading="lazy"
+          triggerClassName="h-4 w-4"
+          imageClassName="rounded"
         />
       ) : (
         <AchievementIcon iconType={achievement.iconType} />
