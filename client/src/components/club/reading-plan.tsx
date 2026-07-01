@@ -8,6 +8,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { NativePickerInput } from "@/components/ui/native-picker-input";
 import { Textarea } from "@/components/ui/textarea";
 import { 
   BookOpen, 
@@ -515,7 +516,7 @@ function CreatePlanForm({
 
       <div>
         <Label htmlFor="targetDate">Целевая дата</Label>
-        <Input
+        <NativePickerInput
           id="targetDate"
           type="date"
           value={formData.targetDate}
@@ -618,7 +619,7 @@ function EditPlanForm({
 
       <div>
         <Label htmlFor="edit-targetDate">Целевая дата</Label>
-        <Input
+        <NativePickerInput
           id="edit-targetDate"
           type="date"
           value={formData.targetDate}

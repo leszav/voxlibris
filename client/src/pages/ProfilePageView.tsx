@@ -176,6 +176,9 @@ export default function ProfilePage() {
   const [currentPassword, setCurrentPassword] = React.useState("");
   const [newPassword, setNewPassword] = React.useState("");
   const [confirmPassword, setConfirmPassword] = React.useState("");
+  const [newPasswordError, setNewPasswordError] = React.useState("");
+  const passwordAllowedCharsRegex = /^[A-Za-z0-9!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~]*$/;
+  
   // Определяем isOwnProfile здесь, перед использованием
   const currentUserId = user?.id || null;
   const isOwnProfile = !id || currentUserId === id || profileId === "current";
@@ -225,6 +228,33 @@ export default function ProfilePage() {
       toast({
         title: "Заполните все поля",
         description: "Для смены пароля требуется заполнить все поля формы",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!passwordAllowedCharsRegex.test(newPassword)) {
+      toast({
+        title: "Некорректный пароль",
+        description: "Пароль может содержать только латинские буквы, цифры и спецсимволы",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (newPassword.length < 8) {
+      toast({
+        title: "Пароль слишком короткий",
+        description: "Минимальная длина пароля — 8 символов",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!/[A-Za-z]/.test(newPassword) || !/\d/.test(newPassword)) {
+      toast({
+        title: "Пароль слишком простой",
+        description: "Пароль должен содержать буквы и цифры",
         variant: "destructive",
       });
       return;
@@ -568,10 +598,21 @@ export default function ProfilePage() {
                         id="new-password"
                         type="password"
                         value={newPassword}
-                        onChange={(event) => setNewPassword(event.target.value)}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          if (!passwordAllowedCharsRegex.test(value)) {
+                            setNewPasswordError('Недопустимые символы. Используйте латинские буквы, цифры и спецсимволы');
+                            return;
+                          }
+                          setNewPasswordError('');
+                          setNewPassword(value);
+                        }}
                         autoComplete="new-password"
                         disabled={changePasswordMutation.isPending}
                       />
+                      {newPasswordError && (
+                        <p className="text-sm text-red-600">{newPasswordError}</p>
+                      )}
                     </div>
 
                     <div className="space-y-2">

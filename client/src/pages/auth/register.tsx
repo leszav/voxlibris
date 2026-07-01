@@ -12,6 +12,9 @@ export default function Register() {
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   // Display name: allow Cyrillic/Latin letters, digits, spaces, _ and -
   const displayNameRegex = /^[\p{L}\p{N}][\p{L}\p{N}_\- ]{0,48}[\p{L}\p{N}]$/u;
+  // Password: allow only A-Za-z0-9 and ASCII special characters
+  const passwordAllowedCharsRegex = /^[A-Za-z0-9!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~]*$/;
+  
   const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -22,6 +25,7 @@ export default function Register() {
   const [isLoading, setIsLoading] = useState(false);
   const [showErrorModal, setShowErrorModal] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [passwordError, setPasswordError] = useState('');
   const [, setLocation] = useLocation();
   const { register } = useAuth();
   const [inviteToken, setInviteToken] = useState<string | undefined>(undefined);
@@ -40,16 +44,40 @@ export default function Register() {
     }
   }, []);
 
+  // Функция оценки сложности пароля
+  const calculatePasswordStrength = (pwd: string): 'weak' | 'medium' | 'strong' => {
+    let score = 0;
+    if (pwd.length >= 8) score++;
+    if (pwd.length >= 12) score++;
+    if (/[a-z]/.test(pwd) && /[A-Z]/.test(pwd)) score++; // mixed case
+    if (/\d/.test(pwd)) score++; // digit
+    if (/[!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~]/.test(pwd)) score++; // special char
+    
+    if (score >= 4) return 'strong';
+    if (score >= 2) return 'medium';
+    return 'weak';
+  };
+
+  const passwordStrength = password.length > 0 ? calculatePasswordStrength(password) : null;
+
   const passwordRequirements = {
     length: password.length >= 8,
+    hasLetter: /[A-Za-z]/.test(password),
+    hasDigit: /\d/.test(password),
     match: password === confirmPassword && password.length > 0,
+    validChars: passwordAllowedCharsRegex.test(password),
   };
   const isEmailValid = emailRegex.test(email.trim());
   const normalizedDisplayName = displayName.trim().replace(/\s+/gu, ' ');
   const isDisplayNameValid = displayNameRegex.test(normalizedDisplayName);
   
+  const isPasswordValid = passwordRequirements.length && 
+                          passwordRequirements.hasLetter && 
+                          passwordRequirements.hasDigit && 
+                          passwordRequirements.validChars;
+  
   const isFormValid = normalizedDisplayName && email && password && confirmPassword && 
-    passwordRequirements.length && passwordRequirements.match && isEmailValid && isDisplayNameValid;
+    isPasswordValid && passwordRequirements.match && isEmailValid && isDisplayNameValid;
 
   const parseRegisterError = (error: unknown): string => {
     if (!(error instanceof Error)) {
@@ -100,6 +128,16 @@ export default function Register() {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handlePasswordChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    if (!passwordAllowedCharsRegex.test(value)) {
+      setPasswordError('Недопустимые символы. Используйте латинские буквы, цифры и спецсимволы');
+      return;
+    }
+    setPasswordError('');
+    setPassword(value);
   };
 
   const handleCloseErrorModal = () => {
@@ -172,7 +210,7 @@ export default function Register() {
                     type={showPassword ? "text" : "password"}
                     placeholder="Создайте пароль"
                     value={password}
-                    onChange={(e) => setPassword(e.target.value)}
+                    onChange={handlePasswordChange}
                     required
                     autoComplete="new-password"
                     className="pr-10"
@@ -191,6 +229,9 @@ export default function Register() {
                     )}
                   </Button>
                 </div>
+                {passwordError && (
+                  <p className="text-sm text-red-600">{passwordError}</p>
+                )}
               </div>
 
               <div className="space-y-2">
@@ -235,6 +276,49 @@ export default function Register() {
                       Минимум 8 символов
                     </span>
                   </div>
+                  <div className="flex items-center gap-2">
+                    {passwordRequirements.hasLetter ? (
+                      <Check className="h-4 w-4 text-green-500" />
+                    ) : (
+                      <X className="h-4 w-4 text-red-500" />
+                    )}
+                    <span className={passwordRequirements.hasLetter ? "text-green-600" : "text-red-600"}>
+                      Содержит буквы
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {passwordRequirements.hasDigit ? (
+                      <Check className="h-4 w-4 text-green-500" />
+                    ) : (
+                      <X className="h-4 w-4 text-red-500" />
+                    )}
+                    <span className={passwordRequirements.hasDigit ? "text-green-600" : "text-red-600"}>
+                      Содержит цифры
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {passwordRequirements.validChars ? (
+                      <Check className="h-4 w-4 text-green-500" />
+                    ) : (
+                      <X className="h-4 w-4 text-red-500" />
+                    )}
+                    <span className={passwordRequirements.validChars ? "text-green-600" : "text-red-600"}>
+                      Только латинские буквы, цифры и спецсимволы
+                    </span>
+                  </div>
+                  {passwordStrength && (
+                    <div className="flex items-center gap-2 mt-2 pt-2 border-t">
+                      <span className="text-muted-foreground">Сложность пароля:</span>
+                      <span className={
+                        passwordStrength === 'strong' ? 'text-green-600 font-medium' :
+                        passwordStrength === 'medium' ? 'text-yellow-600 font-medium' :
+                        'text-red-600 font-medium'
+                      }>
+                        {passwordStrength === 'strong' ? 'Надёжный' :
+                         passwordStrength === 'medium' ? 'Средний' : 'Слабый'}
+                      </span>
+                    </div>
+                  )}
                   {confirmPassword && (
                     <div className="flex items-center gap-2">
                       {passwordRequirements.match ? (

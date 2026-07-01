@@ -14,6 +14,7 @@ export type PushNotificationType =
   | 'club_discussion'
   | 'mention_in_chat'
   | 'dm_received'
+  | 'club_moderation'
   | 'new_follower'
   | 'streak_reminder'
   | 'achievement_unlocked'
@@ -280,6 +281,8 @@ export class PushService {
         return settings.mentionInChat;
       case 'dm_received':
         return settings.dmReceived;
+      case 'club_moderation':
+        return settings.clubDiscussion;
       case 'new_follower':
         return settings.newFollower;
       case 'streak_reminder':

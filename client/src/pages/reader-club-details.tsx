@@ -1,7 +1,7 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
-import { ArrowLeft, BookOpen, Calendar, Check, Clock, Headphones, Loader2, Lock, Mic2, MoreHorizontal, Play, Radio, Trash2, UserCheck, UserX, Users, Volume2, VolumeX, X } from "lucide-react";
+import { ArrowLeft, BookOpen, Calendar, Check, Headphones, Loader2, Lock, Mic2, MoreHorizontal, Play, Radio, Trash2, UserCheck, UserX, Users, Volume2, VolumeX, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getClubCoverUrl } from "@/lib/club-cover";
 import { apiRequest } from "@/lib/queryClient";
@@ -12,8 +12,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { NativePickerInput } from "@/components/ui/native-picker-input";
 import { Textarea } from "@/components/ui/textarea";
 import { ChatWidget } from "@/components/chat/ChatWidget";
 import { ActiveReadersModal, LiveReadersBubble } from "@/components/studio/LiveReadersBubble";
@@ -139,11 +139,6 @@ function getRestrictionInfo(until?: Date | string | null, reason?: string | null
   return reason ? `${untilText}. Причина: ${reason}` : untilText;
 }
 
-function openNativePicker(input: HTMLInputElement | null): void {
-  input?.showPicker?.();
-  input?.focus();
-}
-
 function formatMetricValue(value: number): string {
   return new Intl.NumberFormat("ru-RU").format(value);
 }
@@ -207,8 +202,6 @@ export default function ReaderClubDetails({ clubId, initialClub }: ReaderClubDet
   const [moderationDate, setModerationDate] = useState("");
   const [moderationTime, setModerationTime] = useState("");
   const [moderationReason, setModerationReason] = useState("");
-  const moderationDateRef = useRef<HTMLInputElement>(null);
-  const moderationTimeRef = useRef<HTMLInputElement>(null);
   const [liveModalOpen, setLiveModalOpen] = useState(false);
   const [playingRecording, setPlayingRecording] = useState<{ id: string; url: string } | null>(null);
   const activeBookId = club?.bookId ?? "";
@@ -759,21 +752,11 @@ export default function ReaderClubDetails({ clubId, initialClub }: ReaderClubDet
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="reader-moderation-date">Дата окончания</Label>
-                <div className="flex gap-2">
-                  <Input ref={moderationDateRef} id="reader-moderation-date" type="date" value={moderationDate} onChange={(event) => setModerationDate(event.target.value)} />
-                  <Button type="button" variant="outline" size="icon" aria-label="Открыть календарь" onClick={() => openNativePicker(moderationDateRef.current)}>
-                    <Calendar className="h-4 w-4" />
-                  </Button>
-                </div>
+                <NativePickerInput id="reader-moderation-date" type="date" value={moderationDate} onChange={(event) => setModerationDate(event.target.value)} />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="reader-moderation-time">Время окончания</Label>
-                <div className="flex gap-2">
-                  <Input ref={moderationTimeRef} id="reader-moderation-time" type="time" value={moderationTime} onChange={(event) => setModerationTime(event.target.value)} />
-                  <Button type="button" variant="outline" size="icon" aria-label="Открыть выбор времени" onClick={() => openNativePicker(moderationTimeRef.current)}>
-                    <Clock className="h-4 w-4" />
-                  </Button>
-                </div>
+                <NativePickerInput id="reader-moderation-time" type="time" value={moderationTime} onChange={(event) => setModerationTime(event.target.value)} />
               </div>
             </div>
             <div className="space-y-2">

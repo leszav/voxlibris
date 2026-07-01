@@ -37,7 +37,7 @@ interface EmbeddedClubStudioShellProps {
   microphoneLoading: boolean;
   microphoneError: string | null;
   publicationRecordingEnabled: boolean;
-  onPublicationRecordingChange: (enabled: boolean) => void;
+  onPublicationRecordingChange?: (enabled: boolean) => void;
   runtimeMicrophoneWarning: string | null;
   prepStatusText: string;
   compactStartButtonLabel: string;

@@ -1,5 +1,5 @@
 import type { ClubMemberRole, ClubWithDetails } from "@shared/schema";
-import { useRef, useState } from "react";
+import { useState } from "react";
 import {
   ArrowLeft,
   BookOpen,
@@ -54,6 +54,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { NativePickerInput } from "@/components/ui/native-picker-input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -90,11 +91,6 @@ interface ClubSettings {
 function getRestrictionInfo(until?: Date | string | null, reason?: string | null): string {
   const untilText = until ? `до ${new Date(until).toLocaleString()}` : "бессрочно";
   return reason ? `${untilText}. Причина: ${reason}` : untilText;
-}
-
-function openNativePicker(input: HTMLInputElement | null): void {
-  input?.showPicker?.();
-  input?.focus();
 }
 
 type ClubWithOptionalBook = ClubDetailsResponse & { book?: ClubDetailsResponse["book"] | null };
@@ -735,8 +731,6 @@ function MembersListCard({ clubId, clubTitle, members, memberCount, membersLoadi
   const [moderationDate, setModerationDate] = useState("");
   const [moderationTime, setModerationTime] = useState("");
   const [moderationReason, setModerationReason] = useState("");
-  const moderationDateRef = useRef<HTMLInputElement>(null);
-  const moderationTimeRef = useRef<HTMLInputElement>(null);
   const { data: presenceData } = useQuery<{ onlineUserIds: string[] }>({
     queryKey: ["/api/presence/club", clubId],
     queryFn: () => authFetch(`/api/presence/club/${clubId}`).then(r => r.json()) as Promise<{ onlineUserIds: string[] }>,
@@ -919,21 +913,11 @@ function MembersListCard({ clubId, clubTitle, members, memberCount, membersLoadi
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="moderation-date">Дата окончания</Label>
-                <div className="flex gap-2">
-                  <Input ref={moderationDateRef} id="moderation-date" type="date" value={moderationDate} onChange={(event) => setModerationDate(event.target.value)} />
-                  <Button type="button" variant="outline" size="icon" aria-label="Открыть календарь" onClick={() => openNativePicker(moderationDateRef.current)}>
-                    <Calendar className="h-4 w-4" />
-                  </Button>
-                </div>
+                <NativePickerInput id="moderation-date" type="date" value={moderationDate} onChange={(event) => setModerationDate(event.target.value)} />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="moderation-time">Время окончания</Label>
-                <div className="flex gap-2">
-                  <Input ref={moderationTimeRef} id="moderation-time" type="time" value={moderationTime} onChange={(event) => setModerationTime(event.target.value)} />
-                  <Button type="button" variant="outline" size="icon" aria-label="Открыть выбор времени" onClick={() => openNativePicker(moderationTimeRef.current)}>
-                    <Clock className="h-4 w-4" />
-                  </Button>
-                </div>
+                <NativePickerInput id="moderation-time" type="time" value={moderationTime} onChange={(event) => setModerationTime(event.target.value)} />
               </div>
             </div>
             <div className="space-y-2">

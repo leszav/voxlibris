@@ -46,6 +46,7 @@ import { useStudioDeviceEligibility } from "@/hooks/use-studio-device-eligibilit
 import { useStudioMode } from "@/hooks/use-studio-mode";
 import { useAuth } from "@/hooks/use-auth";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { useClub } from "@/hooks/use-clubs";
 import { EmbeddedClubStudioShell } from "@/components/studio/EmbeddedClubStudioShell";
 import type { ReaderSettings } from "@/lib/reader-settings";
 
@@ -102,6 +103,9 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
 
   // ── Авторизация ─────────────────────────────────────────────────────
   const { user } = useAuth();
+  const { data: clubDetails } = useClub(clubId);
+  const publicationRecordingAllowed = clubDetails ? clubDetails.type === "reader-led" : true;
+  const showPublicationRecordingToggle = clubDetails?.type === "reader-led";
 
   // ── Live-чтецы ────────────────────────────────────────────────────────
   const [liveModalOpen, setLiveModalOpen] = useState(false);
@@ -226,6 +230,7 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
     currentChapter: currentChapter ?? 1,
     readerName: user?.username ?? 'Чтец',
     userId: user?.id,
+    publicationRecordingAllowed,
     enabled: studioOpen && studioAccessAllowed,
   });
 
@@ -819,7 +824,7 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
         >
           <div
             ref={settingsPanelRef}
-            className="bg-background border rounded-lg shadow-xl w-[85vw] max-w-[320px] sm:max-w-md max-h-[80vh] pointer-events-auto mr-2 sm:mr-4"
+            className="bg-background border rounded-lg shadow-xl w-[85vw] max-w-[320px] sm:max-w-md max-h-[80vh] overflow-y-auto pointer-events-auto mr-2 sm:mr-4"
           >
             <div className="sticky top-0 bg-background border-b p-3 sm:p-4 flex items-center justify-between">
               <h2 className="text-sm sm:text-lg font-semibold">Настройки</h2>
@@ -939,7 +944,7 @@ function ClubReaderInner({ clubId, bookId }: Readonly<ClubReaderInnerProps>) {
         microphoneLoading={studio.microphoneLoading}
         microphoneError={studio.microphoneError}
         publicationRecordingEnabled={studio.publicationRecordingEnabled}
-        onPublicationRecordingChange={studio.setPublicationRecordingEnabled}
+        onPublicationRecordingChange={showPublicationRecordingToggle ? studio.setPublicationRecordingEnabled : undefined}
         runtimeMicrophoneWarning={embeddedStudioView.runtimeMicrophoneWarning}
         prepStatusText={embeddedPrepView.prepStatusText}
         compactStartButtonLabel={embeddedPrepView.compactStartButtonLabel}

@@ -277,7 +277,6 @@ export default function Home() {
                 isPrivate={club.isPrivate}
                 type={club.type as "standard" | "premium" | "reader-led" | "reading_club"}
                 tags={club.tags}
-                readerJoinRequestsEnabled={club.readerJoinRequestsEnabled}
               />
             ))}
             
@@ -465,7 +464,6 @@ function HomeClubCard({ club }: Readonly<{ club: PublicCatalogClub }>) {
       isPrivate={club.isPrivate}
       type={club.type as "standard" | "premium" | "reader-led" | "reading_club"}
       tags={club.tags}
-      readerJoinRequestsEnabled={club.readerJoinRequestsEnabled}
     />
   );
 }

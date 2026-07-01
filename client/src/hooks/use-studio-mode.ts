@@ -24,6 +24,7 @@ interface UseStudioModeOptions {
   currentChapter: number;
   readerName: string;
   userId?: string;
+  publicationRecordingAllowed: boolean;
   /** Хук активен только когда enabled=true, чтобы не тратить ресурсы в режиме чтения */
   enabled: boolean;
 }
@@ -72,6 +73,7 @@ export function useStudioMode({
   currentChapter,
   readerName: _readerName,
   userId,
+  publicationRecordingAllowed,
   enabled,
 }: Readonly<UseStudioModeOptions>): StudioModeState {
   const [micMuted, setMicMuted] = useState(false);
@@ -133,7 +135,7 @@ export function useStudioMode({
     mute: muteAudioStream,
   } = useAudioStream({
     sessionId: session.sessionId ?? null,
-    enableRecording: publicationRecordingEnabled,
+    enableRecording: publicationRecordingAllowed && publicationRecordingEnabled,
     onError: (msg, source) => {
       if (source === 'microphone') {
         setMicrophoneIssue(msg);
@@ -167,6 +169,12 @@ export function useStudioMode({
       clearStudioMicCheckPassed();
     }
   }, [enabled, microphoneAvailable]);
+
+  useEffect(() => {
+    if (!publicationRecordingAllowed && publicationRecordingEnabled) {
+      setPublicationRecordingEnabled(false);
+    }
+  }, [publicationRecordingAllowed, publicationRecordingEnabled]);
 
   // ── Синхронизация mute ─────────────────────────────────────────────────
   useEffect(() => {
@@ -357,13 +365,16 @@ export function useStudioMode({
   }, [resumeAudioStream, session.sessionId, notifyBroadcastResumed, resumeReading]);
 
   const handleEnd = useCallback(
-    (onAnnounceEnd: (sessionId: string) => void) => {
-      stopAudioStream();
-      if (session.sessionId) {
-        notifyBroadcastEnded(session.sessionId);
-        onAnnounceEnd(session.sessionId);
+    async (onAnnounceEnd: (sessionId: string) => void) => {
+      const sessionId = session.sessionId;
+      if (sessionId) {
+        await endReading();
+        stopAudioStream();
+        notifyBroadcastEnded(sessionId);
+        onAnnounceEnd(sessionId);
+      } else {
+        stopAudioStream();
       }
-      endReading();
       setShowEndConfirm(false);
       setShowSummary(true);
     },

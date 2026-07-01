@@ -4,6 +4,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { NativePickerInput } from "@/components/ui/native-picker-input";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -509,7 +510,7 @@ export function ClubSettingsModal({ club }: ClubSettingsModalProps) {
                   <div className="grid grid-cols-2 gap-2">
                     <div>
                       <Label htmlFor="schedule-date" className="text-xs">Дата</Label>
-                      <Input
+                      <NativePickerInput
                         id="schedule-date"
                         type="date"
                         value={newSchedule.date}
@@ -518,7 +519,7 @@ export function ClubSettingsModal({ club }: ClubSettingsModalProps) {
                     </div>
                     <div>
                       <Label htmlFor="schedule-time" className="text-xs">Время</Label>
-                      <Input
+                      <NativePickerInput
                         id="schedule-time"
                         type="time"
                         value={newSchedule.time}

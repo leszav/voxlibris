@@ -294,18 +294,21 @@ export function useReadingSession(enabled: boolean = true) {
   };
 
   // End reading session
-  const endReading = () => {
+  const endReading = async () => {
     if (!session.sessionId) return;
 
     const sessionId = session.sessionId;
 
-    void apiRequest(`/api/sessions/${sessionId}/end`, {
-      method: 'PUT',
-    }).catch((error) => {
+    try {
+      await apiRequest(`/api/sessions/${sessionId}/end`, {
+        method: 'PUT',
+      });
+    } catch (error) {
       if (import.meta.env.DEV) {
         console.error('Failed to end reading session:', error);
       }
-    });
+      throw error;
+    }
 
     stopTimer();
 

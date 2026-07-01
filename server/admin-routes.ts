@@ -296,6 +296,9 @@ interface StudioRecordingSessionMeta {
   readerId: string | null;
   readerName: string | null;
   startedAt: Date | null;
+  endedAt: Date | null;
+  isActive: boolean;
+  isLive: boolean;
 }
 
 async function probeStudioRecordingDurationSeconds(filePath: string): Promise<number | null> {
@@ -410,6 +413,9 @@ async function getStudioRecordingSessionMeta(sessionIds: string[]): Promise<Map<
       readerId: users.id,
       readerName: users.username,
       startedAt: readingSessions.startedAt,
+      endedAt: readingSessions.endedAt,
+      isActive: readingSessions.isActive,
+      isLive: readingSessions.isLive,
     })
     .from(readingSessions)
     .leftJoin(clubs, eq(readingSessions.clubId, clubs.id))
@@ -2524,11 +2530,42 @@ router.put('/clubs/:id/approve', jwtAuth, requireAdmin, async (req, res) => {
         currentStatus: club.status
       });
     }
-    
+
+    const clubOwner = await storage.getUser(club.ownerId);
+    if (!clubOwner?.email) {
+      return res.status(400).json({ message: 'Cannot approve club: owner email not found' });
+    }
+
+    const ownerProfile = await storage.getUserProfile(clubOwner.id).catch(() => undefined);
+     
     const approvedClub = await storage.approveClub(id);
-    
+     
     if (!approvedClub) {
       return res.status(500).json({ message: 'Failed to approve club' });
+    }
+
+    const emailSent = await emailService.sendClubApprovalNotification({
+      email: clubOwner.email,
+      username: clubOwner.username,
+      displayName: ownerProfile?.displayName ?? undefined,
+      clubId: approvedClub.id,
+      clubTitle: approvedClub.title,
+    });
+
+    if (!emailSent) {
+      logger.warn({ clubId: id, ownerId: clubOwner.id }, 'Club approved, but owner email notification failed');
+    }
+
+    const pushResult = await pushService.sendToUser(clubOwner.id, {
+      type: 'club_moderation',
+      title: 'Клуб одобрен',
+      body: `Клуб "${approvedClub.title}" прошел модерацию.`,
+      url: `/clubs/${approvedClub.id}`,
+      tag: `club-approved-${approvedClub.id}`,
+    });
+
+    if (pushResult.skipped) {
+      logger.info({ clubId: id, ownerId: clubOwner.id, reason: pushResult.reason }, 'Club approval push notification skipped');
     }
     
     await logAction(
@@ -2601,6 +2638,18 @@ router.put('/clubs/:id/reject', jwtAuth, requireAdmin, async (req, res) => {
     const deleted = await storage.deleteClub(id);
     if (!deleted) {
       return res.status(500).json({ message: 'Failed to delete rejected club' });
+    }
+
+    const pushResult = await pushService.sendToUser(clubOwner.id, {
+      type: 'club_moderation',
+      title: 'Клуб отклонён',
+      body: `Клуб "${club.title}" не прошел модерацию. Причина: ${rawReason}`,
+      url: '/catalog',
+      tag: `club-rejected-${id}`,
+    });
+
+    if (pushResult.skipped) {
+      logger.info({ clubId: id, ownerId: clubOwner.id, reason: pushResult.reason }, 'Club rejection push notification skipped');
     }
     
     await logAction(
@@ -3848,8 +3897,16 @@ router.get('/recordings', jwtAuth, requireModerator, async (req, res) => {
         continue;
       }
 
+      if (existingRecordingSessionIds.has(file.sessionId)) {
+        continue;
+      }
+
       const meta = sessionMetaMap.get(file.sessionId);
       if (!meta?.clubId) {
+        continue;
+      }
+
+      if (meta.isActive || meta.isLive || !meta.endedAt) {
         continue;
       }
 

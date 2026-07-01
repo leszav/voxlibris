@@ -25,6 +25,7 @@ import http from 'node:http';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import { PassThrough } from 'node:stream';
+import { eq } from 'drizzle-orm';
 import { db } from '../db.js';
 import { jwtAuth } from '../jwt-middleware.js';
 import { logger } from '../lib/logger.js';
@@ -37,8 +38,10 @@ import {
   getStudioRecordingsDir,
 } from '../lib/studio-recording-storage.js';
 import { buildStudioStreamStatus, resolveStudioStreamSessionForReader } from '../lib/studio-streaming-service.js';
+import { isReaderLedClub } from '../lib/reader-club-access.js';
 import { recordingService } from '../services/recording-service.js';
-import { sessionRecordings } from '../../shared/schema.js';
+import { storage } from '../repositories/index.js';
+import { clubs, sessionRecordings } from '../../shared/schema.js';
 import {
   clearActiveStudioStream,
   getStudioMountPath,
@@ -169,7 +172,10 @@ router.post(
     }
 
     await clearStudioStreamClosureIntent(sessionId);
-    const publicationRequested = req.query.record !== 'false';
+    const club = validation.session?.clubId
+      ? await db.select().from(clubs).where(eq(clubs.id, validation.session.clubId)).limit(1).then(([row]) => row ?? null)
+      : null;
+    const publicationRequested = req.query.record !== 'false' && Boolean(club && isReaderLedClub(club));
 
     // Mount point формата /live/<sessionId>
     const mountPath = getStudioMountPath(sessionId);
@@ -264,7 +270,10 @@ router.post(
 
       try {
         const intent = await getStudioStreamClosureIntent(sessionId);
-        if (intent !== 'end') {
+        const session = await storage.getReadingSession(sessionId).catch(() => validation.session);
+        const sessionAlreadyEnded = Boolean(session && (!session.isActive || session.endedAt));
+
+        if (intent !== 'end' && !sessionAlreadyEnded) {
           logger.info({ sessionId, intent: intent ?? 'unknown' }, 'Skipping studio recording finalization for non-end shutdown');
           return;
         }
@@ -275,7 +284,6 @@ router.post(
           return;
         }
 
-        const session = validation.session;
         if (!session?.clubId) {
           logger.warn({ sessionId }, 'Skipping studio recording finalization: missing clubId');
           return;
@@ -338,6 +346,27 @@ router.post(
       }
     };
 
+    const finalizeAfterRecordingFlush = () => {
+      let finalizeStarted = false;
+
+      const runOnce = () => {
+        if (finalizeStarted) {
+          return;
+        }
+
+        finalizeStarted = true;
+        void finalizeRecording();
+      };
+
+      if (recordingWriteStream.writableFinished || recordingWriteStream.closed) {
+        runOnce();
+        return;
+      }
+
+      recordingWriteStream.once('finish', runOnce);
+      recordingWriteStream.once('close', runOnce);
+    };
+
     const cleanup = (reason: string) => {
       if (isShuttingDown) {
         return;
@@ -348,9 +377,7 @@ router.post(
       logger.info({ sessionId, reason }, 'Closing stream');
       clearActiveStudioStream(sessionId);
 
-      recordingWriteStream.once('finish', () => {
-        void finalizeRecording();
-      });
+      finalizeAfterRecordingFlush();
 
       try { req.unpipe(ffmpeg.stdin); } catch { /* ignore */ }
       try { ffmpeg.stdin.end(); } catch {

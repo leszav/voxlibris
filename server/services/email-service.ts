@@ -429,6 +429,41 @@ class EmailService {
   }
 
   /**
+   * Отправка уведомления владельцу об одобрении клуба
+   */
+  async sendClubApprovalNotification(params: {
+    email: string;
+    username: string;
+    displayName?: string;
+    clubId: string;
+    clubTitle: string;
+    baseUrl?: string;
+  }): Promise<boolean> {
+    try {
+      const template = await this.loadTemplate('club-approval-notification');
+
+      const baseUrl = await resolveTrustedBaseUrl(params.baseUrl);
+      const clubUrl = `${baseUrl}/clubs/${params.clubId}`;
+
+      const html = this.replaceVariables(template, {
+        username: params.displayName || params.username,
+        clubTitle: params.clubTitle,
+        clubUrl,
+      });
+
+      return await this.sendEmail({
+        to: params.email,
+        subject: `Ваш клуб "${params.clubTitle}" одобрен`,
+        html,
+      });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.error({ error: errorMessage }, '[EmailService] Error sending club approval notification');
+      return false;
+    }
+  }
+
+  /**
    * Отправка уведомления владельцу об отклонении клуба с причиной
    */
   async sendClubRejectionNotification(params: {

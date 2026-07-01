@@ -69,6 +69,9 @@ export function EmailVerificationModal({ isOpen, onClose }: EmailVerificationMod
               Ваш аккаунт зарегистрирован, но email не подтвержден.
             </p>
             <p className="text-sm text-orange-600">
+              Если вы уже перешли по ссылке из письма и подтвердили email, выйдите из аккаунта и войдите снова.
+            </p>
+            <p className="text-sm text-orange-600">
               Без подтверждения email недоступны:
             </p>
             <ul className="text-sm text-orange-600 list-disc list-inside space-y-1">
@@ -87,6 +90,7 @@ export function EmailVerificationModal({ isOpen, onClose }: EmailVerificationMod
               </div>
               <p className="text-sm text-green-600">
                 Проверьте почту (включая папку "Спам") и перейдите по ссылке для подтверждения.
+                Если подтверждение уже выполнено, выйдите из аккаунта и войдите снова.
               </p>
             </div>
           ) : (

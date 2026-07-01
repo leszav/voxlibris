@@ -1,11 +1,6 @@
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { apiRequest } from "@/lib/queryClient";
 import { getClubCoverUrl } from "@/lib/club-cover";
-import { useAuth } from "@/hooks/use-auth";
-import { useToast } from "@/hooks/use-toast";
-import { Users, Mic, Lock, UserPlus, Loader2 } from "lucide-react";
-import { useState } from "react";
+import { Users, Mic, Lock } from "lucide-react";
 import { Link } from "wouter";
 
 function formatMemberCount(members: number, maxMembers: number): string {
@@ -28,7 +23,6 @@ interface ClubCardProps {
   readonly isPrivate?: boolean;
   readonly type?: "standard" | "premium" | "reader-led" | "reading_club";
   readonly tags?: string[];
-  readonly readerJoinRequestsEnabled?: boolean;
 }
 
 export function ClubCard({
@@ -45,38 +39,7 @@ export function ClubCard({
   isPrivate,
   type = "standard",
   tags = [],
-  readerJoinRequestsEnabled = true,
 }: Readonly<ClubCardProps>) {
-  const { isAuthenticated } = useAuth();
-  const { toast } = useToast();
-  const [joinRequestSending, setJoinRequestSending] = useState(false);
-  const canRequestReaderClubJoin = isAuthenticated && type === "reader-led" && readerJoinRequestsEnabled;
-
-  const handleReaderClubJoinRequest = async (event: React.MouseEvent<HTMLButtonElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-
-    if (joinRequestSending) return;
-
-    setJoinRequestSending(true);
-    try {
-      await apiRequest(`/api/dm/reader-clubs/${id}/join-request`, { method: "POST" });
-      toast({
-        title: "Заявка отправлена",
-        description: "Чтец получит её в личных сообщениях.",
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Не удалось отправить заявку";
-      toast({
-        title: "Не удалось отправить заявку",
-        description: message,
-        variant: "destructive",
-      });
-    } finally {
-      setJoinRequestSending(false);
-    }
-  };
-
   return (
     <div className="relative h-full">
       <Link href={`/clubs/${id}`}>
@@ -161,20 +124,6 @@ export function ClubCard({
                     {formatMemberCount(members, maxMembers)}
                   </span>
                 </div>
-                {canRequestReaderClubJoin ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="icon"
-                    className="h-8 w-8 rounded-md bg-background/95 shadow-sm"
-                    aria-label="Оставить заявку на вступление"
-                    title="Оставить заявку на вступление"
-                    disabled={joinRequestSending}
-                    onClick={handleReaderClubJoinRequest}
-                  >
-                    {joinRequestSending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserPlus className="h-3.5 w-3.5" />}
-                  </Button>
-                ) : null}
               </div>
               <div className="flex shrink-0 items-center gap-1.5">
                 <Mic className="h-4 w-4" />

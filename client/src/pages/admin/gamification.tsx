@@ -1932,7 +1932,7 @@ export default function AdminGamificationPage() { // NOSONAR: orchestration comp
       </div>
 
       <Dialog open={achievementDialogOpen} onOpenChange={(open) => (open ? setAchievementDialogOpen(true) : resetAchievementDialog())}>
-        <DialogContent className="max-w-3xl">
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editingAchievement ? "Редактирование достижения" : "Новое достижение"}</DialogTitle>
           </DialogHeader>
@@ -2339,7 +2339,7 @@ export default function AdminGamificationPage() { // NOSONAR: orchestration comp
                     <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                   </Button>
                 </PopoverTrigger>
-                <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start" portalled={false}>
                   <Command>
                     <CommandInput placeholder="Поиск поля..." />
                     <CommandList>

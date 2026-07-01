@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { NativePickerInput } from "@/components/ui/native-picker-input";
 import {
   Select,
   SelectContent,
@@ -281,7 +282,7 @@ export default function AuditPage() {
 
                   <div>
                     <Label htmlFor="date-from">Дата от</Label>
-                    <Input
+                    <NativePickerInput
                       id="date-from"
                       type="date"
                       value={filters.dateFrom}
@@ -291,7 +292,7 @@ export default function AuditPage() {
 
                   <div>
                     <Label htmlFor="date-to">Дата до</Label>
-                    <Input
+                    <NativePickerInput
                       id="date-to"
                       type="date"
                       value={filters.dateTo}
